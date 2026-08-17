@@ -51,10 +51,16 @@ CALL, RETURN, INT_ADD/SUB/MULT/AND/OR/XOR, …); the OGAR Machine executes
 P-code only. `legacy.exe → Ghidra (once) → normalized program image →
 population execution`. This is the same shape as the workspace's
 ruff→OGAR harvest arms: an existing analyzer becomes the transcoder
-front-end, and the substrate executes the normalized IR. First concrete
-archaeology step in the fresh clone: locate the P-code opcode enum and
-SLEIGH lifting surface, and size the *real* op set (the list above is the
-discussion's sketch, not a verified inventory).
+front-end, and the substrate executes the normalized IR.
+
+**The archaeology ran — see `ghidra-integration-v1.md` G0** (2026-08-17):
+the real op set is **74 opcodes** (`opcodes.hh`, `CPUI_MAX = 75`), not the
+sketch's ~13; the fork is 12.2 DEV / Java 25+; `analyzeHeadless` is the
+lift entry; and Ghidra ships its own sequential `PcodeEmulator`
+(`Ghidra/Framework/Emulation/.../pcode/emu/`) — which upgrades this plan's
+oracle story from "our own scalar reference" to "diff against the
+reference implementation," the tesseract-rs method. Wave detail, image
+format, and op-set discipline live in that companion plan.
 
 ## The four load-bearing design rules captured from the discussion
 

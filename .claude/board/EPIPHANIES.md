@@ -4,6 +4,52 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-17 — E-LGJ-CALCIFY-THEN-DISPATCH-1
+
+**Status:** DOCTRINE (operator-ruled: "don't execute the consumer plans yet,
+just calcify the insights and make sure the muscle memory of the epiphanies
+helps to gain momentum"). **Confidence:** High.
+
+The working rhythm this repo now runs on, made explicit so it compounds
+instead of being re-derived:
+
+**plan → wave map → (shelf) → dispatch → gates → merge → arc entry**
+
+A *plan* says what and why. A *wave file* (`.claude/waves/`) says exactly
+who edits which file under which verbatim guardrails, with which disable-runs
+and gate commands — dispatchable as-is, months later, by a session with zero
+shared context. Writing the wave map WITHOUT executing it is not deferral;
+it is the calcification step: decisions get made while the context is hot
+(worker scopes, D1-style design forks, STOP triggers, the graph wave's
+discovery that the fixture payload is PRNG noise and traversal needs a
+deliberate edge-bearing generator arm — found at MAPPING time, not
+mid-dispatch), and execution later starts from momentum instead of from
+archaeology.
+
+**The muscle memory, in one list** (each item earned at least once this
+session, provenance in the entries below and in PR bodies #1–#6):
+
+1. **Disable-run or it didn't happen.** Green tests prove nothing about a
+   guard; break the thing, watch exactly the right tests go red, restore.
+2. **Scaffolding-vs-target check.** When a proposal doesn't fit the code,
+   ask which one is the placeholder before declining the proposal.
+3. **The membrane never grows from the consumer side.** A needed symbol
+   goes back through the wave process (now stamped in every consumer wave).
+4. **Measure before believing direction** — the Vector API beat the
+   crossing; fusion was noise at 65K rows and 3× at 256; the doc that
+   assumed otherwise got corrected by the bench, not vice versa.
+5. **Independent recomputation over golden blobs** — parity tests
+   transcribe the generator; two (better: three) independent paths to one
+   number.
+6. **Assessments happen once, on the record** — archived discussions get
+   one knowledge-doc verdict (kept/pinned-wrong) so they are never
+   re-mined or cited naively.
+7. **Exact-span over round-up** at every boundary a segment can be built
+   from (the `byte_len` lesson — the difference between a view and an
+   out-of-bounds capability).
+8. **Board in the same commit** as the work it records; arc entry at
+   merge; realign after every squash.
+
 ## 2026-08-17 — E-LGJ-THE-MIDDLE-TIER-IS-DELETED-NOT-WRAPPED-1
 
 **Status:** DOCTRINE (operator-stated, scope confirmed). **Confidence:** High —

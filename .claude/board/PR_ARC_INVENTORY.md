@@ -8,6 +8,28 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #6 — layout-bridge assessment, OGAR Machine plan, hydrate note (merged 2026-08-17, squash `8954e53`)
+
+- **Added:** `.claude/knowledge/prior-art-and-the-layout-bridge-claim.md`
+  (the first archived ChatGPT context assessed once: convergent
+  confirmation; kept the callability-vs-shared-executable-layout
+  positioning + the schema-key extractable + the baseline-dependent
+  claims discipline; pinned its three errors so it is never cited
+  naively); `.claude/plans/ogar-machine-v1.md` (the second context — a
+  genuinely NEW workload: population emulation, one row = one machine
+  state, Ghidra P-code as guest ISA, differential migration testing;
+  EXPLORATORY, gated on W3 + a W5 example + archaeology + probe P-M1).
+- **Locked:** W6 named in the substrate plan (schema/classid field on the
+  descriptors when ClassView lands); lance-graph #957's
+  `lance-graph-hydrate` recorded as the INHERITED hydration path — never
+  re-derived here (#958 is its hardening fast-follow, owned elsewhere).
+- **Deferred:** everything in ogar-machine-v1 (named, not scheduled).
+- **Docs:** the PR IS docs; `AdaWorldAPI/ghidra` attached + shallow-cloned
+  at `/workspace/ghidra` for the future P-code archaeology.
+- **Confidence:** High for the assessments (checked against shipped code
+  and measurements); the OGAR Machine plan is explicitly exploratory.
+  Both bot reviewers hit usage limits and did not run.
+
 ## PR #5 — SoA row store: 512B rows, 32 facet lanes, ABI minor 2 (merged 2026-08-17, squash `78aa60e`)
 
 Companion: **AdaWorldAPI/ndarray#279** (W1), merged first — `lgj-abi`'s
