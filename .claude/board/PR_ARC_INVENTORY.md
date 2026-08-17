@@ -8,6 +8,35 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #5 — SoA row store: 512B rows, 32 facet lanes, ABI minor 2 (merged 2026-08-17, squash `78aa60e`)
+
+Companion: **AdaWorldAPI/ndarray#279** (W1), merged first — `lgj-abi`'s
+`kernels.rs` calls `iter_u32x16` / `eq_u32_strided_to_mask` from it.
+
+- **Added:** `native/lgj-abi/src/rowstore.rs` (one `Arc<[u8]>`, two
+  readings, zero copies, normative SplitMix64 generator);
+  `LGJ_RESOURCE_ROWSTORE` + `lgj_rowstore_open` + `lgj_op_eq_classid` +
+  `lgj_row_facet_match`; `docs/abi.md` §11; the W1–W5 wave plan and three
+  consumer-example plans; `.claude/knowledge/soa-row-store-layout.md`.
+- **Locked:** the 512 B / 32 × (4 B classid + 12 B payload) layout as
+  substrate truth (Java's view may differ); facet lanes ride the
+  **unchanged** `LgjLaneDesc`; masks parent onto row stores so the whole
+  existing mask algebra applies with no new surface; `byte_len` is the
+  exact covered span `(len-1)*stride + elem_bytes` (the old `len*stride`
+  form would have let Java bound a segment past the allocation's end);
+  ABI minor 1→2 and the §1/§7 symbol count corrected 14→18 (`nm -D`).
+  Doctrine: `E-LGJ-THE-MIDDLE-TIER-IS-DELETED-NOT-WRAPPED-1`;
+  self-correction: `E-LGJ-THE-FLAT-FIXTURE-WAS-SCAFFOLDING-NOT-THE-TARGET-1`.
+- **Deferred:** `align(64)` base (stated honestly — arrives with real
+  `NodeRow`); payload semantics (a ClassView concern one layer up); fused
+  plans over facet lanes (W6, only if measurement asks).
+- **Docs:** `abi.md` §11 + 4 plan files + 1 knowledge doc + full board.
+- **Confidence:** High — 84/84, clippy/fmt clean, 18/18 symbols; both new
+  kernels parity-checked against independent scalar references over
+  10 row counts × 2 seeds × 4 facets × 4 needles and cross-checked a third
+  way; two-sided payload-vs-classid falsifier. Both bot reviewers (cursor,
+  codex) hit usage limits and did not run.
+
 ## PR #4 — Phase I synthesis docs + fusion re-run + board hygiene (merged 2026-08-17, squash `bd92c58`)
 
 - **Added:** `docs/{architecture,panama,valhalla-lab,execution-boundary}.md`

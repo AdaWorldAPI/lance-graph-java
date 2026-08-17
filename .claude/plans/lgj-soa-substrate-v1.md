@@ -32,10 +32,23 @@
 | **W3** | Java `RowStore` facade: no FFM in public signatures; structured `MemoryLayout` (`sequence(32, struct(u32 classid, 12B payload))`); minor-≥2 gate; `FacetMatchView` zero-copy accessor over a Java-arena segment; `RowStoreParityTest` transcribing the generator | OPEN — next |
 | **W4** | Bench Component F: Java Vector API per-row facet scan (one `IntVector` 16-lane chunk = 4 facets, same algorithm as the Rust kernel) vs `lgj_row_facet_match` crossing vs scalar VarHandle walk — the "where does execution belong" question re-asked on the REAL layout | OPEN |
 | **W5** | The three consumer examples (own plan files, below) | PLANNED |
+| **W6** *(named, not scheduled)* | ClassView wiring — and with it an explicit **schema/classid field** on `LgjResourceInfo`/`LgjLaneDesc` (additive, one minor bump), so a resource names WHICH layout contract its bytes obey instead of implying it via `kind`. Provenance + rationale: `.claude/knowledge/prior-art-and-the-layout-bridge-claim.md` §3 ("one key, many projections" made literal at the membrane). Also the `align(64)` base guarantee (real `NodeRow`) and, only if measurement asks, fused plans over facet lanes | NAMED |
 
 Wave rule (house style): one wave = one reviewable PR; gates run centrally
 (orchestrator only — agents never run cargo); every safety property lands
 disable-verified, every measured claim lands with its reproduction command.
+
+**Cross-repo dependency note (2026-08-17, operator-flagged):** lance-graph
+**#957** (merged) minted `crates/lance-graph-hydrate` — the generic
+SoA→S3→volume→Lance hydration pattern (four-state lifecycle,
+hydrate-aside/publish-by-rename, warm markers, dirty detection), minted in
+lance-graph *specifically so consumers inherit it as a path/git dependency
+rather than re-implement*. **#958** (open, another session's PR) is its 5+3
+council hardening fast-follow. Consequence here: when this substrate's
+persistence slice arrives (the "Seal & Persist (Lance)" column of the
+formula, and `ogar-machine-v1.md`'s time-machine storage), the hydration
+path is `lance-graph-hydrate` — inherited, never re-derived. Do not design
+a hydration mechanism in this repo.
 
 ## What W2 locked (so W3+ doesn't re-derive it)
 
