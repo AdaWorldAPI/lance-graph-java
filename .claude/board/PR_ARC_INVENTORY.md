@@ -8,6 +8,27 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #7 — waves calcified: dispatch maps for every plan (merged 2026-08-17, squash `68f7add`)
+
+- **Added:** `.claude/waves/` — README (standing rules + verbatim worker
+  preamble) + six dispatchable maps (substrate W3+W4 READY; three
+  consumer waves DO-NOT-DISPATCH; Ghidra G1+G2 shelved; OGAR-Machine
+  P-M1 BLOCKED behind a 4-condition gate incl. explicit operator go);
+  `.claude/plans/ghidra-integration-v1.md` (G0 archaeology from the real
+  clone: 74 P-code opcodes, `PcodeEmulator` as reference oracle, Toy as
+  minimal lift target).
+- **Locked:** the calcify-then-dispatch rhythm + the eight
+  muscle-memory rules (`E-LGJ-CALCIFY-THEN-DISPATCH-1`); the op-set
+  halt-loudly discipline; the D1a/D1b hop fork with ruling guidance.
+- **Deferred:** ALL execution, by operator ruling — nothing dispatched,
+  no code changed.
+- **Docs:** the PR is docs; mapping-time catches recorded (graph
+  consumer needs an edge-bearing generator arm — substrate change,
+  flagged before it could burn a dispatch).
+- **Confidence:** High for the maps (grounded in shipped code + real
+  clone archaeology); execution confidence deliberately unclaimed until
+  the waves run. Bot reviewers at usage limits, did not run.
+
 ## PR #6 — layout-bridge assessment, OGAR Machine plan, hydrate note (merged 2026-08-17, squash `8954e53`)
 
 - **Added:** `.claude/knowledge/prior-art-and-the-layout-bridge-claim.md`

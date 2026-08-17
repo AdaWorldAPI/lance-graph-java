@@ -13,8 +13,10 @@ import java.util.concurrent.atomic.LongAdder;
  * Every downcall handle in the project, resolved <strong>once</strong> into static finals.
  *
  * <p>Resolution is not free — {@code Linker.downcallHandle} builds a native stub — so doing it per
- * call would be a per-crossing tax on top of the crossing itself. There are 14 symbols
- * (docs/abi.md §7) and 14 handles.
+ * call would be a per-crossing tax on top of the crossing itself. There are 17 downcall symbols
+ * resolved here (docs/abi.md §7 + §11) and 17 handles; the 18th ABI symbol, {@code
+ * lgj_abi_manifest}, resolves separately in {@link Abi} because it returns a pointer rather than a
+ * status and has no failure mode.
  *
  * <p><strong>The anti-JNI rule (docs/abi.md §6) lives here.</strong> Panama makes it easy to write
  * JNI-shaped code: one downcall per element. Every wrapper below either does work proportional to
@@ -92,6 +94,20 @@ public final class Downcalls {
     private static final MethodHandle REDUCE_SUM_I32 = mh("lgj_reduce_sum_i32",
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
                     ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+
+    // Row store (docs/abi.md §11, ABI minor 2). Argument widths follow §11 argument-for-argument,
+    // same u32/i32-are-both-JAVA_INT rule as above.
+    private static final MethodHandle ROWSTORE_OPEN = mh("lgj_rowstore_open",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+
+    private static final MethodHandle OP_EQ_CLASSID = mh("lgj_op_eq_classid",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG));
+
+    private static final MethodHandle ROW_FACET_MATCH = mh("lgj_row_facet_match",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                    ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
 
     private static MethodHandle mh(String symbol, FunctionDescriptor descriptor) {
         MemorySegment addr = Abi.lookup().find(symbol).orElseThrow(() ->
@@ -315,6 +331,61 @@ public final class Downcalls {
         }
         Status.check("lgj_reduce_sum_i32", st);
         return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    // ── row store (docs/abi.md §11, ABI minor 2) ─────────────────────────────────────────────
+    //
+    // Callers above this class are expected to have already checked Abi.requireMinor(2) — these
+    // wrappers do not re-check it, matching every other wrapper here: this class marshals and maps
+    // status, it does not gate on version. See Engine for the requireMinor call sites.
+
+    /**
+     * Build the 64K×512-byte SoA row store deterministically from {@code seed} (docs/abi.md §11).
+     * Returns the resource handle.
+     */
+    public static long rowstoreOpen(long nRows, long seed, MemorySegment outHandle) {
+        crossed();
+        int st;
+        try {
+            st = (int) ROWSTORE_OPEN.invokeExact(nRows, seed, outHandle);
+        } catch (Throwable t) {
+            throw wrap("lgj_rowstore_open", t);
+        }
+        Status.check("lgj_rowstore_open", st);
+        return outHandle.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * Overwrites {@code dstMask} with {@code classid(facet, row) == needle}. {@code facet} is a
+     * facet index {@code 0..32} into the row's 32 facet lanes, <strong>not</strong> a lane id
+     * (docs/abi.md §11).
+     */
+    public static void opEqClassid(long res, int facet, int needle, long dstMask) {
+        crossed();
+        int st;
+        try {
+            st = (int) OP_EQ_CLASSID.invokeExact(res, facet, needle, dstMask);
+        } catch (Throwable t) {
+            throw wrap("lgj_op_eq_classid", t);
+        }
+        Status.check("lgj_op_eq_classid", st);
+    }
+
+    /**
+     * Writes, for every row, a {@code u32} bitset of which of its 32 facets carry {@code needle} as
+     * classid, into the caller's {@code out} buffer — zero-copy out, nothing serialized
+     * (docs/abi.md §11). Capacity is checked by the native side before anything is written
+     * ({@code MASK_LENGTH_MISMATCH} on a short buffer).
+     */
+    public static void rowFacetMatch(long res, int needle, MemorySegment out, long outLenElems) {
+        crossed();
+        int st;
+        try {
+            st = (int) ROW_FACET_MATCH.invokeExact(res, needle, out, outLenElems);
+        } catch (Throwable t) {
+            throw wrap("lgj_row_facet_match", t);
+        }
+        Status.check("lgj_row_facet_match", st);
     }
 
     private static LanceGraphException wrap(String symbol, Throwable t) {

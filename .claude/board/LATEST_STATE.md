@@ -1,3 +1,34 @@
+## 2026-08-17 (dispatch 1) — W3 shipped: the Java `RowStore` facade, from the calcified wave map
+
+First real dispatch of the wave system: `wave-substrate-w3-w4.md` Dispatch 1
+executed exactly as mapped — 3 Sonnet workers on disjoint file scopes (FFM
+membrane extension / public facade / tests), Opus orchestrator integrated,
+gated, and fixed centrally. Confirms the calcify-then-dispatch rhythm works
+end to end, not just as a documentation exercise.
+
+- **New public surface:** `RowStore` (`open`/`rowCount`/`isOpen`/
+  `maskOfFacetClass`/`facetMatches`/`close`), `FacetMatchView`
+  (`rowCount`/`matchesOf`/`cardinality`), `FacetId` (a 0..31-checked record).
+  Zero `java.lang.foreign` types in any public signature — `ApiSurfaceTest`
+  passed unmodified.
+- **`Mask` generalized**: `source()` retypes `NativePattern → NativeResource`
+  (new minimal interface), so a mask can parent onto EITHER a pattern or a
+  row store with the existing algebra unchanged. Verified zero call-site
+  breakage before the retype.
+- **One real bug found by the suite itself and fixed**:
+  `FacetMatchView.rowCount()` was missing the closed-store guard its sibling
+  accessors both had — a caller could read a stale row count off a dead
+  view. Caught by `RowStoreLifetimeTest`, fixed, re-verified 185/185.
+- **Both disable-runs green-red-green**, confirming the version gate and the
+  generator-transcription parity are load-bearing, not decorative (full
+  detail on `STATUS_BOARD.md` D-LGJ-W3).
+- Gate: `javac -Xlint:all` clean (7 pre-existing `[restricted]` warnings,
+  0 new); `AllTests` 132→185 (+53); native `.so` unchanged this dispatch
+  (Rust side untouched — pure Java consumer work).
+
+**Next:** W4 (bench Component F, Vector API vs the crossing on the real
+row-store layout) — the second half of the same wave file.
+
 ## 2026-08-17 (latest) — waves calcified, Ghidra plan grounded, NOTHING dispatched
 
 Operator ruling: consumer plans are **calcified, not executed** — insights

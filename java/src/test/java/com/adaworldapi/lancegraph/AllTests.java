@@ -26,6 +26,8 @@ public final class AllTests {
         suites.put("LazinessTest", LazinessTest::run);
         suites.put("NarrowingTest", NarrowingTest::run);
         suites.put("LifetimeTest", LifetimeTest::run);
+        suites.put("RowStoreParityTest", RowStoreParityTest::run);
+        suites.put("RowStoreLifetimeTest", RowStoreLifetimeTest::run);
 
         if (!NativeRuntime.isAvailable()) {
             // ApiSurfaceTest needs no native library — the API's shape is a compile-time property —

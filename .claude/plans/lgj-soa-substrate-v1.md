@@ -43,7 +43,8 @@ disable-verified, every measured claim lands with its reproduction command.
 SoA→S3→volume→Lance hydration pattern (four-state lifecycle,
 hydrate-aside/publish-by-rename, warm markers, dirty detection), minted in
 lance-graph *specifically so consumers inherit it as a path/git dependency
-rather than re-implement*. **#958** (open, another session's PR) is its 5+3
+rather than re-implement*. **#958** (merged 2026-08-17, another session's
+PR) was its 5+3
 council hardening fast-follow. Consequence here: when this substrate's
 persistence slice arrives (the "Seal & Persist (Lance)" column of the
 formula, and `ogar-machine-v1.md`'s time-machine storage), the hydration

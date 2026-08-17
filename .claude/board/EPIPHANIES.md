@@ -4,6 +4,47 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-17 — E-LGJ-WAVE-DISPATCH-VALIDATED-1
+
+**Status:** FINDING (first real dispatch of the wave system). **Confidence:**
+High — measured, not asserted.
+
+The wave map (`E-LGJ-CALCIFY-THEN-DISPATCH-1`) was written to be
+"dispatchable as-is by a session with zero shared context." First test: W3,
+three Sonnet workers on disjoint file scopes, zero coordination between
+them beyond the frozen signatures the orchestrator's briefs specified. All
+three landed clean, mutually consistent (same `RowStore.open(long,long)`
+signature, same `FacetId.index()` accessor — nobody guessed differently),
+and the disjoint-scope rule held with zero merge conflicts.
+
+Two things the gate sequence actually caught, worth recording precisely
+because they're the mechanism, not the anecdote:
+
+1. **A real defect, caught by the tests the wave mandated.**
+   `FacetMatchView.rowCount()` was missing the same closed-store guard
+   `matchesOf`/`cardinality` both carried — one accessor out of three,
+   asymmetric, exactly the kind of gap a reviewer skims past and a
+   two-sided lifetime test does not. `RowStoreLifetimeTest` (itself
+   AI-written, by a different worker than the one who wrote the class
+   under test) caught it on the first real run. This is the payoff of
+   "workers never run the gate themselves" — the orchestrator's fresh,
+   independent test run is what a self-reported "looks right" cannot be.
+2. **A false alarm from the ORCHESTRATOR's own environment, not the
+   code.** The first two `AllTests` invocations failed with every
+   pre-existing suite red — before touching a single line of worker
+   output. Root cause: I used an invented env var name (`LGJ_NATIVE_LIB`)
+   instead of the real one (`LGJ_LIBRARY`, defined in `Abi.java`), so the
+   runtime silently fell back to a stale `.so` from an unrelated default
+   search path. The fix was to READ THE CODE (`Abi.java`'s
+   `ENV_LIBRARY` constant) rather than guess a plausible-sounding name.
+   Lesson for future orchestrator runs: verify the discovery mechanism
+   from source before trusting a gate result — a wrong environment can
+   look exactly like a real regression.
+
+Both disable-runs (version-gate inflation; generator draw-order swap) ran
+red-then-green with the EXACT expected suite-level blast radius — no
+overreach, no under-reach — closing the loop the wave file promised.
+
 ## 2026-08-17 — E-LGJ-CALCIFY-THEN-DISPATCH-1
 
 **Status:** DOCTRINE (operator-ruled: "don't execute the consumer plans yet,
