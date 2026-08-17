@@ -8,6 +8,25 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #11 — consumer example: World/Trades (merged 2026-08-17, squash `db7bdf1`)
+
+- **Added:** `consumers/trades/` — own compile unit, core consumed as a
+  third party would. `Trade` (schema-not-entity, reflection-proven),
+  `World.open` → the existing lazy `View` under domain names;
+  `TradesParityTest` 12/12, `TradesAllocationTest` 3/3.
+- **Locked:** the poster's number, measured — **240 bytes allocated per
+  query, IDENTICAL at 64K and 1M rows** (row-count independence is the
+  thesis assertion); 0 crossings composing / 1 at terminal, through the
+  domain vocabulary; the membrane's own `LANE_KIND_MISMATCH` catches a
+  misbound schema (disable-run green-red-green). Zero new membrane
+  surface, zero core changes — the consumer iron rule held on its first
+  real test.
+- **Deferred:** QUANTITY (honestly absent — arrives with ClassView/W6);
+  bricks + graph consumer waves (still shelved).
+- **Docs:** STATUS_BOARD W5 row → trades DONE.
+- **Confidence:** High — every falsifier two-sided or anti-vacuity
+  guarded; no `java/` file changed. Bot reviewers at usage limits.
+
 ## PR #10 — third parity read path + R2IL handoff boundary (merged 2026-08-17, squash `4114c4e`)
 
 - **Added:** `RowStoreParityTest` section reading all 32,000 classids of a

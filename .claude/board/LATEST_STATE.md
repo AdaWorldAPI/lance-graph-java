@@ -1,3 +1,31 @@
+## 2026-08-17 (dispatch 4) — W5b bricks shipped: authorization IS a mask, measured
+
+`wave-consumer-bricks.md` executed (2 Sonnet workers K1/K2, disjoint main/test
+scopes, orchestrator-gated). `consumers/bricks/` is the second consumer proof:
+**RBAC as a natively-evaluated predicate in the same lazy chain as `where(...)`**
+— `Role.EU_ONLY` folds `REGION.eq(EU)` into the plan, `DENY_ALL` is a real
+impossible predicate (`REGION.eq(0xFFFF)`) that pays a real crossing and counts
+0, and an unauthorized chain throws `UnauthorizedQueryException` BEFORE any
+native crossing (fail-closed; no default-allow path exists in the package).
+Aggregate-only egress is structural: every public method returns
+`BricksQuery`/`long`/`Map` — no row-shaped public type exists to leak.
+
+- **BricksAuthTest 62/62.** Parity vs the transcribed generator at 1K+64K rows;
+  EU_ONLY == GLOBAL+explicit-where equivalence; crossing arithmetic measured.
+- **A real finding, not just a green suite: a sum terminal costs 2 crossings**
+  (plan evaluation into the mask + `lgj_reduce_sum_i32`), unlike `count()`
+  whose plan eval returns the count and pays 1. `sumBy()` therefore measures
+  **32 crossings (16 groups × 2) — IDENTICAL at 1K and 64K rows**, which is the
+  thesis (crossings ∝ groups, never rows). K1's Javadoc claimed "one crossing
+  per group"; the measurement corrected the doc, not the other way round.
+- **Disable-run:** `requireAuthorized` short-circuited → exactly the 3
+  can-fire fail-closed checks red (59 green), restored, 62/62. Core suite
+  untouched at 188/188.
+- Board-hygiene note, owned: W5a (trades, PR #11) shipped without a
+  LATEST_STATE entry — STATUS_BOARD D-LGJ-W5 carried it; both consumers are
+  now recorded there in full. W5c (graph) stays SHELVED on the D1 ruling +
+  the edge-bearing generator substrate change.
+
 ## 2026-08-17 (dispatch 2) — W4 measured: the boundary re-asked on the REAL layout
 
 `wave-substrate-w3-w4.md` Dispatch 2 executed: one Sonnet worker
