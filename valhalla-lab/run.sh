@@ -66,6 +66,7 @@ run () {                     # $1=tag $2=jdk $3=label  shift 3 -> extra jvm args
   echo "--> $tag/$label"
   ( JAVA_TOOL_OPTIONS= "$jdk/bin/java" \
       --enable-native-access=ALL-UNNAMED \
+      -Dstdout.encoding=UTF-8 \
       -Dlgj.library="$LIB_DIR/liblgj_abi.so" \
       "$@" \
       -cp "$OUT/$tag-api:$OUT/$tag-lab" com.adaworldapi.lancegraph.lab.RunAll ) \
