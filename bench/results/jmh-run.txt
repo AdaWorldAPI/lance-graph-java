@@ -1,0 +1,344 @@
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+================================================================================================
+lance-graph-java :: benchmark harness
+================================================================================================
+jdk              OpenJDK 64-Bit Server VM 26.0.2+10-55
+vm args          [--enable-native-access=ALL-UNNAMED, --add-modules=jdk.incubator.vector, -Dstdout.encoding=UTF-8, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so]
+os / arch        Linux amd64
+cpu              Intel(R) Xeon(R) Processor @ 2.10GHz  (4 logical processors)
+vector species   Species[int, 16, S_512_BIT]  (16 int lanes, 512 bit)
+native runtime   lance-graph native runtime: abi 0.1, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
+predicate        class == 7 AND value > 100
+================================================================================================
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 1, rows = 256)
+
+# Run progress: 0.00% complete, ETA 00:03:28
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 0.558 us/op
+# Warmup Iteration   2: 0.415 us/op
+# Warmup Iteration   3: 0.411 us/op
+# Warmup Iteration   4: 0.407 us/op
+# Warmup Iteration   5: 0.416 us/op
+Iteration   1: 0.410 us/op
+Iteration   2: 0.401 us/op
+Iteration   3: 0.401 us/op
+Iteration   4: 0.403 us/op
+Iteration   5: 0.401 us/op
+Iteration   6: 0.402 us/op
+Iteration   7: 0.414 us/op
+Iteration   8: 0.400 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  0.404 ±(99.9%) 0.010 us/op [Average]
+  (min, avg, max) = (0.400, 0.404, 0.414), stdev = 0.005
+  CI (99.9%): [0.394, 0.414] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 1, rows = 65536)
+
+# Run progress: 3.13% complete, ETA 00:07:47
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 7.485 us/op
+# Warmup Iteration   2: 6.796 us/op
+# Warmup Iteration   3: 6.828 us/op
+# Warmup Iteration   4: 6.877 us/op
+# Warmup Iteration   5: 6.934 us/op
+Iteration   1: 6.969 us/op
+Iteration   2: 6.845 us/op
+Iteration   3: 7.029 us/op
+Iteration   4: 6.872 us/op
+Iteration   5: 7.005 us/op
+Iteration   6: 6.795 us/op
+Iteration   7: 6.839 us/op
+Iteration   8: 6.952 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  6.913 ±(99.9%) 0.165 us/op [Average]
+  (min, avg, max) = (6.795, 6.913, 7.029), stdev = 0.087
+  CI (99.9%): [6.748, 7.079] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 2, rows = 256)
+
+# Run progress: 6.25% complete, ETA 00:07:32
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 0.728 us/op
+# Warmup Iteration   2: 0.512 us/op
+# Warmup Iteration   3: 0.514 us/op
+# Warmup Iteration   4: 0.496 us/op
+# Warmup Iteration   5: 0.531 us/op
+Iteration   1: 0.523 us/op
+Iteration   2: 0.512 us/op
+Iteration   3: 0.512 us/op
+Iteration   4: 0.503 us/op
+Iteration   5: 0.526 us/op
+Iteration   6: 0.558 us/op
+Iteration   7: 0.515 us/op
+Iteration   8: 0.511 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  0.520 ±(99.9%) 0.032 us/op [Average]
+  (min, avg, max) = (0.503, 0.520, 0.558), stdev = 0.017
+  CI (99.9%): [0.488, 0.552] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 2, rows = 65536)
+
+# Run progress: 9.38% complete, ETA 00:07:17
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 16.620 us/op
+# Warmup Iteration   2: 15.641 us/op
+# Warmup Iteration   3: 16.258 us/op
+# Warmup Iteration   4: 14.963 us/op
+# Warmup Iteration   5: 15.345 us/op
+Iteration   1: 15.653 us/op
+Iteration   2: 14.803 us/op
+Iteration   3: 15.174 us/op
+Iteration   4: 15.789 us/op
+Iteration   5: 15.463 us/op
+Iteration   6: 14.982 us/op
+Iteration   7: 15.045 us/op
+Iteration   8: 14.867 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  15.222 ±(99.9%) 0.707 us/op [Average]
+  (min, avg, max) = (14.803, 15.222, 15.789), stdev = 0.370
+  CI (99.9%): [14.515, 15.930] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 4, rows = 256)
+
+# Run progress: 12.50% complete, ETA 00:07:02
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 1.071 us/op
+# Warmup Iteration   2: 0.831 us/op
+# Warmup Iteration   3: 0.805 us/op
+# Warmup Iteration   4: 0.812 us/op
+# Warmup Iteration   5: 0.787 us/op
+Iteration   1: 0.803 us/op
+Iteration   2: 0.787 us/op
+Iteration   3: 0.819 us/op
+Iteration   4: 0.794 us/op
+Iteration   5: 0.803 us/op
+Iteration   6: 0.812 us/op
+Iteration   7: 0.800 us/op
+Iteration   8: 0.843 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  0.808 ±(99.9%) 0.033 us/op [Average]
+  (min, avg, max) = (0.787, 0.808, 0.843), stdev = 0.017
+  CI (99.9%): [0.774, 0.841] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 4, rows = 65536)
+
+# Run progress: 15.63% complete, ETA 00:06:47
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 27.861 us/op
+# Warmup Iteration   2: 25.722 us/op
+# Warmup Iteration   3: 25.611 us/op
+# Warmup Iteration   4: 25.534 us/op
+# Warmup Iteration   5: 25.717 us/op
+Iteration   1: 26.072 us/op
+Iteration   2: 25.173 us/op
+Iteration   3: 25.405 us/op
+Iteration   4: 25.841 us/op
+Iteration   5: 25.419 us/op
+Iteration   6: 25.530 us/op
+Iteration   7: 25.412 us/op
+Iteration   8: 25.874 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  25.591 ±(99.9%) 0.582 us/op [Average]
+  (min, avg, max) = (25.173, 25.591, 26.072), stdev = 0.304
+  CI (99.9%): [25.009, 26.173] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 8, rows = 256)
+
+# Run progress: 18.75% complete, ETA 00:06:32
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 1.841 us/op
+# Warmup Iteration   2: 1.446 us/op
+# Warmup Iteration   3: 1.521 us/op
+# Warmup Iteration   4: 1.556 us/op
+# Warmup Iteration   5: 1.502 us/op
+Iteration   1: 1.440 us/op
+Iteration   2: 1.494 us/op
+Iteration   3: 1.463 us/op
+Iteration   4: 1.525 us/op
+Iteration   5: 1.451 us/op
+Iteration   6: 1.533 us/op
+Iteration   7: 1.446 us/op
+Iteration   8: 1.505 us/op
+
+
+Result "com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused":
+  1.482 ±(99.9%) 0.070 us/op [Average]
+  (min, avg, max) = (1.440, 1.482, 1.533), stdev = 0.037
+  CI (99.9%): [1.412, 1.553] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.fused
+# Parameters: (predicates = 8, rows = 65536)
+
+# Run progress: 21.88% complete, ETA 00:06:17
+# Fork: 1 of 1
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 62.079 us/op
+# Warmup Iteration   2: 58.850 us/op
+# Warmup Iteration   3: 57.828 us/op
+# Warmup Iteration   4: 59.013 us/op
+# Warmup Iteration   5: 57.218 us/op
+Iteration   1: 57.682 us/op
+Iteration   2: 59.927 us/op
+Iteration   3: 56.783 us/op
+Iteration   4: 57.691 us/op
+Iteration   5: 59.234 us/op
+Iteration   6: 57.057 us/op

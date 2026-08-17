@@ -4,6 +4,47 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-17 — E-LGJ-VECTOR-API-BEATS-THE-CROSSING-1
+
+**Status:** FINDING. **Confidence:** High (real JMH 1.37, `Data.crossCheck()` guards every fork,
+independently cross-checked against a second, mechanically-generated computation of the same CSV).
+
+Completes D-LGJ-G, the mission's mandated "where does execution belong — measure it, do not assume
+the Rust side wins" comparison. The honest answer complicates the thesis in a useful way: **for a
+single predicate over one native lane, the Java Vector API — reading the SAME native
+`MemorySegment` zero-copy via `IntVector.fromMemorySegment`, no `byte[]`, no bounce buffer — beats
+the native `lgj_plan_eval` crossing at every row count tested, from 64 to 4,194,304**, by 56.4× at
+small sizes down to 1.33-1.41× at the largest:
+
+| rows | native (µs) | vectorApi (µs) | vectorApi wins by |
+|---:|---:|---:|---:|
+| 64 | 0.612 | 0.011 | 56.40× |
+| 65,536 | 15.324 | 8.027 | 1.91× |
+| 4,194,304 | 1858.686 | 1319.107 | 1.41× |
+
+A second, separate crossover is also real: native beats a plain Java **scalar** loop only past
+roughly 4,096-16,384 rows — below that the crossing's own fixed cost (consistent with Component A's
+measured ~22 ns bare-downcall floor) is not yet repaid.
+
+**Why this does not overturn the project's thesis, and where the thesis's own machinery already
+shows the real answer.** Component C isolates exactly one predicate, one lane — the case with
+nothing to fuse and nothing to coordinate, which is precisely the case a zero-copy Vector kernel is
+best at. Component E (multi-predicate fusion) shows the picture change: SIMD-vs-scalar is the
+largest lever measured anywhere in this benchmark (10.8×-31.1×, growing with predicate count), and
+`fused`/`unfused` land within this harness's own stated ~10% noise floor of each other at 65,536
+rows — meaning the fused plan's real value is the STRUCTURAL guarantee of exactly one crossing
+regardless of predicate count (already proven separately by `LazinessTest`), not a large measured
+time saving at this scale. The honest verdict, matching the mission brief's own framing rather than
+either extreme: **the crossing is worth paying for composed, multi-predicate work — not for reading
+one predicate off one lane, where Java on the same memory is simply faster.**
+
+**Method note, since two independent computations of the same data is itself worth recording as a
+discipline:** `RESULTS.md` was hand-written from the raw `results/jmh-results.csv`, then verified
+against `bench/summarise.sh` — a separate script the same PR ships that mechanically regenerates
+the tables from the CSV "so a re-run's numbers can be regenerated mechanically — a table
+transcribed by hand is a table that can drift from its own data" (the script's own doc comment).
+Both productions of the same 50-row CSV agreed to 3 decimal places on every cell checked.
+
 ## 2026-08-17 — E-LGJ-VALHALLA-MEASURED-NOT-ASSUMED-1
 
 **Status:** FINDING. **Confidence:** High (real numbers, both JDKs actually
