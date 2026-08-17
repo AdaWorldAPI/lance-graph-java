@@ -1,3 +1,29 @@
+## 2026-08-17 (latest) — waves calcified, Ghidra plan grounded, NOTHING dispatched
+
+Operator ruling: consumer plans are **calcified, not executed** — insights
+locked in while hot, execution starts from momentum later. Rhythm now
+explicit in `E-LGJ-CALCIFY-THEN-DISPATCH-1` (plan → wave map → shelf →
+dispatch → gates → merge → arc).
+
+- **`.claude/waves/`** created: README (standing rules + the verbatim
+  worker preamble) + six dispatchable wave maps — substrate W3+W4 (the
+  only one marked READY; W3 is still the next action), three consumer
+  waves (DO-NOT-DISPATCH), Ghidra G1+G2 (shelved), OGAR-Machine P-M1
+  (BLOCKED, 4-condition gate incl. explicit operator go).
+- **`ghidra-integration-v1.md`** written from REAL archaeology against
+  the fresh clone (`/workspace/ghidra`, 12.2 DEV, Java 25+): the true
+  P-code op set is **74 opcodes** (not the sketch's ~13); Ghidra ships
+  its own sequential `PcodeEmulator` — upgrading the OGAR-Machine oracle
+  story to reference-implementation parity (the tesseract-rs method);
+  `Toy` processor = the minimal lift target; `SymbolicSummaryZ3` = the
+  in-tree precedent for the far-future branch-population direction.
+- **Mapping-time discoveries** (the payoff of calcifying): the graph
+  consumer needs a deliberate edge-bearing generator arm (fixture payload
+  is PRNG noise) — a substrate change, flagged before anyone hits it
+  mid-dispatch; the graph hop has a real design fork (D1a Java-side
+  scatter via WRITABLE mask words / D1b native `lgj_hop`, minor 3) with
+  ruling guidance recorded.
+
 ## 2026-08-17 (Slice 2) — the SoA row store is REAL: ABI minor 2, W1+W2 shipped
 
 **The reframing that started it** (operator, three directives): the flat
