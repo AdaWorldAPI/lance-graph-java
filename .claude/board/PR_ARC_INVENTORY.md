@@ -8,6 +8,25 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #10 — third parity read path + R2IL handoff boundary (merged 2026-08-17, squash `4114c4e`)
+
+- **Added:** `RowStoreParityTest` section reading all 32,000 classids of a
+  1000-row store DIRECTLY from the raw lane-0 segment through
+  `Layouts.ROW_LAYOUT.byteOffset(...)` — proving the LAYOUT's carving
+  against the generator, and giving `ROW_LAYOUT` its first real consumer
+  (it had been defined and size-checked but read by nothing). AllTests
+  185 → 188.
+- **Locked:** three independent routes to the same numbers (native
+  kernels / generator transcription / structured segment read); the raw
+  lane's own description pinned (n*512 bytes, contiguous). The R2IL
+  handoff boundary recorded in `ghidra-integration-v1.md`: r2sleigh/ruff
+  integration arrives from ANOTHER session — lift-candidate C and the
+  r2dec direction are FROZEN here until it lands.
+- **Deferred:** everything the handoff covers, deliberately.
+- **Docs:** the plan's handoff section IS the record.
+- **Confidence:** High — closes a gap the W3 worker itself flagged rather
+  than one discovered by accident. Bot reviewers at usage limits.
+
 ## PR #9 — bench Component F: the boundary on the real layout (merged 2026-08-17, squash `b28bd34`)
 
 - **Added:** `F_RowStoreFacetScan` + `RowStoreData` + two `Kernels`
