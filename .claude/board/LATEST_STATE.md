@@ -1,3 +1,53 @@
+## 2026-08-17 (Slice 2) — the SoA row store is REAL: ABI minor 2, W1+W2 shipped
+
+**The reframing that started it** (operator, three directives): the flat
+three-lane fixture was always scaffolding; Java is meant to optimize the *SoA
+layout*; serialization is abandoned outright in favor of lance-graph's 64K
+zero-copy concurrency + the ndarray SIMD polyfill; Panama+Valhalla are "the
+supraconductor over lance-graph ABI shaped SoA substrate". Doctrine on the
+board as `E-LGJ-THE-MIDDLE-TIER-IS-DELETED-NOT-WRAPPED-1`; my own mis-scoped
+"declined" verdict corrected in
+`E-LGJ-THE-FLAT-FIXTURE-WAS-SCAFFOLDING-NOT-THE-TARGET-1`.
+
+**Layout now in code** (operator-stated reference): 64K × **512 B rows, 32
+facet lanes of 16 B = 4-byte LE classid + 12-byte payload**, the lance-graph
+V3 content-blind facet. Java's own view may differ — these bytes are the
+substrate truth. Full statement: `.claude/knowledge/soa-row-store-layout.md`.
+
+- **W1 (ndarray PR #279, open):** `MultiLaneColumn::iter_u32x16`/`len_u32x16`
+  (the u32 lane whose absence was the real blocker) + `eq_u32_strided_to_mask`
+  (the AoS-facet classid scan, overflow-checked bounds). `simd_int_ops` 46/46,
+  `simd_soa` 15/15, `simd` 263/263, clippy/fmt clean, both x86 arms.
+- **W2 (this repo):** `rowstore.rs` + `LGJ_RESOURCE_ROWSTORE` +
+  `lgj_rowstore_open` + `lgj_op_eq_classid` + `lgj_row_facet_match`; facet
+  lanes ride the **unchanged** `LgjLaneDesc` (`stride_bytes` has carried this
+  since minor 1). ABI **minor 1→2**, `docs/abi.md` §11 written, and the §1/§7
+  "14 symbols" count corrected (its own list already enumerated 15; the real
+  number is now 18, verified by `nm -D`). `cargo test` **84/84**, clippy
+  `-D warnings` + fmt clean.
+- **Parity, three independent ways:** each SIMD kernel vs its independent
+  scalar reference over 10 row counts × 2 seeds × 4 facets × 4 needles, then
+  both cross-checked against `RowStore::classid_at`. Two-sided falsifier proves
+  payload bytes carrying the needle's bit pattern never satisfy a classid
+  match, and that a real classid match does fire.
+- **`byte_len` semantics tightened** to the exact covered span
+  `(len-1)*stride + elem_bytes` — a full-stride final window would have let
+  Java bound a segment past the allocation's end on a facet lane. Contiguous
+  lanes unchanged.
+- **Masks parent onto row stores**, so the entire existing mask algebra applies
+  with no new surface (proven end-to-end through the membrane).
+
+**Planned and written this session:** `.claude/plans/lgj-soa-substrate-v1.md`
+(the W1–W5 wave plan) plus one plan per consumer example —
+`consumer-world-trades-v1.md` (zero-object fluent domain API),
+`consumer-bricks-analytics-v1.md` (mask-first RBAC, fail-closed, aggregates
+only), `consumer-graph-traversal-v1.md` (traversal as facet addressing,
+crossings ∝ hops). Iron rule in all three: **a consumer example never grows the
+membrane** — a needed symbol goes back through the wave process.
+
+**Next:** W3, the Java `RowStore` facade (structured `MemoryLayout`,
+minor-≥2 gate, `FacetMatchView`, generator-transcribing parity test).
+
 ## 2026-08-17 (later) — Phase I docs written, fusion re-run merged, simd_soa question answered (PR #4)
 
 - **All four synthesis docs shipped** (`docs/architecture.md`,

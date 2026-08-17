@@ -4,6 +4,74 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-17 — E-LGJ-THE-MIDDLE-TIER-IS-DELETED-NOT-WRAPPED-1
+
+**Status:** DOCTRINE (operator-stated, scope confirmed). **Confidence:** High —
+four directives + three posters, restated and confirmed in session.
+
+The blast radius, recorded because a session that reads this repo as "a faster
+Java binding to a Rust library" will make locally-sensible decisions that are
+globally wrong:
+
+1. **The middle of the Java data stack is deleted, not wrapped.** Today:
+   App → DTO/ORM → Gremlin/TinkerPop → JanusGraph → Cassandra → Elastic /
+   ClickHouse / Lucene = six components, five serialization boundaries, three
+   mental models. After: **one** explicit ABI boundary, **zero** serialization
+   boundaries. The middleware and side-car analytics tiers do not get wrapped —
+   lance-graph + ndarray under one Panama membrane already *are* the traversal,
+   analytics and search substrate. *"Java als low-code Oberfläche, ABI als
+   Wahrheit."*
+2. **Objects are eliminated, not optimized.** 10⁹ logical entities ⇒ **0** Java
+   objects: no header tax, no GC churn, masks instead of pointers, survivors
+   only touch heavy data. Valhalla's role is narrow and already measured here —
+   it makes the *tiny descriptor vocabulary* free (≤8 B flattens; the 16 B
+   entity does not), which is exactly why entities stay native and descriptors
+   stay `record`-shaped.
+3. **The trust boundary collapses with the data boundary.** Mask-first: the
+   RBAC/ABAC clamp composes BEFORE execution, the scan runs on authorized lanes
+   only, and only aggregates/projections leave. Security enforced at the source
+   is a *consequence* of zero-copy, not a feature bolted on.
+4. **The migration asymmetry is the weapon.** The developer-visible diff is
+   `stream().filter(λ)` → `.where(Field.gt(...))`; everything underneath changes
+   universe. Hence the standing rule: **the ABI is a machine membrane and never
+   the product API** — the product is the illusion that ordinary Java just works
+   at 10⁹ objects.
+
+Operator's compression: *"Java Panama and Valhalla become the supraconductor
+over lance-graph ABI shaped SoA substrate."* Supraconductor is precise — current
+(the query) flows with no resistance (no allocation, no GC, no serialization)
+through a thin familiar surface.
+
+**Consequence for review:** any proposal that adds a serialization step, a
+per-element crossing, an object materialization, or a post-filter security check
+is not a tradeoff to weigh — it contradicts the thesis and is rejected.
+
+## 2026-08-17 — E-LGJ-THE-FLAT-FIXTURE-WAS-SCAFFOLDING-NOT-THE-TARGET-1
+
+**Status:** CORRECTION (of my own framing). **Confidence:** High — operator
+correction, acted on the same session.
+
+I answered the `simd_soa` question by measuring `MultiLaneColumn` against the
+**flat three-lane fixture**, found two real API mismatches, and recorded a
+"declined for now" verdict. The operator corrected the frame: *"the whole point
+is Java should optimize the SoA layout — we won't dismiss the initial plans
+just because you found it doesn't apply for unorganized non-SoA."*
+
+The technical findings were right and are unchanged (see the entry below); the
+**conclusion drawn from them was scoped wrong**. The flat fixture was always
+scaffolding — `docs/abi.md` §10 and `architecture.md` said so from PR #1 ("the
+generic fixture in this first slice was deliberately chosen … so the membrane's
+physics could be proven independent of graph semantics"). Measuring a
+substrate-shaped tool against the scaffolding and concluding "not yet" inverted
+which one was provisional.
+
+**The generalizable failure:** when a proposal doesn't fit the *current* code,
+check whether the proposal is early or whether the **code is the placeholder**.
+Here the code was the placeholder, and the right move was to build the real
+shape (the 512-byte row store, W2, shipped same session) rather than defer the
+tool. A "declined, revisit later" verdict is only honest when the thing it was
+measured against is the thing that stays.
+
 ## 2026-08-17 — E-LGJ-SIMD-SOA-IS-FOR-THE-ROW-STORE-NOT-THE-FLAT-LANES-1
 
 **Status:** DECISION (declined refactor, with the trigger for revisiting named).

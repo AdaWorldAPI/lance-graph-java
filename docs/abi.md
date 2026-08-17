@@ -62,8 +62,10 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 14 symbols. Growth is a design smell to be argued
-  for, not a default.
+- It is **small** — currently 18 symbols (minor 2; the "14" this line carried
+  at minor 1 was arithmetic drift — the §7 list it referred to already
+  enumerated 15). Growth is a design smell to be argued for, not a default;
+  minor 2's three additions are argued in §11.
 - It is **bulk-only**. Every call must be capable of doing work proportional to
   `n_rows` (see §6 — the anti-JNI rule).
 - It speaks **resource, lane, view, mask, operation, descriptor, status,
@@ -76,7 +78,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 1    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 2    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -177,7 +179,7 @@ bounded description that the FFM layer turns into a `MemorySegment`:
 pub struct LgjLaneDesc {
     pub addr:         u64,    // physics — never surfaced in the public Java API
     pub len_elems:    u64,
-    pub byte_len:     u64,
+    pub byte_len:     u64,    // exact covered span: (len-1)*stride + elem_bytes; 0 when empty
     pub owner:        u64,    // owning resource handle
     pub epoch:        u64,    // liveness stamp; Java re-checks before use
     pub elem_kind:    u32,    // LgjElemKind
@@ -267,7 +269,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (14 symbols)
+## 7. The function surface (18 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -407,3 +409,78 @@ Named so their absence is a decision on record rather than an oversight:
   ABI-compatible: `WideFieldMask`'s canonical `[u64]` chunks *are* this ABI's
   `MASK_WORD` lane, and `NodeRow`'s `16|16|480` `#[repr(C, align(64))]` layout is
   already a legal lane description.
+
+## 11. The SoA row store (ABI minor ≥ 2)
+
+The substrate layout the whole stack converges on — operator-stated reference
+(2026-08-17): **64K rows × 512 bytes per row, 32 facet lanes of 16 bytes each
+(4-byte little-endian classid + 12-byte payload)**, the lance-graph V3
+content-blind facet shape, enforced everywhere on the Rust side. The Java
+side's *view* may differ; these bytes are the substrate truth. One buffer,
+zero serialization: every access — Rust kernel or Java segment read — is a
+*reading* of the same bytes.
+
+### Resource
+
+```
+LGJ_RESOURCE_ROWSTORE = 3
+i32 lgj_rowstore_open(u64 n_rows, u64 seed, u64* out_handle)
+```
+
+Deterministic generator (normative; two SplitMix64 draws per facet, `a` then
+`b`, 64 draws per row — full statement in `rowstore.rs`'s doc):
+
+```
+classid = (a >>> 33) & 0xF            // same recipe as the fixture's class lane
+payload = le64(b) ++ le32(a & 0xFFFFFFFF)
+```
+
+### Lanes (described through the UNCHANGED `LgjLaneDesc` — `stride_bytes`
+anticipated this since minor 1)
+
+| lane id | what | kind | stride | flags |
+|---|---|---|---|---|
+| `0` | the raw buffer, `n_rows * 512` bytes | `U8` | 1 | `READABLE \| CONTIGUOUS` |
+| `1 + f` (f in `0..32`) | facet `f`'s classid column | `U32` | 512 | `READABLE` |
+
+`byte_len` is the **exact covered span** `(len_elems - 1) * stride_bytes +
+elem_bytes` (0 when empty) — for a strided facet lane this deliberately does
+NOT round up to `len * stride`, because the lane's base sits `f*16` into the
+buffer and a full-stride final window would let Java bound a segment past the
+allocation's end. For contiguous lanes the formula reduces to
+`len * elem_bytes`, unchanged from minor 1.
+
+### Operations
+
+```
+i32 lgj_op_eq_classid(u64 res, u32 facet, u32 needle, u64 dst_mask)
+i32 lgj_row_facet_match(u64 res, u32 needle, u32* out, u64 out_len_elems)
+```
+
+- `lgj_op_eq_classid` overwrites `dst_mask` with the row mask
+  `classid(facet, row) == needle`. `facet` is a facet index `0..32`, not a
+  lane id. The result is an ordinary mask: `lgj_mask_create` accepts a row
+  store as parent (masks may parent onto a pattern OR a row store — both are
+  read-only row-shaped resources), and the whole §7 mask algebra
+  (`and`/`or`/`count`/`describe`) applies unchanged.
+- `lgj_row_facet_match` writes, for every row, a `u32` bitset of which of its
+  32 facets carry `needle` as classid — into the **caller's** buffer (a
+  Java-arena segment; zero-copy out, nothing serialized). Capacity is checked
+  BEFORE anything is written (`MASK_LENGTH_MISMATCH` on a short buffer).
+
+### SIMD provenance (unchanged §8 rule, applied)
+
+`lgj_op_eq_classid` routes through `ndarray::simd::eq_u32_strided_to_mask`
+(scalar strided loads — at stride 512 each element is on its own cache line,
+so the walk is memory-bound and SIMD earns its keep in the 16-wide compare).
+`lgj_row_facet_match` wraps the store's bytes in
+`ndarray::simd::MultiLaneColumn` (an `Arc` refcount bump, no copy) and answers
+four facets per 64-byte chunk with one `U32x16::eq_bitmask`.
+
+### Alignment (stated honestly)
+
+The buffer base is `u8`-aligned (`Arc<[u8]>`; stable Rust promises no more).
+Rows are 512-byte strided within it. Nothing in this slice needs more — Java
+reads via `JAVA_INT_UNALIGNED`-class layouts, and every `ndarray::simd` load
+is a register fill. The 64-byte-aligned base guarantee arrives with the real
+`NodeRow` (`#[repr(C, align(64))]`) wiring.

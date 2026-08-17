@@ -51,6 +51,7 @@ pub mod exports;
 pub mod fixture;
 pub mod kernels;
 pub mod registry;
+pub mod rowstore;
 
 // Re-export the ABI vocabulary at the crate root for convenience in tests and
 // for any Rust consumer that links the `rlib` rather than the `cdylib`.
@@ -88,6 +89,18 @@ mod integration_tests {
         }
         pub fn reduce_sum_i32(r: u64, lane: u32, m: u64, out: *mut i64) -> i32 {
             unsafe { lgj_reduce_sum_i32(r, lane, m, out) }
+        }
+        pub fn rowstore_open(n: u64, seed: u64, out: *mut u64) -> i32 {
+            unsafe { lgj_rowstore_open(n, seed, out) }
+        }
+        pub fn resource_info(h: u64, out: *mut LgjResourceInfo) -> i32 {
+            unsafe { lgj_resource_info(h, out) }
+        }
+        pub fn lane_describe(h: u64, lane: u32, out: *mut LgjLaneDesc) -> i32 {
+            unsafe { lgj_lane_describe(h, lane, out) }
+        }
+        pub fn row_facet_match(r: u64, needle: u32, out: *mut u32, cap: u64) -> i32 {
+            unsafe { lgj_row_facet_match(r, needle, out, cap) }
         }
     }
 
@@ -231,6 +244,106 @@ mod integration_tests {
             let want = f.classes().iter().filter(|&&c| c == 7).count() as u64;
             assert_eq!(got, want, "thread for seed {seed} disagreed");
         }
+    }
+
+    /// The SoA row store, end to end through the membrane (ABI minor ≥ 2):
+    /// open → describe → classid predicate → mask algebra → count →
+    /// facet-match into a caller buffer — everything independently recomputed
+    /// from the documented generator, exactly as the Java parity test will.
+    #[test]
+    fn the_rowstore_slice_end_to_end_through_the_membrane() {
+        use crate::rowstore::{RowStore, LANE_FACET_BASE, ROW_BYTES};
+        let n = 1000u64;
+        let seed = 0xC0FFEE;
+        let mut s = 0u64;
+        assert_eq!(call::rowstore_open(n, seed, &mut s), LGJ_OK);
+
+        // Resource self-description.
+        let mut info = LgjResourceInfo::default();
+        assert_eq!(call::resource_info(s, &mut info), LGJ_OK);
+        assert_eq!(info.kind, LGJ_RESOURCE_ROWSTORE);
+        assert_eq!(info.lane_count, 33);
+        assert_eq!(info.n_rows, n);
+
+        // Raw lane: contiguous U8, exactly n*512 bytes.
+        let mut d = LgjLaneDesc::default();
+        assert_eq!(call::lane_describe(s, 0, &mut d), LGJ_OK);
+        assert_eq!(d.elem_kind, LgjElemKind::U8 as u32);
+        assert_eq!(d.len_elems, n * ROW_BYTES);
+        assert_eq!(d.byte_len, n * ROW_BYTES);
+        assert_ne!(d.flags & LGJ_FLAG_CONTIGUOUS, 0);
+
+        // Facet lane 7: strided U32, stride 512, and the exact-span rule —
+        // the described window must END at the buffer's last classid, never
+        // a full stride past it (Java bounds a segment from this number).
+        assert_eq!(call::lane_describe(s, LANE_FACET_BASE + 7, &mut d), LGJ_OK);
+        assert_eq!(d.elem_kind, LgjElemKind::U32 as u32);
+        assert_eq!(d.len_elems, n);
+        assert_eq!(d.stride_bytes, 512);
+        assert_eq!(d.byte_len, (n - 1) * 512 + 4);
+        assert_eq!(d.flags & LGJ_FLAG_CONTIGUOUS, 0);
+        // Lane 34 does not exist (1 raw + 32 facets = ids 0..=32).
+        assert_eq!(call::lane_describe(s, 34, &mut d), LGJ_ERR_INVALID_LANE);
+
+        // classid predicate on facet 7 → an ordinary mask, counted natively…
+        let m = mask(s, LGJ_MASK_INIT_EMPTY);
+        assert_eq!(lgj_op_eq_classid(s, 7, 9, m), LGJ_OK);
+        let mut count = 0u64;
+        assert_eq!(call::mask_count(m, &mut count), LGJ_OK);
+
+        // …and recomputed independently from the documented generator.
+        let store = RowStore::generate(n, seed).unwrap();
+        let want = (0..n).filter(|&r| store.classid_at(r, 7) == 9).count() as u64;
+        assert_eq!(count, want);
+        assert!(count > 0 && count < n, "must be a middling selection");
+
+        // Facet out of range is a status, and the facet/lane-id distinction
+        // holds: facet 32 is invalid even though LANE id 32 (facet 31) exists.
+        assert_eq!(lgj_op_eq_classid(s, 32, 9, m), LGJ_ERR_INVALID_LANE);
+
+        // The mask composes with the EXISTING algebra: AND facet-7==9 with
+        // facet-0==9 and verify against the independent recomputation.
+        let m2 = mask(s, LGJ_MASK_INIT_EMPTY);
+        assert_eq!(lgj_op_eq_classid(s, 0, 9, m2), LGJ_OK);
+        assert_eq!(lgj_mask_and(m, m2, m), LGJ_OK);
+        assert_eq!(call::mask_count(m, &mut count), LGJ_OK);
+        let want_and = (0..n)
+            .filter(|&r| store.classid_at(r, 7) == 9 && store.classid_at(r, 0) == 9)
+            .count() as u64;
+        assert_eq!(count, want_and);
+
+        // Facet-match into a caller-owned buffer (what Java allocates in its
+        // own arena): per-row 32-bit facet sets, verified row by row.
+        let mut out = vec![u32::MAX; n as usize];
+        assert_eq!(call::row_facet_match(s, 9, out.as_mut_ptr(), n), LGJ_OK);
+        for r in 0..n {
+            let mut want_bits = 0u32;
+            for f in 0..32u32 {
+                if store.classid_at(r, f) == 9 {
+                    want_bits |= 1 << f;
+                }
+            }
+            assert_eq!(out[r as usize], want_bits, "row {r}");
+        }
+        // A too-small caller buffer is rejected BEFORE anything is written.
+        let mut short = vec![0xABAB_ABABu32; 10];
+        assert_eq!(
+            call::row_facet_match(s, 9, short.as_mut_ptr(), 10),
+            LGJ_ERR_MASK_LENGTH_MISMATCH
+        );
+        assert!(
+            short.iter().all(|&x| x == 0xABAB_ABAB),
+            "untouched on failure"
+        );
+
+        // Lifecycle: same rules as every resource.
+        assert_eq!(lgj_close(m2), LGJ_OK);
+        assert_eq!(lgj_close(m), LGJ_OK);
+        assert_eq!(lgj_close(s), LGJ_OK);
+        assert_eq!(
+            call::row_facet_match(s, 9, out.as_mut_ptr(), n),
+            LGJ_ERR_INVALID_HANDLE
+        );
     }
 
     /// Concurrent mask binops that name the same masks in *opposite* orders —
