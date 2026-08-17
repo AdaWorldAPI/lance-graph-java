@@ -27,6 +27,43 @@ License note: Ghidra core is Apache-2.0 (compatible with everything in
 this stack); the `GPL/` subtree (demangler etc.) is not needed for
 lifting and stays untouched.
 
+## G0 addendum (2026-08-17, operator-flagged): `AdaWorldAPI/r2sleigh` — the third lift path and the decompiler candidate
+
+Read-only clone at `/workspace/adaworldapi/r2sleigh` (HEAD `60942f6`, 20 MB,
+Rust 1.93 workspace, 8 crates + an r2 plugin). What it is, verified from the
+tree, not the README alone:
+
+- **Pipeline:** `.sla (Ghidra processor spec) → libsla → P-code → r2il
+  (typed IR, 60+ opcodes) → {SSA (r2ssa) → taint/symbolic (r2sym, Z3-backed),
+  decompiler-to-C (r2dec), type inference (r2types), ESIL}`.
+- **The honest FFI fact:** `Cargo.lock` carries `libsla` AND `libsla-sys` —
+  the SLEIGH runtime underneath is **Ghidra's native C++ via FFI**, not a
+  pure-Rust SLEIGH. r2sleigh's own crates are Rust; the lifter core is not.
+  Acceptable on exactly the same footing as running Ghidra itself: this is
+  a LIFT-TIME tool, never at OGAR-Machine runtime (the no-C-at-runtime rule
+  is about the execution path, and lift time is not on it).
+
+**Consequences for the waves:**
+
+1. **G1 gains a candidate C: lift via `r2sleigh-cli`** (Rust CLI consuming
+   Ghidra's own `.sla` specs) alongside A (released-Ghidra
+   `analyzeHeadless`) and B (fork build). No JVM in the lift loop, and the
+   P-code comes from the SAME SLEIGH specs Ghidra uses — so the G1
+   falsifier gets stronger, not weaker: r2sleigh's P-code dump vs Ghidra's
+   own listing is a **cross-implementation** agreement check, two
+   independent consumers of one spec.
+2. **Operator designation: future decompiler candidate.** `r2dec`
+   (P-code→SSA→structured C) is the natural engine for the OGAR-Machine's
+   "semantic shims erode the emulator" direction — recognizing and lifting
+   stable call surfaces needs decompilation-grade structure recovery, and
+   building that from scratch was never on any plan. Not scheduled; named.
+3. **A second symbolic-execution precedent** (`r2sym`, Z3) in Rust, next to
+   Ghidra's `SymbolicSummaryZ3` — the branch-population direction now has
+   two prior arts to study before designing anything.
+4. **Access boundary, recorded:** the clone is anonymous/read-only —
+   pushing or PRs against r2sleigh require re-attaching with push access.
+   Any fix we need upstream goes through the operator first.
+
 ## The integration shape — two roles, both offline
 
 ```
