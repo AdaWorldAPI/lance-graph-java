@@ -31,7 +31,12 @@ use core::mem::{align_of, size_of};
 pub const LGJ_ABI_MAJOR: u32 = 0;
 
 /// Additive change ⇒ bump. Older Java may still load (`minor >= expected`).
-pub const LGJ_ABI_MINOR: u32 = 1;
+///
+/// Minor **2** (2026-08-17): the SoA row store — `LGJ_RESOURCE_ROWSTORE`,
+/// `lgj_rowstore_open`, `lgj_op_eq_classid`, `lgj_row_facet_match`, and
+/// strided facet lanes described through the (unchanged) `LgjLaneDesc`.
+/// Purely additive; a minor-1 Java loads and sees none of it.
+pub const LGJ_ABI_MINOR: u32 = 2;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -139,8 +144,13 @@ pub const LGJ_FLAG_CONTIGUOUS: u32 = 1 << 2;
 // §5 resource kinds
 /// A pattern (the SoA fixture): id/class/value lanes, read-only.
 pub const LGJ_RESOURCE_PATTERN: u32 = 1;
-/// A mask: one `MASK_WORD` lane, writable, owned by a parent pattern.
+/// A mask: one `MASK_WORD` lane, writable, owned by a parent pattern or
+/// row store.
 pub const LGJ_RESOURCE_MASK: u32 = 2;
+/// A SoA row store (abi.md §11): `n_rows × 512` bytes, 32 facet lanes of
+/// (4-byte LE classid + 12-byte payload); 1 raw `U8` lane + 32 strided
+/// `U32` classid lanes, all read-only. ABI minor ≥ 2.
+pub const LGJ_RESOURCE_ROWSTORE: u32 = 3;
 
 // §7 mask_create initial states
 /// `lgj_mask_create(initial = 0)` — no rows set.
@@ -201,7 +211,11 @@ pub struct LgjLaneDesc {
     pub addr: u64,
     /// Number of elements.
     pub len_elems: u64,
-    /// `len_elems * stride_bytes`.
+    /// Exact covered span: `(len_elems - 1) * stride_bytes + elem_bytes`, `0`
+    /// when empty. Reduces to `len_elems * elem_bytes` for contiguous lanes;
+    /// for a strided facet lane it deliberately does NOT round up to
+    /// `len * stride` (abi.md §11 — a full-stride final window would let Java
+    /// bound a segment past the allocation's end).
     pub byte_len: u64,
     /// Owning resource handle.
     pub owner: u64,

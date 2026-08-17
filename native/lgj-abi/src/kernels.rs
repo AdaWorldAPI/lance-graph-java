@@ -98,6 +98,81 @@ pub fn simd_popcount(words: &[u64]) -> u64 {
     ndarray::simd::popcount_batch_u64(words)
 }
 
+/// Row mask over one facet-classid lane of a 512-byte row store:
+/// `out_words[row-th bit] = (classid of facet at first_offset in row == needle)`.
+///
+/// Routes through `ndarray::simd::eq_u32_strided_to_mask` — the strided
+/// AoS-facet scan (LE `u32` at `first_offset + row * 512`). The primitive
+/// owns bounds checking (overflow-checked, panics rather than reading out of
+/// bounds) and the trailing-bits-zero guarantee.
+#[inline]
+pub fn simd_rowstore_classid_mask(
+    bytes: &[u8],
+    first_offset: usize,
+    n_rows: usize,
+    needle: u32,
+    out_words: &mut [u64],
+) {
+    ndarray::simd::eq_u32_strided_to_mask(
+        bytes,
+        first_offset,
+        crate::rowstore::ROW_BYTES as usize,
+        n_rows,
+        needle,
+        out_words,
+    );
+}
+
+/// Per-row facet-match: `out[row]` gets bit `f` set iff facet `f`'s classid
+/// in that row equals `needle` — "which facets of this node carry class X",
+/// one `u32` answer per row, written into the caller's buffer.
+///
+/// This is the [`ndarray::simd::MultiLaneColumn`] consumer: the store's
+/// `Arc<[u8]>` is wrapped WITHOUT copying (the Arc clone is a refcount bump),
+/// and each 64-byte chunk — four 16-byte facets — is answered by ONE
+/// `U32x16::eq_bitmask` against the broadcast needle, masked to the classid
+/// positions 0/4/8/12 and folded into 4 facet bits. Eight chunks per row
+/// assemble the row's 32-bit answer.
+///
+/// # Panics
+///
+/// Panics if `bytes.len() != n_rows * 512` or `out.len() < n_rows` — caller
+/// bugs inside this crate, not reachable from the membrane (the export
+/// validates first).
+pub fn simd_rowstore_facet_match(
+    bytes: &std::sync::Arc<[u8]>,
+    n_rows: usize,
+    needle: u32,
+    out: &mut [u32],
+) {
+    use crate::rowstore::ROW_BYTES;
+    assert_eq!(bytes.len(), n_rows * ROW_BYTES as usize);
+    assert!(out.len() >= n_rows);
+
+    // n*512 is always a multiple of 64 (rowstore tests pin this), so `new`
+    // cannot fail — and the construction shares the bytes, never copies them.
+    let col = ndarray::simd::MultiLaneColumn::new(std::sync::Arc::clone(bytes))
+        .expect("rowstore buffer is a multiple of 64 bytes by construction");
+    let needle_v = ndarray::simd::U32x16::from_array([needle; 16]);
+
+    // Fully overwrite, same contract as every mask writer in this crate: the
+    // per-chunk fold below ORs, so stale caller bits must not survive.
+    for o in out.iter_mut().take(n_rows) {
+        *o = 0;
+    }
+
+    const CHUNKS_PER_ROW: usize = (ROW_BYTES / 64) as usize; // 8
+    for (c, chunk) in col.iter_u32x16().enumerate() {
+        // Classids sit at u32 positions 0/4/8/12 of the 16-lane chunk; the
+        // other twelve lanes are payload bytes that must never contribute.
+        let m = chunk.eq_bitmask(needle_v) & 0x1111;
+        let facet_bits = (m & 1) | ((m >> 4) & 1) << 1 | ((m >> 8) & 1) << 2 | ((m >> 12) & 1) << 3;
+        let row = c / CHUNKS_PER_ROW;
+        let chunk_in_row = c % CHUNKS_PER_ROW;
+        out[row] |= (facet_bits as u32) << (4 * chunk_in_row);
+    }
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Scalar reference — INDEPENDENT of ndarray. Do not "simplify" by calling the
 // wrappers above; the independence IS the test.
@@ -159,6 +234,43 @@ pub fn scalar_popcount(words: &[u64]) -> u64 {
         n += w.count_ones() as u64;
     }
     n
+}
+
+/// Reference strided classid → row mask. Plain byte reads, no ndarray.
+pub fn scalar_rowstore_classid_mask(
+    bytes: &[u8],
+    first_offset: usize,
+    n_rows: usize,
+    needle: u32,
+    out_words: &mut [u64],
+) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for row in 0..n_rows {
+        let off = first_offset + row * crate::rowstore::ROW_BYTES as usize;
+        let v = u32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
+        if v == needle {
+            out_words[row / 64] |= 1u64 << (row % 64);
+        }
+    }
+}
+
+/// Reference per-row facet match. Plain byte reads, no ndarray.
+pub fn scalar_rowstore_facet_match(bytes: &[u8], n_rows: usize, needle: u32, out: &mut [u32]) {
+    use crate::rowstore::{FACET_BYTES, ROW_BYTES, ROW_FACETS};
+    for (row, o) in out.iter_mut().enumerate().take(n_rows) {
+        let mut bits = 0u32;
+        for f in 0..ROW_FACETS {
+            let off = row * ROW_BYTES as usize + f as usize * FACET_BYTES as usize;
+            let v =
+                u32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
+            if v == needle {
+                bits |= 1 << f;
+            }
+        }
+        *o = bits;
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -385,6 +497,110 @@ mod tests {
             eval_predicate(Path::Simd, 12345, 1, &lane, 3, &mut w).unwrap_err(),
             LGJ_ERR_UNKNOWN_OPCODE
         );
+    }
+
+    /// The row-store parity falsifier: both new SIMD kernels against their
+    /// independent scalar references, over real generated stores at row
+    /// counts straddling every boundary (16-lane groups via 4-facet chunks,
+    /// 64-bit words, and the 8-chunks-per-row fold).
+    #[test]
+    fn rowstore_kernels_match_their_scalar_references() {
+        use crate::rowstore::RowStore;
+        for n in [0u64, 1, 2, 15, 16, 17, 63, 64, 65, 200] {
+            for seed in [0u64, 0xABCD] {
+                let s = RowStore::generate(n, seed).unwrap();
+                let bytes = s.bytes_arc();
+
+                for facet in [0u32, 1, 15, 31] {
+                    for needle in [0u32, 7, 15, 42] {
+                        let n_words = mask_words_for(n) as usize;
+                        let mut a = vec![u64::MAX; n_words];
+                        let mut b = vec![u64::MAX; n_words];
+                        let first_offset = (facet as usize) * crate::rowstore::FACET_BYTES as usize;
+                        simd_rowstore_classid_mask(
+                            &bytes,
+                            first_offset,
+                            n as usize,
+                            needle,
+                            &mut a,
+                        );
+                        scalar_rowstore_classid_mask(
+                            &bytes,
+                            first_offset,
+                            n as usize,
+                            needle,
+                            &mut b,
+                        );
+                        assert_eq!(a, b, "classid_mask n={n} facet={facet} needle={needle}");
+                        // Cross-check against the store's own scalar accessor,
+                        // a THIRD independent computation.
+                        for row in 0..n {
+                            let bit = (a[(row / 64) as usize] >> (row % 64)) & 1;
+                            let expect = (s.classid_at(row, facet) == needle) as u64;
+                            assert_eq!(bit, expect, "row {row}");
+                        }
+                    }
+                }
+
+                for needle in [0u32, 7, 15] {
+                    let mut a = vec![u32::MAX; n as usize];
+                    let mut b = vec![u32::MAX; n as usize];
+                    simd_rowstore_facet_match(&bytes, n as usize, needle, &mut a);
+                    scalar_rowstore_facet_match(&bytes, n as usize, needle, &mut b);
+                    assert_eq!(a, b, "facet_match n={n} needle={needle}");
+                    // Consistency with the per-facet masks: bit f of row r in
+                    // facet_match must equal row r's bit in facet f's mask.
+                    if n > 0 {
+                        for facet in [0u32, 31] {
+                            let mut m = vec![0u64; mask_words_for(n) as usize];
+                            scalar_rowstore_classid_mask(
+                                &bytes,
+                                facet as usize * crate::rowstore::FACET_BYTES as usize,
+                                n as usize,
+                                needle,
+                                &mut m,
+                            );
+                            for row in 0..n as usize {
+                                let via_match = (a[row] >> facet) & 1;
+                                let via_mask = ((m[row / 64] >> (row % 64)) & 1) as u32;
+                                assert_eq!(via_match, via_mask, "row {row} facet {facet}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The facet-match fold must never let PAYLOAD bytes match: plant the
+    /// needle's bit pattern inside a payload and prove it does not fire.
+    #[test]
+    fn facet_match_ignores_needle_patterns_in_payload_bytes() {
+        use crate::rowstore::RowStore;
+        let s = RowStore::generate(4, 0x5EED).unwrap();
+        let mut bytes = s.as_bytes().to_vec();
+        let needle = 0xDEAD_BEEFu32;
+        // Row 2, facet 5: put the needle in PAYLOAD positions (offsets +4 and
+        // +12), and a non-matching classid at +0.
+        let base = 2 * 512 + 5 * 16;
+        bytes[base..base + 4].copy_from_slice(&1u32.to_le_bytes());
+        bytes[base + 4..base + 8].copy_from_slice(&needle.to_le_bytes());
+        bytes[base + 12..base + 16].copy_from_slice(&needle.to_le_bytes());
+        let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(bytes);
+
+        let mut out = vec![0u32; 4];
+        simd_rowstore_facet_match(&bytes, 4, needle, &mut out);
+        assert_eq!(
+            (out[2] >> 5) & 1,
+            0,
+            "payload bytes must never satisfy a classid match"
+        );
+        // And the twin: planting it in the CLASSID position does fire.
+        let mut bytes2 = s.as_bytes().to_vec();
+        bytes2[base..base + 4].copy_from_slice(&needle.to_le_bytes());
+        let bytes2: std::sync::Arc<[u8]> = std::sync::Arc::from(bytes2);
+        simd_rowstore_facet_match(&bytes2, 4, needle, &mut out);
+        assert_eq!((out[2] >> 5) & 1, 1, "a real classid match must fire");
     }
 
     #[test]

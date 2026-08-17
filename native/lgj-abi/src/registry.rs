@@ -49,6 +49,7 @@ use std::sync::{Arc, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::abi::*;
 use crate::fixture::{Fixture, PATTERN_LANE_COUNT};
+use crate::rowstore::{RowStore, ROWSTORE_LANE_COUNT};
 
 /// The mutable half of a mask: the packed row bits.
 #[derive(Debug)]
@@ -65,6 +66,9 @@ pub struct MaskWords {
 pub enum Payload {
     /// A read-only SoA fixture — no lock needed, because no ABI path mutates it.
     Pattern(Fixture),
+    /// A read-only SoA row store (abi.md §11) — likewise lock-free: the
+    /// `Arc<[u8]>` buffer is immutable for the resource's whole life.
+    RowStore(RowStore),
     /// Mutable mask words behind their own lock.
     Mask(RwLock<MaskWords>),
 }
@@ -96,7 +100,15 @@ impl ResourceEntry {
     pub fn fixture(&self) -> Option<&Fixture> {
         match &self.payload {
             Payload::Pattern(f) => Some(f),
-            Payload::Mask(_) => None,
+            _ => None,
+        }
+    }
+
+    /// `Some(&RowStore)` iff this is a row store.
+    pub fn rowstore(&self) -> Option<&RowStore> {
+        match &self.payload {
+            Payload::RowStore(s) => Some(s),
+            _ => None,
         }
     }
 
@@ -104,7 +116,7 @@ impl ResourceEntry {
     pub fn mask(&self) -> Option<&RwLock<MaskWords>> {
         match &self.payload {
             Payload::Mask(m) => Some(m),
-            Payload::Pattern(_) => None,
+            _ => None,
         }
     }
 
@@ -127,6 +139,7 @@ impl ResourceEntry {
             kind: self.kind,
             lane_count: match self.kind {
                 LGJ_RESOURCE_PATTERN => PATTERN_LANE_COUNT,
+                LGJ_RESOURCE_ROWSTORE => ROWSTORE_LANE_COUNT,
                 // A mask exposes exactly one MASK_WORD lane.
                 _ => 1,
             },
@@ -278,9 +291,29 @@ pub fn open_pattern(n_rows: u64, seed: u64) -> Result<u64, i32> {
     })
 }
 
+/// Create a row-store resource from the deterministic generator (abi.md §11).
+pub fn open_rowstore(n_rows: u64, seed: u64) -> Result<u64, i32> {
+    let store = RowStore::generate(n_rows, seed).ok_or(LGJ_ERR_LENGTH_OVERFLOW)?;
+    insert(ResourceEntry {
+        kind: LGJ_RESOURCE_ROWSTORE,
+        epoch: next_epoch(),
+        n_rows,
+        parent: 0,
+        parent_gen: 0,
+        payload: Payload::RowStore(store),
+    })
+}
+
 /// Create a mask over `parent`, all bits `0` or all bits `1`.
+///
+/// A mask's parent may be a pattern OR a row store — both are read-only
+/// row-shaped resources, and a mask is a row selection over either. A mask
+/// over a mask stays rejected.
 pub fn create_mask(parent_handle: u64, initial: u32) -> Result<u64, i32> {
-    let parent = resolve_kind(parent_handle, LGJ_RESOURCE_PATTERN)?;
+    let parent = resolve(parent_handle)?;
+    if !matches!(parent.kind, LGJ_RESOURCE_PATTERN | LGJ_RESOURCE_ROWSTORE) {
+        return Err(LGJ_ERR_WRONG_RESOURCE_KIND);
+    }
     let n_rows = parent.n_rows;
     let n_words = usize::try_from(mask_words_for(n_rows)).map_err(|_| LGJ_ERR_LENGTH_OVERFLOW)?;
 
@@ -484,6 +517,40 @@ mod tests {
         assert_eq!(create_mask(m, 0).unwrap_err(), LGJ_ERR_WRONG_RESOURCE_KIND);
         close(m).unwrap();
         close(p).unwrap();
+    }
+
+    #[test]
+    fn rowstore_opens_and_describes_itself() {
+        let h = open_rowstore(70, 3).unwrap();
+        let e = resolve_kind(h, LGJ_RESOURCE_ROWSTORE).unwrap();
+        let info = e.info();
+        assert_eq!(info.kind, LGJ_RESOURCE_ROWSTORE);
+        assert_eq!(info.lane_count, ROWSTORE_LANE_COUNT);
+        assert_eq!(info.n_rows, 70);
+        assert!(e.rowstore().is_some());
+        assert!(e.fixture().is_none());
+        close(h).unwrap();
+    }
+
+    /// A mask parents onto a row store exactly as onto a pattern — same
+    /// row-count sizing, same tail rule, same parent-liveness propagation.
+    #[test]
+    fn mask_over_rowstore_works_and_tracks_parent_liveness() {
+        let s = open_rowstore(70, 1).unwrap();
+        let m = create_mask(s, LGJ_MASK_INIT_ALL).unwrap();
+        {
+            let e = resolve(m).unwrap();
+            let g = e.read_mask().unwrap();
+            assert_eq!(g.words.len(), 2);
+            assert_eq!(g.words[1], 0x3F, "tail past row 70 must be zero");
+        }
+        assert!(resolve_mask_with_parent(m).is_ok());
+        close(s).unwrap();
+        assert_eq!(
+            resolve_mask_with_parent(m).unwrap_err(),
+            LGJ_ERR_PARENT_CLOSED
+        );
+        close(m).unwrap();
     }
 
     /// Locking distinct masks in address order must not deadlock regardless of

@@ -8,6 +8,26 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #4 — Phase I synthesis docs + fusion re-run + board hygiene (merged 2026-08-17, squash `bd92c58`)
+
+- **Added:** `docs/{architecture,panama,valhalla-lab,execution-boundary}.md`
+  (D-LGJ-I DONE — synthesis, each claim tied to its proving artifact);
+  the fusion-sweep 256-row re-run (`RESULTS.md` rewritten from
+  `jmh-results-merged.csv`, `TABLES.md` mechanically generated from the
+  same file); refreshed Valhalla lab result files (findings unchanged).
+- **Locked:** the fusion self-correction — "fused ≈ unfused" was true
+  only at 65,536 rows; at 256 rows × 8 predicates unfused/fused = 2.99×.
+  The `MultiLaneColumn` decision
+  (`E-LGJ-SIMD-SOA-IS-FOR-THE-ROW-STORE-NOT-THE-FLAT-LANES-1`): declined
+  for flat lanes, earmarked for the 512-byte row-store slice; operator
+  layout reference (64K × 512 B, 32 × (4 B classid + 12 B)) recorded.
+- **Deferred:** `NodeRow`/`WideFieldMask` wiring (unchanged);
+  `MultiLaneColumn` adoption gated on that slice.
+- **Docs:** the four docs ARE the deliverable; board updated in-commit,
+  incl. this file's #1-#3 backfill (lapse owned above).
+- **Confidence:** High — docs-only + measured data; both bot reviewers
+  (cursor, codex) hit usage limits and did not run.
+
 ## PR #3 — Vector API bench: real JMH, cross-checked (merged 2026-08-17, squash)
 
 - **Added:** `bench/` — real JMH 1.37 suite (Components A/B/C/E:

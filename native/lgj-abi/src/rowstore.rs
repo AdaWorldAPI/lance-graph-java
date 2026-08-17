@@ -1,0 +1,292 @@
+//! The SoA row store — the lance-graph-shaped substrate (abi.md §11).
+//!
+//! Where [`crate::fixture`] proved the membrane over three flat lanes, this
+//! module carries the layout the whole stack actually converges on — the
+//! operator-stated reference (2026-08-17): **64K rows × 512 bytes per row,
+//! read as 32 lanes of 16 bytes each: a 4-byte little-endian classid plus a
+//! 12-byte payload** (the lance-graph V3 content-blind facet). The Java side
+//! may lay its *view* out differently; these bytes are the substrate truth.
+//!
+//! # One buffer, two readings, zero copies
+//!
+//! The store is ONE `Arc<[u8]>` of `n_rows * 512` bytes. Everything else is a
+//! *reading* of those bytes, never a copy:
+//!
+//! - **Row reading** — row `r` is bytes `r*512 .. (r+1)*512`; facet `f` of
+//!   row `r` is the 16 bytes at `r*512 + f*16`, its classid the leading LE
+//!   `u32`. This is what `iter_u8x64`/`iter_u32x16`-style chunk scans and
+//!   Java's structured `MemoryLayout` both address.
+//! - **Facet-lane reading** — classid lane `f` is a strided `u32` column:
+//!   `first_offset = f*16`, `stride = 512`, `count = n_rows`. This is what
+//!   [`crate::abi::LgjLaneDesc::stride_bytes`] has described since ABI 0.1 —
+//!   the descriptor anticipated this module.
+//!
+//! `Arc<[u8]>` is the deliberate carrier: its heap buffer never moves for the
+//! Arc's whole life (the §4 allocation-stability guarantee), a clone is a
+//! refcount bump (the kernels wrap the same bytes in an
+//! `ndarray::simd::MultiLaneColumn` without copying), and shared immutable
+//! ownership is exactly the one-writer-per-resource concurrency shape the
+//! 64K-mailbox model wants.
+//!
+//! # Alignment (stated honestly)
+//!
+//! Rows are 512-byte *strided* within the buffer, but the buffer's base is
+//! only `u8`-aligned — `Arc<[u8]>` cannot promise more on stable Rust.
+//! Nothing in this slice needs more: Panama reads are alignment-agnostic
+//! (`ValueLayout.JAVA_INT_UNALIGNED` exists precisely for this), and every
+//! `ndarray::simd` load goes through `from_array`-style register fills. The
+//! 64-byte-aligned guarantee arrives with the real `NodeRow`
+//! (`#[repr(C, align(64))]`) wiring, not here.
+
+/// Bytes per row: 32 facets × 16 bytes.
+pub const ROW_BYTES: u64 = 512;
+/// Facet lanes per row.
+pub const ROW_FACETS: u32 = 32;
+/// Bytes per facet: 4-byte classid + 12-byte payload.
+pub const FACET_BYTES: u64 = 16;
+/// The classid is the facet's leading little-endian `u32`.
+pub const FACET_CLASSID_BYTES: u64 = 4;
+/// Classid cardinality the generator produces: `0..16` (same recipe as the
+/// flat fixture, so predicates select the same middling fraction).
+pub const ROWSTORE_CLASS_CARDINALITY: u64 = 16;
+
+/// Lane id of the raw whole-buffer lane (`U8`, contiguous, `n_rows * 512`
+/// elements).
+pub const LANE_RAW: u32 = 0;
+/// Lane id of facet `f`'s classid lane is `LANE_FACET_BASE + f`.
+pub const LANE_FACET_BASE: u32 = 1;
+/// Total describable lanes: 1 raw + 32 facet classid lanes.
+pub const ROWSTORE_LANE_COUNT: u32 = 1 + ROW_FACETS;
+
+use std::sync::Arc;
+
+use crate::fixture::SplitMix64;
+
+/// The SoA row store: one shared, immutable, address-stable byte buffer.
+///
+/// # The generation algorithm — NORMATIVE
+///
+/// Like [`crate::fixture::Fixture`], the Java parity test recomputes
+/// expectations from this description alone, so it is a contract:
+///
+/// ```text
+/// rng = SplitMix64(seed)                  // state = seed, no warm-up draws
+/// for row in 0 .. n_rows:                 // ascending
+///     for facet in 0 .. 32:               // ascending within the row
+///         a = rng.next_u64()              // FIRST draw of the facet
+///         b = rng.next_u64()              // SECOND draw of the facet
+///         base = row*512 + facet*16
+///         bytes[base    .. base+4 ]  = le32( (a >>> 33) & 0xF )   // classid
+///         bytes[base+4  .. base+12]  = le64( b )                  // payload
+///         bytes[base+12 .. base+16]  = le32( a & 0xFFFFFFFF )     // payload
+/// ```
+///
+/// Two draws per facet, `a` before `b`, 64 draws per row. The classid recipe
+/// `(a >>> 33) & 0xF` is byte-identical to the flat fixture's class lane, so
+/// a classid predicate selects the same ≈1/16 fraction here.
+pub struct RowStore {
+    /// Logical row count.
+    pub n_rows: u64,
+    /// The seed the buffer was generated from.
+    pub seed: u64,
+    bytes: Arc<[u8]>,
+}
+
+impl std::fmt::Debug for RowStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RowStore")
+            .field("n_rows", &self.n_rows)
+            .field("seed", &self.seed)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RowStore {
+    /// Build the store. Allocates the buffer exactly once.
+    ///
+    /// Returns `None` if `n_rows * 512` overflows or cannot be allocated
+    /// (the caller maps that to `LENGTH_OVERFLOW` / `ALLOCATION_FAILED`).
+    pub fn generate(n_rows: u64, seed: u64) -> Option<Self> {
+        let n = usize::try_from(n_rows).ok()?;
+        let byte_len = n.checked_mul(ROW_BYTES as usize)?;
+
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(byte_len).ok()?;
+        bytes.resize(byte_len, 0u8);
+
+        let mut rng = SplitMix64::new(seed);
+        for row in 0..n {
+            for facet in 0..ROW_FACETS as usize {
+                let a = rng.next_u64();
+                let b = rng.next_u64();
+                let base = row * ROW_BYTES as usize + facet * FACET_BYTES as usize;
+                let classid = ((a >> 33) & (ROWSTORE_CLASS_CARDINALITY - 1)) as u32;
+                bytes[base..base + 4].copy_from_slice(&classid.to_le_bytes());
+                bytes[base + 4..base + 12].copy_from_slice(&b.to_le_bytes());
+                bytes[base + 12..base + 16].copy_from_slice(&(a as u32).to_le_bytes());
+            }
+        }
+
+        Some(Self {
+            n_rows,
+            seed,
+            bytes: Arc::from(bytes),
+        })
+    }
+
+    /// The whole buffer as a byte slice. Zero-copy; the address is stable for
+    /// the store's life (see the module header).
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// A cheap shared handle to the same bytes — what the kernels wrap in a
+    /// `MultiLaneColumn` without copying.
+    pub fn bytes_arc(&self) -> Arc<[u8]> {
+        Arc::clone(&self.bytes)
+    }
+
+    /// The classid of facet `facet` in row `row` — the scalar (one-element)
+    /// read, used by tests and the scalar reference kernels. Bulk access goes
+    /// through the lanes, never through a loop over this.
+    pub fn classid_at(&self, row: u64, facet: u32) -> u32 {
+        let base = (row * ROW_BYTES + facet as u64 * FACET_BYTES) as usize;
+        u32::from_le_bytes([
+            self.bytes[base],
+            self.bytes[base + 1],
+            self.bytes[base + 2],
+            self.bytes[base + 3],
+        ])
+    }
+
+    /// `(base address, len_elems, elem_kind, stride_bytes, contiguous)` for a
+    /// lane id, or `None` for an out-of-range id (⇒ `INVALID_LANE`).
+    pub fn lane_raw(&self, lane_id: u32) -> Option<(u64, u64, crate::abi::LgjElemKind, u32, bool)> {
+        use crate::abi::LgjElemKind;
+        if lane_id == LANE_RAW {
+            return Some((
+                self.bytes.as_ptr() as u64,
+                self.bytes.len() as u64,
+                LgjElemKind::U8,
+                1,
+                true,
+            ));
+        }
+        let facet = lane_id.checked_sub(LANE_FACET_BASE)?;
+        if facet >= ROW_FACETS {
+            return None;
+        }
+        // Classid lane f: strided u32 column at first_offset f*16, stride 512.
+        let addr = self.bytes.as_ptr() as u64 + facet as u64 * FACET_BYTES;
+        Some((addr, self.n_rows, LgjElemKind::U32, ROW_BYTES as u32, false))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generation_is_deterministic_and_seed_sensitive() {
+        let a = RowStore::generate(64, 42).unwrap();
+        let b = RowStore::generate(64, 42).unwrap();
+        let c = RowStore::generate(64, 43).unwrap();
+        assert_eq!(a.as_bytes(), b.as_bytes());
+        assert_ne!(a.as_bytes(), c.as_bytes());
+    }
+
+    /// The normative algorithm, recomputed independently from the doc-comment
+    /// description (a transcription, exactly what the Java test will do).
+    #[test]
+    fn the_documented_generator_is_the_actual_generator() {
+        let n = 5u64;
+        let seed = 0xABCD;
+        let store = RowStore::generate(n, seed).unwrap();
+
+        let mut rng = SplitMix64::new(seed);
+        for row in 0..n {
+            for facet in 0..ROW_FACETS {
+                let a = rng.next_u64();
+                let b = rng.next_u64();
+                let expect_class = ((a >> 33) & 0xF) as u32;
+                assert_eq!(store.classid_at(row, facet), expect_class);
+                let base = (row * ROW_BYTES + facet as u64 * FACET_BYTES) as usize;
+                assert_eq!(&store.as_bytes()[base + 4..base + 12], &b.to_le_bytes());
+                assert_eq!(
+                    &store.as_bytes()[base + 12..base + 16],
+                    &(a as u32).to_le_bytes()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_buffer_is_exactly_n_times_512_bytes() {
+        for n in [0u64, 1, 7, 64] {
+            let s = RowStore::generate(n, 1).unwrap();
+            assert_eq!(s.as_bytes().len() as u64, n * ROW_BYTES);
+            // …which is always a multiple of 64: the MultiLaneColumn
+            // precondition holds BY CONSTRUCTION, never by luck.
+            assert_eq!(s.as_bytes().len() % 64, 0);
+        }
+    }
+
+    #[test]
+    fn lane_map_covers_raw_plus_32_facets_and_nothing_else() {
+        let s = RowStore::generate(16, 9).unwrap();
+        let (addr0, len0, kind0, stride0, contig0) = s.lane_raw(LANE_RAW).unwrap();
+        assert_eq!(addr0, s.as_bytes().as_ptr() as u64);
+        assert_eq!(len0, 16 * ROW_BYTES);
+        assert_eq!(kind0, crate::abi::LgjElemKind::U8);
+        assert_eq!(stride0, 1);
+        assert!(contig0);
+
+        for f in 0..ROW_FACETS {
+            let (addr, len, kind, stride, contig) = s.lane_raw(LANE_FACET_BASE + f).unwrap();
+            assert_eq!(addr, s.as_bytes().as_ptr() as u64 + f as u64 * FACET_BYTES);
+            assert_eq!(len, 16);
+            assert_eq!(kind, crate::abi::LgjElemKind::U32);
+            assert_eq!(stride, ROW_BYTES as u32);
+            assert!(!contig);
+        }
+        assert!(s.lane_raw(LANE_FACET_BASE + ROW_FACETS).is_none());
+        assert!(s.lane_raw(u32::MAX).is_none());
+    }
+
+    /// Classids must use their full 0..16 range in every facet lane — a
+    /// constant lane would make every classid predicate vacuous.
+    #[test]
+    fn every_facet_lane_uses_the_full_classid_range() {
+        let s = RowStore::generate(4096, 7).unwrap();
+        for facet in [0u32, 1, 15, 31] {
+            let mut seen = [false; 16];
+            for row in 0..s.n_rows {
+                let c = s.classid_at(row, facet);
+                assert!(c < 16);
+                seen[c as usize] = true;
+            }
+            assert!(
+                seen.iter().all(|&x| x),
+                "facet {facet} must hit all 16 classids at n=4096"
+            );
+        }
+    }
+
+    #[test]
+    fn addresses_are_stable_across_reads() {
+        let s = RowStore::generate(32, 3).unwrap();
+        let first = s.lane_raw(LANE_FACET_BASE + 5).unwrap().0;
+        for _ in 0..100 {
+            assert_eq!(s.lane_raw(LANE_FACET_BASE + 5).unwrap().0, first);
+        }
+        // And the Arc handle shares, never copies.
+        assert_eq!(s.bytes_arc().as_ptr(), s.as_bytes().as_ptr());
+    }
+
+    #[test]
+    fn zero_rows_is_legal_and_empty() {
+        let s = RowStore::generate(0, 1).unwrap();
+        assert!(s.as_bytes().is_empty());
+        assert_eq!(s.lane_raw(LANE_FACET_BASE).unwrap().1, 0);
+    }
+}

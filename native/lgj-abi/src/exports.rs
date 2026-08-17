@@ -104,6 +104,40 @@ pub unsafe extern "C" fn lgj_pattern_open(n_rows: u64, seed: u64, out_handle: *m
     })
 }
 
+/// Build the deterministic SoA **row store** (abi.md §11) and return its
+/// handle: `n_rows × 512` bytes, 32 facets of (4-byte LE classid + 12-byte
+/// payload) per row. ABI minor ≥ 2.
+///
+/// Bulk by construction; the generation algorithm is normative — see
+/// [`crate::rowstore::RowStore`]. Lanes: `0` = the raw `U8` buffer
+/// (contiguous), `1..=32` = per-facet classid lanes (`U32`, stride 512).
+/// # Safety
+///
+/// A null pointer is *handled*, not UB: it returns `NULL_ARGUMENT`. Beyond
+/// that, `out_handle` must be a valid, aligned, writable `u64`. Written only
+/// on success.
+///
+/// `unsafe` here is a note to Rust callers linking the `rlib`. The JVM,
+/// which is the real caller, has no such concept — it upholds the same
+/// contract by construction, because every pointer it passes comes from a
+/// `MemorySegment` whose size and alignment it derived from the manifest.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_rowstore_open(n_rows: u64, seed: u64, out_handle: *mut u64) -> i32 {
+    guard(|| {
+        if out_handle.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        match registry::open_rowstore(n_rows, seed) {
+            Ok(h) => {
+                // SAFETY: non-null (checked above); written only on success.
+                unsafe { *out_handle = h };
+                LGJ_OK
+            }
+            Err(e) => e,
+        }
+    })
+}
+
 /// Free a resource: its lanes are dropped, its generation is bumped, and its
 /// children begin failing with `PARENT_CLOSED`.
 ///
@@ -145,12 +179,15 @@ pub unsafe extern "C" fn lgj_resource_info(handle: u64, out: *mut LgjResourceInf
 // Lanes
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Describe one lane of a **pattern**: `0 = ids (U64)`, `1 = classes (U32)`,
-/// `2 = values (I32)`.
+/// Describe one lane of a **pattern** (`0 = ids (U64)`, `1 = classes (U32)`,
+/// `2 = values (I32)`) or of a **row store** (`0 = raw U8 buffer,
+/// contiguous; 1..=32 = facet classid lanes, U32, stride 512` — the strided
+/// case `stride_bytes` existed for since ABI 0.1).
 ///
-/// All pattern lanes are `READABLE | CONTIGUOUS` and never `WRITABLE`
-/// (abi.md §7). The returned `addr` is stable until `lgj_close` — lanes are
-/// allocated once and never moved or resized (§4).
+/// All these lanes are `READABLE` and never `WRITABLE` (abi.md §7); the
+/// contiguous flag is set exactly when `stride_bytes == elem_bytes`. The
+/// returned `addr` is stable until `lgj_close` — buffers are allocated once
+/// and never moved or resized (§4).
 /// # Safety
 ///
 /// A null pointer is *handled*, not UB: it returns `NULL_ARGUMENT`. Beyond
@@ -170,29 +207,53 @@ pub unsafe extern "C" fn lgj_lane_describe(
         if out.is_null() {
             return LGJ_ERR_NULL_ARGUMENT;
         }
-        let entry = match registry::resolve_kind(handle, LGJ_RESOURCE_PATTERN) {
+        let entry = match registry::resolve(handle) {
             Ok(e) => e,
             Err(e) => return e,
         };
-        let fixture = match entry.fixture() {
-            Some(f) => f,
-            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
-        };
-        let (addr, len_elems, kind) = match fixture.lane_raw(lane_id) {
-            Some(t) => t,
-            None => return LGJ_ERR_INVALID_LANE,
-        };
+        // (addr, len_elems, kind, stride_bytes, contiguous) — patterns are
+        // always contiguous; a row store's facet lanes are the strided case.
+        let (addr, len_elems, kind, stride_bytes, contiguous) =
+            if let Some(fixture) = entry.fixture() {
+                match fixture.lane_raw(lane_id) {
+                    Some((a, n, k)) => (a, n, k, k.elem_bytes(), true),
+                    None => return LGJ_ERR_INVALID_LANE,
+                }
+            } else if let Some(store) = entry.rowstore() {
+                match store.lane_raw(lane_id) {
+                    Some(t) => t,
+                    None => return LGJ_ERR_INVALID_LANE,
+                }
+            } else {
+                // A mask: its word lane is described by lgj_mask_describe.
+                return LGJ_ERR_WRONG_RESOURCE_KIND;
+            };
         let elem_bytes = kind.elem_bytes();
+        let mut flags = LGJ_FLAG_READABLE;
+        if contiguous {
+            flags |= LGJ_FLAG_CONTIGUOUS;
+        }
+        // Exact covered span: from the lane's base to the END of its LAST
+        // element — `(len-1)*stride + elem_bytes`. For a contiguous lane this
+        // is `len * elem_bytes` exactly as before; for a strided facet lane it
+        // deliberately does NOT round up to `len * stride`, because a facet
+        // lane's base sits `facet*16` into the buffer and a full-stride final
+        // window would let Java bound a segment past the allocation's end.
+        let byte_len = if len_elems == 0 {
+            0
+        } else {
+            (len_elems - 1) * stride_bytes as u64 + elem_bytes as u64
+        };
         let desc = LgjLaneDesc {
             addr,
             len_elems,
-            byte_len: len_elems * elem_bytes as u64,
+            byte_len,
             owner: handle,
             epoch: entry.epoch,
             elem_kind: kind as u32,
             elem_bytes,
-            stride_bytes: elem_bytes,
-            flags: crate::fixture::Fixture::lane_flags(),
+            stride_bytes,
+            flags,
         };
         // SAFETY: non-null; `LgjLaneDesc` is `#[repr(C)]`, 56 bytes, and that
         // size is asserted at compile time and reported by the manifest.
@@ -541,6 +602,111 @@ pub extern "C" fn lgj_op_gt_i32(res: u64, lane_id: u32, threshold: i32, dst_mask
             n_rows,
             &mut g.words,
         ))
+    })
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Row-store bulk predicates (ABI minor ≥ 2)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// One crossing: **overwrites** `dst_mask` with the row mask
+/// `classid(facet, row) == needle` over a row store's facet lane.
+///
+/// `facet` is the facet index `0..32`, NOT a lane id (lane id = facet + 1).
+/// The resulting mask is an ordinary mask resource: it composes with
+/// `lgj_mask_and`/`or`, counts with `lgj_mask_count`, and its words are
+/// directly readable/writable through `lgj_mask_describe` — the whole
+/// existing mask algebra applies unchanged to row stores.
+#[no_mangle]
+pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask: u64) -> i32 {
+    guard(|| {
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        if facet >= crate::rowstore::ROW_FACETS {
+            return LGJ_ERR_INVALID_LANE;
+        }
+        let (mask, _parent) = match registry::resolve_mask_with_parent(dst_mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        if mask.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let mut g = match mask.write_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        kernels::simd_rowstore_classid_mask(
+            store.as_bytes(),
+            facet as usize * crate::rowstore::FACET_BYTES as usize,
+            store_entry.n_rows as usize,
+            needle,
+            &mut g.words,
+        );
+        clear_tail_bits(&mut g.words, store_entry.n_rows);
+        LGJ_OK
+    })
+}
+
+/// One crossing: for every row, which of its 32 facets carry `needle` as
+/// classid — one `u32` bitset per row, written into the **caller's** buffer
+/// (a Java-arena segment of `n_rows` ints; zero-copy out, nothing
+/// serialized).
+///
+/// `out_len_elems` is the capacity of `out` in `u32` elements; it must be at
+/// least the store's row count or the call fails with `MASK_LENGTH_MISMATCH`
+/// before anything is written. The first `n_rows` elements are fully
+/// overwritten; elements past `n_rows` are untouched.
+/// # Safety
+///
+/// A null pointer is *handled*, not UB: it returns `NULL_ARGUMENT`. Beyond
+/// that, `out` must point to at least `out_len_elems` writable, 4-byte-aligned
+/// `u32`s (Java passes a segment it allocated with that layout).
+///
+/// `unsafe` here is a note to Rust callers linking the `rlib`. The JVM,
+/// which is the real caller, has no such concept — it upholds the same
+/// contract by construction, because every pointer it passes comes from a
+/// `MemorySegment` whose size and alignment it derived from the manifest.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_row_facet_match(
+    res: u64,
+    needle: u32,
+    out: *mut u32,
+    out_len_elems: u64,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let n_rows = store_entry.n_rows;
+        if out_len_elems < n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let n = match usize::try_from(n_rows) {
+            Ok(n) => n,
+            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+        };
+        // SAFETY: non-null (checked), and the caller guarantees at least
+        // `out_len_elems >= n_rows` writable u32s at `out` — Java passes a
+        // segment whose element count it allocated. The slice is built over
+        // exactly the prefix this call overwrites.
+        let out_slice = unsafe { std::slice::from_raw_parts_mut(out, n) };
+        kernels::simd_rowstore_facet_match(&store.bytes_arc(), n, needle, out_slice);
+        LGJ_OK
     })
 }
 

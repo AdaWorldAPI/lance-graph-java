@@ -28,3 +28,16 @@ and D-LGJ-G are the only rows still open; they are deliberately NOT blocking
 PR #1 (the core slice is independently complete and green) and will land as
 their own PR once the Lab agent finishes and is reviewed with the same
 rigor.
+
+## lgj-soa-substrate-v1 — the lance-graph-shaped SoA substrate (2026-08-17)
+
+Plan: `.claude/plans/lgj-soa-substrate-v1.md`. The 512-byte row / 32-facet
+layout wired end to end. Doctrine: `E-LGJ-THE-MIDDLE-TIER-IS-DELETED-NOT-WRAPPED-1`.
+
+| D-id | Deliverable | Status |
+|---|---|---|
+| D-LGJ-W1 | ndarray: `MultiLaneColumn::iter_u32x16`/`len_u32x16` + `eq_u32_strided_to_mask` (W1a contract) | **DONE 2026-08-17** — ndarray PR #279; `simd_int_ops` 46/46 (5 new strided tests incl. two `should_panic` bounds/overflow arms + stride-4 parity against the contiguous primitive), `simd_soa` 15/15, full `simd` 263/263, doctests, clippy `-D warnings` + fmt clean |
+| D-LGJ-W2 | lgj-abi row store: `rowstore.rs`, `LGJ_RESOURCE_ROWSTORE`, `lgj_rowstore_open`, strided facet lanes through the unchanged `LgjLaneDesc`, `lgj_op_eq_classid`, `lgj_row_facet_match`, ABI minor 1→2, `docs/abi.md` §11 | **DONE 2026-08-17** — `cargo test` **84/84**, clippy/fmt clean, release build exports **18/18** symbols (`nm -D`). Parity: both kernels vs independent scalar references over 10 row counts × 2 seeds × 4 facets × 4 needles, cross-checked a THIRD way against `RowStore::classid_at`. Two-sided payload-vs-classid falsifier. End-to-end membrane test covers describe → predicate → mask algebra → count → facet-match → lifecycle |
+| D-LGJ-W3 | Java `RowStore` facade: structured `MemoryLayout`, minor-≥2 gate, `FacetMatchView`, parity test transcribing the generator | **NEXT** |
+| D-LGJ-W4 | Bench Component F: Vector API facet scan vs the crossing, on the REAL layout | Queued |
+| D-LGJ-W5 | Three consumer examples (trades / bricks / graph) — one plan file each | Planned, gated on W3 |
