@@ -1,0 +1,91 @@
+Picked up JAVA_TOOL_OPTIONS: 
+lance-graph-java :: valhalla lab
+platform                                     stable
+java.vm.version                              26.0.2+10-55
+java.vendor.version                          -
+jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so]
+
+== (a) SEMANTIC TRUTH ? is identity observable? ==============================
+platform                                     stable ? stable-record vocabulary; arrays are reference arrays; fields are references
+LaneId.class.isValue()                       false
+Ordinal.class.isValue()                      false
+MaskId.class.isValue()                       false
+RowRange.class.isValue()                     false
+Row.class.isValue()                          false
+equal state => equals()                      true
+different state => !equals()                 true
+equal state => equal hashCode()              true
+equal state => equal toString()              true
+a == b  (reference equality)                 false
+identityHashCode(a) == identityHashCode(b)   false
+a local of this type accepts null            true
+array kind                                   LaneId[]
+array flatness                               UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+array slot accepts null                      true
+synchronized(x) legality                     legal but never used by the production API
+
+== FLATTENING CLIFF ? which payload shapes does the VM flatten? ==============
+platform                                     stable
+note                                         payload = declared field bytes, ignoring any header
+LaneId     1 int            payload= 4 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+Ordinal    1 int            payload= 4 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+MaskId     1 long           payload= 8 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+RowRange   2 long           payload=16 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+Row        1 long + 2 int   payload=16 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+
+== (b)/(c) REPRESENTATION ? allocation, arrays, fields, arguments ============
+platform                                     stable
+allocation instrument baseline               0 B
+N (operations per measurement)               1000000
+construct N LaneId, store into array         15.26 MiB
+  ... per LaneId                             16.00 B
+construct N LaneId, never escaping           6.71 MiB
+  ... per LaneId                             7.03 B
+LaneId[1024] flatness                        UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+allocate+fill LaneId[N] (array + elements)   19.07 MiB
+  ... per element                            20.00 B
+bare LaneId[N] with no elements stored       3.81 MiB
+  ... per slot                               4.00 B
+Descriptor kind                              identity class with two reference fields
+Descriptor fields null-restricted            false
+construct N Descriptor (2 wrappers each)     53.41 MiB
+  ... per Descriptor                         56.00 B
+pass 2 wrappers through 3 call levels        7.90 MiB
+  ... per call                               8.29 B
+read 65,536 LaneId from array                  median=   44182.0 ns  [min    41690.0 .. max    59914.0]  n=51
+native runtime                               lance-graph native runtime: abi 0.1, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
+
+== FFM ADDRESSING ? is the wrapper free where it touches native memory? ======
+platform                                     stable
+sum (identical across all three)             6929623
+bare long index                                median=   59148.0 ns  [min    59077.0 .. max   114952.0]  n=51
+RowRange bounds (wrapper hoisted)              median=   47952.0 ns  [min    47759.0 .. max    65535.0]  n=51
+per-element wrapper: bytes allocated         1.00 MiB
+  ... per element                            16.00 B
+Ordinal built per element                      median=   50062.0 ns  [min    49790.0 .. max    61194.0]  n=51
+
+== THE THESIS ? 65,536 entities, three representations =======================
+platform                                     stable
+rows                                         65536
+question                                     count(class==7 AND value>100) and sum(value)
+answer (identical across all paths)          2173 rows, sum 499246
+selectivity                                  3.32%
+
+==   heap cost ===============================================================
+(1) native ? Java bytes allocated (warm)     816 B  per query, for the fluent chain itself
+(1) native ? Java objects per row            0
+(1) native ? native lane bytes               1.00 MiB  (u64 id + u32 class + i32 value)
+(1) native ? mask bytes                      8.0 KiB  (1 bit per row, packed)
+(2)/(3) hydrate 65536 Row ? allocated        2.00 MiB
+        ... per row                          32.00 B
+        array flatness                       UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+        ratio vs native lane bytes           2.00x
+        retained heap (APPROX, gc-delta)     2.25 MiB
+
+==   time to answer the question =============================================
+(1) native  one crossing, fused plan           median=   16378.0 ns  [min    15962.0 .. max    33819.0]  n=51
+(2/3) hydrate 65536 Row objects                median=  603139.0 ns  [min   529172.0 .. max  5246059.0]  n=51
+(2/3) scan the materialised objects            median=  151886.0 ns  [min   112687.0 .. max   201271.0]  n=51
+(2/3) hydrate THEN scan (honest total)         median=  788227.0 ns  [min   710221.0 .. max  1146017.0]  n=51
+
+lab complete.

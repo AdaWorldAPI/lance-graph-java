@@ -4,6 +4,57 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-17 — E-LGJ-VALHALLA-MEASURED-NOT-ASSUMED-1
+
+**Status:** FINDING. **Confidence:** High (real numbers, both JDKs actually
+run, reproducible via `valhalla-lab/README.md`).
+
+The mandatory N-objects-vs-N-values-vs-1-lane experiment
+(`.claude/knowledge/valhalla-three-truths-method.md`'s "one experiment that
+must never be skipped") ran on both real JDKs. Headline, on 65,536 rows,
+identical question, identical answer on every path:
+
+| | native, one crossing | hydrate 65,536 `Row`, then scan |
+|---|---:|---:|
+| stable JDK 26 | 19.5 µs, 289 KiB | 746 µs, 2.00 MiB |
+| Valhalla JDK 27 EA | 15.7 µs, 289.5 KiB | 900 µs, 2.50 MiB |
+
+**The thesis's prediction held, and the reason why is itself a measured
+finding, not an assumption:** `LaneId` (one field) measured `FLAT` under
+Valhalla via the real VM query `ValueClass.isFlatArray` (2.90 B/element vs
+16.00 B on stable — ~5.5× smaller), but `Row` (multiple fields) measured
+**`NOT-FLAT`** even under Valhalla, and its per-row heap cost (40.01 B) was
+*larger* than the stable JDK's own record-array cost (32.01 B). Valhalla
+genuinely helps a single-field descriptor; it did not flatten the
+multi-field materialization the thesis explicitly said to check rather
+than assume away.
+
+**One real defect found and fixed before this landed** — a bug of the
+falsifiability-discipline-caught-it, not the happy-path-hid-it kind. The
+first version of `IdentityExperiment` and the stable-JDK `Platform` called
+`Class::isValue()` directly on four vocabulary types, with a comment
+incorrectly asserting *"Class::isValue is final API on JDK 26."* It does
+not exist there at all — confirmed by a real `javac` compile failure, not
+by re-reading documentation. Fixed by routing every identity query through
+`Platform.isValueClass(Class<?>)`: the stable half answers `false`
+honestly (a JDK with no value-class concept can never produce one — the
+answer is exact, not a guess, unlike the genuinely-unknowable
+`arrayFlatness` case the same file already handles correctly), the
+Valhalla half answers with the real `type.isValue()`. The correction
+mirrors `E-LGJ-CORE-SLICE-GREEN-DISABLE-VERIFIED-1`'s finding about
+`kernels.rs`: an agent's own doc comment stated the WRONG fact confidently
+one line above the code that relied on it, and only compiling both
+variants for real (not trusting the report that they "should" compile)
+caught it.
+
+**Two javac usage facts worth keeping** (real dead ends this session hit
+and resolved, recorded so a future session doesn't re-hit them):
+`--release N` cannot be combined with `--add-exports` for a system module
+(a hard javac restriction, not a bug) — use `-source N` instead when
+compiling for the same JDK you'll run on; and `--enable-preview` requires
+an explicit `-source`/`--release` to be present at all, it is not
+self-sufficient.
+
 ## 2026-08-17 — E-LGJ-CORE-SLICE-GREEN-DISABLE-VERIFIED-1
 
 **Status:** FINDING. **Confidence:** High (measured, not asserted — every

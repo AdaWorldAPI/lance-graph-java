@@ -1,0 +1,4 @@
+Picked up JAVA_TOOL_OPTIONS: 
+identity container FAILED: java.lang.VerifyError
+  All strict final fields must be initialized before super(): 1 field(s), lane:LR1_NullRestrictedFieldInIdentityClass$LaneId; in R1_NullRestrictedFieldInIdentityClass$Descriptor
+value container:    LaneId[index=1]  (works)
