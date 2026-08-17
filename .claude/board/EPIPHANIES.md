@@ -4,6 +4,36 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-17 — E-LGJ-SIMD-SOA-IS-FOR-THE-ROW-STORE-NOT-THE-FLAT-LANES-1
+
+**Status:** DECISION (declined refactor, with the trigger for revisiting named).
+**Confidence:** High — decided by reading `ndarray/src/simd_soa.rs`'s full API, not by taste.
+
+Operator suggestion: "if you use SoA, calling simd_soa.rs would make sense" — should
+`native/lgj-abi/src/kernels.rs` route through `ndarray::simd_soa::MultiLaneColumn` (the canonical
+`Arc<[u8]>` SoA carrier) instead of raw `&[u32]`/`&[i32]` slices? **Answer: not for today's
+flat-lane fixture; yes for the future 512-byte row-store slice.** Two concrete API mismatches,
+not a style call:
+
+1. **No tail handling.** `MultiLaneColumn::new()` hard-requires `len % 64 == 0`; every `iter_*`
+   yields only full 64-byte chunks via `as_chunks::<64>()` — no remainder arm. The
+   `simd_int_ops` primitives this project consumes do the opposite by design: full 16-lane
+   groups + a scalar tail for arbitrary caller-chosen `n_rows`. Wrapping the fixture's lanes in
+   `MultiLaneColumn` would force 64-byte padding on every allocation, bought for nothing.
+2. **No `u32` lane.** `MultiLaneColumn` ships u8x64/f32x16/f64x8/u64x8/i32x16/i64x8 iterators —
+   no u32. The fixture's `ids`/`classes` are `u32` (`eq_u32_to_mask`).
+
+So `kernels.rs` already calls the correct layer: the `ndarray::simd_int_ops` primitives own their
+chunking internally. `MultiLaneColumn` sits *above* that layer, for uniform pre-padded columns.
+
+**Where it DOES fit — the operator-stated layout reference (recorded verbatim so it survives):**
+"the 64k x 512 bytes SoA layout is enforced everywhere in lance-graph (32 Lanes each 4 bytes
+classview+12 bytes). For Java the layout might differ — just for reference." A 512-byte,
+64-byte-aligned row store (32 × 16-byte V3 facets) is padded/aligned *by construction* — no tail
+problem — and each row is a natural `iter_u8x64` chunk-of-chunks. When the real
+`NodeRow`/facet slice replaces the generic fixture (`docs/abi.md` §10, `docs/architecture.md`
+"where a real graph slice would attach"), `MultiLaneColumn` is the type to reach for. Not before.
+
 ## 2026-08-17 — E-LGJ-VECTOR-API-BEATS-THE-CROSSING-1
 
 **Status:** FINDING. **Confidence:** High (real JMH 1.37, `Data.crossCheck()` guards every fork,

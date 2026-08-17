@@ -1,3 +1,27 @@
+## 2026-08-17 (later) — Phase I docs written, fusion re-run merged, simd_soa question answered (PR #4)
+
+- **All four synthesis docs shipped** (`docs/architecture.md`,
+  `docs/panama.md`, `docs/valhalla-lab.md`, `docs/execution-boundary.md`)
+  — D-LGJ-I DONE. Each cites the proving artifact instead of restating it.
+- **Fusion sweep re-run with a 256-row arm** (`./run.sh E_`): the first
+  pass's "fusion does nothing" (true at 65,536 rows, where kernel time
+  dominates) is false at small rows — unfused/fused grows 0.95× → 2.99×
+  at 256 rows × 8 predicates, because per-crossing overhead dominates
+  there. `RESULTS.md` rewritten from `jmh-results-merged.csv` (A/B/C from
+  the full sweep + E from the re-run), `TABLES.md` mechanically generated
+  from the same file. Valhalla lab result files refreshed by a same-box
+  re-run; findings unchanged.
+- **`MultiLaneColumn` question answered** (operator: "if you use SoA,
+  calling simd_soa.rs would make sense"): declined for the flat-lane
+  fixture (64-byte-multiple constraint + no u32 lane — two concrete API
+  mismatches), earmarked for the 512-byte row-store slice where it fits
+  by construction. Operator layout reference recorded: 64K × 512 B rows,
+  32 lanes × (4 B classid + 12 B), enforced everywhere in lance-graph;
+  Java-side layout may differ. See
+  `E-LGJ-SIMD-SOA-IS-FOR-THE-ROW-STORE-NOT-THE-FLAT-LANES-1`.
+- **PR_ARC_INVENTORY backfilled** for merged PRs #1-#3 (hygiene lapse
+  owned in the file itself).
+
 ## 2026-08-17 — D-LGJ-AUDIT complete, core vertical slice VERIFIED GREEN, PR #1 opened
 
 ### Current Contract Inventory — the vertical slice is real and green

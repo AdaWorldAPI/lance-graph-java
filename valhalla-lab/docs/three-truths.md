@@ -89,13 +89,13 @@ All figures per operation, `N = 1,000,000`.
 
 | measurement | stable | Valhalla | |
 |---|---:|---:|---|
-| construct a `LaneId`, store into an array | 16.00 B | **2.89 B** | 5.5× less |
-| construct a `LaneId`, never escaping | 7.03 B | 8.00 B | ~equal — escape analysis already handles this |
-| `LaneId[N]` array + elements, per element | 20.00 B | **6.89 B** | 2.9× less |
+| construct a `LaneId`, store into an array | 16.00 B | **3.29 B** | 4.9× less |
+| construct a `LaneId`, never escaping | 7.57 B | 7.64 B | ~equal — escape analysis already handles this |
+| `LaneId[N]` array + elements, per element | 20.00 B | **6.87 B** | 2.9× less |
 | bare `LaneId[N]`, per slot | 4.00 B | 4.00 B | equal (compressed oops vs flat int) |
-| construct a `Descriptor` (two wrappers) | 56.00 B | **38.84 B** | 1.4× less |
-| pass two wrappers through 3 call levels | 8.29 B | 10.45 B | ~equal |
-| **read 65,536 `LaneId` from an array** | 44,182 ns | **5,349 ns** | **8.3× faster** |
+| construct a `Descriptor` (two wrappers) | 56.00 B | **36.50 B** | 1.5× less |
+| pass two wrappers through 3 call levels | 9.33 B | 10.87 B | ~equal |
+| **read 65,536 `LaneId` from an array** | 43,739 ns | **5,339 ns** | **8.2× faster** |
 
 `LaneId[1024]` reports `FLAT` on Valhalla and `UNKNOWN` on stable — deliberately not `false`. A
 stable JDK has no `ValueClass.isFlatArray` to ask, so "the question does not exist here" is the
@@ -107,10 +107,10 @@ Re-running the Valhalla build with the VM's own flattening disabled:
 
 | | default | `-XX:-UseArrayFlattening` | `-XX:-UseFieldFlattening` |
 |---|---:|---:|---:|
-| `LaneId` array, per element | 6.89 B | 28.00 B | 6.71 B |
+| `LaneId` array, per element | 6.87 B | 28.00 B | 6.71 B |
 | `LaneId[1024]` flat? | FLAT | NOT-FLAT | FLAT |
-| read 65,536 from array | 5,349 ns | 47,469 ns | 5,303 ns |
-| `Descriptor`, per instance | 38.84 B | 40.51 B | 80.00 B |
+| read 65,536 from array | 5,339 ns | 47,469 ns | 5,303 ns |
+| `Descriptor`, per instance | 36.50 B | 40.51 B | 80.00 B |
 
 Turning array flattening off returns the array numbers to roughly the stable baseline and makes
 the read **8.9× slower**; turning field flattening off doubles the `Descriptor` cost and leaves
@@ -123,18 +123,38 @@ With `-XX:-DoEscapeAnalysis`, i.e. what the object model costs when the JIT cann
 
 | measurement | stable default | stable, no EA | Valhalla default | Valhalla, no EA |
 |---|---:|---:|---:|---:|
-| `LaneId` never escaping | 7.03 B | 16.00 B | 8.00 B | 25.60 B |
-| pass 2 wrappers, 3 levels | 8.29 B | 32.00 B | 10.45 B | 31.00 B |
-| **`Ordinal` built per element** (65,536 iterations) | 50,062 ns | **5,166,233 ns** | 50,021 ns | **94,346 ns** |
+| `LaneId` never escaping | 7.57 B | 16.00 B | 7.64 B | 25.60 B |
+| pass 2 wrappers, 3 levels | 9.33 B | 32.00 B | 10.87 B | 30.90 B |
+| **`Ordinal` built per element** (65,536 iterations) | 50,732 ns | **621,827 ns** | 49,851 ns | **91,383 ns** |
 
 That last row is the clearest single number in the lab. Unaided by escape analysis, building a
-one-`int` wrapper per element costs the stable JDK **103×**; it costs Valhalla **1.9×**. This is
-the concrete meaning of "the abstraction stops being something you pay for" — not that it is
-faster when the JIT can see through it, but that it stays cheap when the JIT cannot.
+one-`int` wrapper per element costs the stable JDK **12.3×** its own escape-analysed time; it
+costs Valhalla **1.8×**. Head to head with the JIT unable to help, Valhalla is **6.8× faster**.
+This is the concrete meaning of "the abstraction stops being something you pay for" — not that it
+is faster when the JIT can see through it, but that it stays cheap when the JIT cannot.
 
 Honesty about what this row is *not*: with escape analysis on — the configuration anyone actually
-ships — the two are indistinguishable at 50 µs. Valhalla's gain here is in **robustness**, not in
-peak. That distinction is easy to lose and worth keeping.
+ships — the two are indistinguishable (50.7 µs vs 49.9 µs, inside this harness's spread). Valhalla's
+gain here is in **robustness**, not in peak. That distinction is easy to lose and worth keeping.
+
+A measurement error worth recording rather than quietly fixing: an earlier draft of this table
+reported 5,166,233 ns for the stable no-EA cell, a 103× ratio. That run was executed while the
+JMH suite in `bench/` was saturating the same four vCPUs. The number was real and the conclusion
+it supported was the same, but it was inflated roughly 8× by contention. The table above is from a
+later, uncontended run.
+
+**The general warning that follows from it:** this lab shares a 4-vCPU container with whatever
+else is running. Every number in this document comes from one uncontended execution of `run.sh`,
+and re-running it moves the allocation figures by a few percent and the timing figures by more.
+Treat the *ratios and the order of magnitude* as the result and the third significant figure as
+noise — the byte counts that land on exact multiples of 8 (16.00, 20.00, 32.00, 40.00) are the
+stable ones, because those are object layouts rather than measurements of speed.
+
+One row in `valhalla-noea` illustrates the point loudly: `hydrate THEN scan` measured 25.8 ms
+median with a 6.1–39.2 ms spread on the final run, against 0.88 ms in the default configuration.
+A 30× median with a 6× spread is not a result about Valhalla; it is GC and a disabled optimiser
+interacting on a loaded box. It is left in `results/` rather than deleted, and it is not quoted as
+a finding anywhere.
 
 ### `-XX:±InlineTypePassFieldsAsArgs`
 
@@ -220,19 +240,21 @@ supports the thesis more strongly than the expected result would have.
 
 | | stable | Valhalla |
 |---|---:|---:|
-| **(1) native — one crossing, fused plan** | **16,378 ns** | **18,805 ns** |
-| (2/3) hydrate 65,536 `Row` objects | 603,139 ns | 768,624 ns |
-| (2/3) scan the materialised objects | 151,886 ns | 91,178 ns |
-| (2/3) hydrate **then** scan (honest total) | **788,227 ns** | **898,955 ns** |
+| **(1) native — one crossing, fused plan** | **16,040 ns** | **15,162 ns** |
+| (2/3) hydrate 65,536 `Row` objects | 1,612,494 ns | 658,842 ns |
+| (2/3) scan the materialised objects | 128,057 ns | 87,213 ns |
+| (2/3) hydrate **then** scan (honest total) | **704,743 ns** | **871,361 ns** |
 
 Medians of 51 iterations after 200–2,000 warm-up runs. Spreads are in `results/*.txt`; the
-hydration rows have long tails (stable max 5.2 ms) because they allocate 2 MiB per iteration and
-occasionally meet a GC, which is exactly why the median is reported.
+hydration rows have long tails (stable min 499 µs, max 4.8 ms) because they allocate 2 MiB per
+iteration and occasionally meet a GC, which is exactly why the median is reported and why the
+isolated-hydrate row should be read as "somewhere between 0.5 and 1.4 ms", not as a precise
+figure. The hydrate-then-scan row is the stable one and is the one to use.
 
-**Native is 48× faster than the honest object total on stable, 48× on Valhalla.** Note where
-Valhalla's one real win sits: *scanning* already-materialised objects is 1.7× faster (91 µs vs
-152 µs), because the scan is a read-only walk that benefits from better locality. It does not
-matter, because the hydration that had to happen first costs 8× what the scan saves.
+**Native is 44× faster than the honest object total on stable, 57× on Valhalla.** Note where
+Valhalla's one real win sits: *scanning* already-materialised objects is 1.5× faster (87 µs vs
+128 µs), because the scan is a read-only walk that benefits from better locality. It does not
+matter, because the hydration that had to happen first costs several times what the scan saves.
 
 That is the thesis, measured: the expensive thing is not *scanning* 65,536 objects, it is
 *existing* as 65,536 objects. Valhalla makes the scan cheaper and does not make the existing
@@ -252,9 +274,9 @@ entire program. No arena, no segment, no mask, no lane, no opcode, no row loop, 
    both object models; only the behaviours it was written to avoid differ. The migration is a
    one-word source change, and it stays that way because the lab did **not** bend the API to fit a
    preview VM (see `reproducers/README.md`).
-2. **Valhalla is a real win for the descriptor vocabulary.** 5.5× less allocation per `LaneId`,
-   8.3× faster array reads, and — the durable part — 103× → 1.9× when escape analysis cannot help.
-   A `LaneId` really does stop being something you pay for.
+2. **Valhalla is a real win for the descriptor vocabulary.** 4.9× less allocation per `LaneId`,
+   8.2× faster array reads, and — the durable part — 6.8× faster than the stable JDK once escape
+   analysis is out of the picture. A `LaneId` really does stop being something you pay for.
 3. **Valhalla does not rescue per-entity materialisation, and on this build it makes it worse.**
    40 B/row against 32 B/row, `NOT-FLAT`, because a 16-byte payload is over the VM's flattening
    budget. The expected finding was "it does not help"; the observed finding is "it costs 25 %
