@@ -8,6 +8,26 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #8 — Java RowStore facade: W3 shipped (merged 2026-08-17, squash `320808d`)
+
+- **Added:** `RowStore`/`FacetMatchView`/`FacetId`/`NativeResource` public
+  API; `Mask.source()` retyped `NativePattern → NativeResource`;
+  `RowStoreParityTest`/`RowStoreLifetimeTest` (53 new checks).
+- **Locked:** the wave-dispatch system works end to end — 3 disjoint
+  Sonnet workers, zero merge conflicts, mutually consistent signatures
+  with no coordination beyond the frozen briefs
+  (`E-LGJ-WAVE-DISPATCH-VALIDATED-1`).
+- **Deferred:** W4 (bench Component F) — the wave file's second dispatch.
+- **Docs:** `STATUS_BOARD` D-LGJ-W3 DONE; `LATEST_STATE`; EPIPHANIES entry
+  incl. an orchestrator-side false alarm (guessed env var name instead
+  of reading `Abi.java`'s `ENV_LIBRARY` constant) recorded so it isn't
+  repeated.
+- **Confidence:** High — 185/185 (was 132), 0 new lint warnings, one real
+  bug (`FacetMatchView.rowCount()` missing its closed-store guard) caught
+  by the mandated tests and fixed before merge, both disable-runs
+  red-then-green with the exact predicted blast radius. Bot reviewers at
+  usage limits, did not run.
+
 ## PR #7 — waves calcified: dispatch maps for every plan (merged 2026-08-17, squash `68f7add`)
 
 - **Added:** `.claude/waves/` — README (standing rules + verbatim worker
