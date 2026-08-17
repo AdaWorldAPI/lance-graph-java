@@ -64,3 +64,12 @@ com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.unfused,avgt,1,8,2.097204,0
 com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.unfused,avgt,1,8,31.789786,3.337085,us/op,4,65536
 com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.unfused,avgt,1,8,4.437382,0.204156,us/op,8,256
 com.adaworldapi.lancegraph.bench.E_FusionAndPlanning.unfused,avgt,1,8,60.967976,2.656815,us/op,8,65536
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.java_scalar,avgt,1,8,134.711904,13.870504,us/op,,4096
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.java_scalar,avgt,1,8,3354.401240,118.415079,us/op,,65536
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.java_scalar,avgt,1,8,82541.075065,3106.426103,us/op,,1048576
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.java_vectorApi,avgt,1,8,76.107543,5.315558,us/op,,4096
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.java_vectorApi,avgt,1,8,1674.064233,126.854113,us/op,,65536
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.java_vectorApi,avgt,1,8,69613.100438,1624.076656,us/op,,1048576
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.native_facetMatch,avgt,1,8,191.285057,24.277993,us/op,,4096
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.native_facetMatch,avgt,1,8,3219.553540,141.518033,us/op,,65536
+com.adaworldapi.lancegraph.bench.F_RowStoreFacetScan.native_facetMatch,avgt,1,8,79016.872595,9239.382837,us/op,,1048576

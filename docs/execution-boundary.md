@@ -146,9 +146,20 @@ Not "Rust executes, Java orchestrates" — the measured picture is finer:
                      tiny results (a count, a sum, a mask handle)
 ```
 
+**Re-measured on the real substrate layout (W4, Component F, 2026-08-17):**
+the single-predicate finding survives *directionally* on the 512-byte-row /
+32-facet store — the Vector API still wins the per-row facet scan at every
+row count measured — but the margin collapses from Component C's 56× to
+**2.5× at 4K rows, 1.9× at 65K, 1.14× at 1M**, where all three arms converge
+on memory bandwidth (512 MiB traversed, ~6–7 GB/s, the native arm's CI
+bracketing much of the residual gap). More work per byte narrows the
+boundary exactly as this document predicted; now it is measured rather than
+predicted, with one disclosed asymmetry (the native arm allocates its output
+per call where the Java arms reuse a buffer — `bench/RESULTS.md` §F).
+
 A future planner could even choose the side per-operation using exactly the
-crossover table in `bench/RESULTS.md` — the data to make that choice
-mechanically now exists. What keeps the model honest is the invariant both
+crossover tables in `bench/RESULTS.md` — the data to make that choice
+mechanically now exists, on both the flat and the row-store layouts. What keeps the model honest is the invariant both
 sides share: **the bytes never serialize, never bounce, never mirror into
 the Java heap as N objects.** Which side loops over them is an
 implementation decision the measurements can now drive; that they are the

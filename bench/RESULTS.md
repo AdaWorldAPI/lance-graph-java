@@ -6,7 +6,7 @@
 > | file | what it is |
 > |---|---|
 > | `results/jmh-run-full.txt` / `jmh-results-full.csv` | the first full sweep (A, B, C/D, and E at 65,536 rows only) |
-> | `results/jmh-run.txt` / `jmh-results.csv` | the `./run.sh E_` re-run, after a 256-row arm was added to the fusion sweep |
+> | `results/jmh-run.txt` / `jmh-results.csv` | the latest selective run — currently `./run.sh F_` (the W4 row-store facet scan); the earlier `E_` re-run's rows live on in the merged file |
 > | `results/jmh-results-merged.csv` | A/B/C from the full sweep + E from the re-run — **the input to every table below** |
 > | `results/TABLES.md` | `./summarise.sh results/jmh-results-merged.csv` |
 >
@@ -192,7 +192,7 @@ most of the residual gap. Both are ABI-implementation changes, not ABI-contract 
 
 ---
 
-## E/F — fusion, and what the fluent API itself costs
+## E — fusion, and what the fluent API itself costs
 
 | rows | predicates | `fused` | `unfused` | `fusedScalarKernel` | `planConstructionOnly` | unfused ÷ fused |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -230,6 +230,38 @@ independent of row count (0.053 vs 0.056 µs at 256 vs 65,536 rows), which is wh
 just a list of predicates" should look like.
 
 ---
+
+## F — the row-store facet scan (the W4 question)
+
+The question C could not answer: does "the Vector API beats the crossing" survive when the
+workload is the REAL substrate layout — 512-byte rows, 32 facets, a *strided* scan doing 32
+classid compares per row instead of one compare per 4-byte element? Three arms over the same
+`RowStore` (`classId == 9`), every arm's full per-row bitset output cross-checked equal in
+`@Setup` before anything was timed (`RowStoreData`'s constructor, at every row count):
+
+| rows | bytes traversed | `native_facetMatch` | `java_vectorApi` | `java_scalar` | native/vector |
+|---:|---:|---:|---:|---:|---:|
+| 4,096 | 2 MiB | 191.3 ±24.3 µs | **76.1 ±5.3 µs** | 134.7 ±13.9 µs | 2.51× |
+| 65,536 | 32 MiB | 3,219.6 ±141.5 µs | **1,674.1 ±126.9 µs** | 3,354.4 ±118.4 µs | 1.92× |
+| 1,048,576 | 512 MiB | 79,016.9 ±9,239.4 µs | **69,613.1 ±1,624.1 µs** | 82,541.1 ±3,106.4 µs | 1.14× |
+
+Three findings, in decreasing order of confidence:
+
+1. **The direction survives; the margin collapses.** The Vector API still wins at every measured
+   row count — but by 1.1–2.5×, not Component C's 56×. More work per byte (32 compares per
+   512-byte row, the same four-facets-per-512-bit-register algorithm on both sides) is exactly
+   the regime the § Verdict predicted would narrow the boundary, and now it is measured rather
+   than predicted.
+2. **At 512 MiB everything converges on memory bandwidth.** 69–82 ms to traverse 512 MiB is
+   ~6–7 GB/s on this shared 4-vCPU container — all three arms are bandwidth-bound and the
+   implementation difference shrinks toward noise (native's CI at 1M rows, ±9.2 ms, brackets much of the
+   gap to vector).
+3. **The native arm carries a disclosed allocation asymmetry.** `RowStore.facetMatches()`
+   allocates a fresh output segment + view per call, where `NativePattern`'s fused-plan path
+   reuses a cached scratch mask and the Java arms reuse a `@Setup`-allocated array. At 4,096
+   rows that fixed cost is a visible slice of 191 µs; at 1M rows it is noise. A
+   `facetMatchesInto(classId, …)` reuse form is the named follow-up if the small-row gap ever
+   matters — filed, not assumed to.
 
 ## Verdict — where does execution belong?
 
