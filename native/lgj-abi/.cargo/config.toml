@@ -1,0 +1,38 @@
+# x86-64-v4 (AVX-512) baseline — MANDATORY (operator directive, 2026-08-17:
+# "rust compiles with CPU v4"). This DIVERGES from /home/user/ndarray's own
+# default (.cargo/config.toml there pins v3/AVX2, because that repo targets
+# portable distribution). lance-graph-java's native artifact is built for
+# THIS host, which has avx512f/bw/cd/dq/ifma/vbmi/vl — verified this session
+# — so the production build exercises ndarray's AVX-512 backend
+# (`src/simd_avx512.rs`) directly rather than falling back to AVX2.
+#
+# Why this line is load-bearing and why omitting/under-shooting it is a
+# *runtime* fault, not a compile error:
+#
+#   ndarray's SIMD backends compose their vector types out of raw AVX /
+#   AVX2 / AVX-512 intrinsics (`__m256`, `__m512`, `__m512i`, ...). Those are
+#   `#[inline]` and get instantiated into THIS crate's object code when we
+#   call `ndarray::simd::*`. Without a target-cpu baseline that actually
+#   covers what got emitted, rustc may target a narrower baseline than the
+#   instantiated intrinsics require, and the CPU then executes an
+#   instruction the compiled target never promised — the process dies with
+#   SIGILL. That is ndarray's PR #170 CI failure mode, reproduced one
+#   consumer down. The symptom is a mysterious SIGILL inside a JVM downcall,
+#   about the worst possible place to debug it from — hence pinning the
+#   baseline here, in the crate that produces the cdylib, rather than
+#   relying on a caller to pass the right RUSTFLAGS.
+#
+# This is a BUILD TARGET declaration, not SIMD selection in source. abi.md §8
+# forbids `#[cfg(target_feature)]` *selection of a SIMD implementation* in
+# this crate; choosing which silicon the artifact is compiled for is
+# ndarray's documented consumer contract, and the manifest then *reports*
+# the resulting backend (never negotiates it) — with this baseline,
+# `LgjAbiManifest::simd_backend` must report AVX512 on this host.
+#
+# Portable/distribution build (older silicon, no AVX-512): override with
+# CARGO_BUILD_RUSTFLAGS='-Ctarget-cpu=x86-64-v3' at build time; do not change
+# this file's default for that — v4 stays the default because this is a
+# research vertical slice built and run on one known host, not a
+# redistributed artifact.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-Ctarget-cpu=x86-64-v4"]

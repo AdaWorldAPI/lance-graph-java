@@ -1,0 +1,3 @@
+# javac output. There is no build system here on purpose (no Maven, no Gradle, no downloads),
+# so the compiled classes land in a plain directory rather than under a tool's conventions.
+out/
