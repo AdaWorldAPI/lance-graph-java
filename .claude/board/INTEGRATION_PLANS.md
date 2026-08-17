@@ -1,3 +1,20 @@
+## 2026-08-17 — ogar-machine-v1 (EXPLORATORY; the population emulator)
+
+Plan: `.claude/plans/ogar-machine-v1.md`. Captured from the operator's
+second archived ChatGPT context (the first was convergent confirmation;
+this one is a genuinely NEW workload): one row = one machine STATE,
+control flow becomes population masks ("which machines currently execute
+ADD?"), Ghidra P-code as the normalized guest ISA
+(`AdaWorldAPI/ghidra` now attached + shallow-cloned at
+`/workspace/ghidra`), differential migration testing as the killer demo
+(65,536 worlds through legacy XOR replacement → the divergent few),
+Lance as the time machine (via `lance-graph-hydrate`, lance-graph
+#957/#958 — inherited, never re-implemented). Strong/weak claims
+separated in the plan; gated on W3 + one W5 example + Ghidra
+archaeology + probe P-M1.
+
+**Status: NAMED, not scheduled.** W3 remains the next action.
+
 ## 2026-08-17 — consumer-{world-trades,bricks-analytics,graph-traversal}-v1 (PLANS; the three W5 consumer examples)
 
 Plans: `.claude/plans/consumer-world-trades-v1.md`,
