@@ -112,6 +112,16 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * The generation-checked registry handle. Package-private — mirrors {@link
+     * NativePattern#handle()} exactly, including its consumer: {@code bench}'s {@code
+     * NativeAccess} reaches package-private accessors like this one from a split-package bridge
+     * class, never through a public API widening.
+     */
+    long handle() {
+        return handle;
+    }
+
+    /**
      * Release the native storage and this store's own arena.
      *
      * @throws ClosedResourceException if already closed

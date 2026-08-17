@@ -70,7 +70,7 @@ for r in rows:
 
 if fus:
     arms = ['fused', 'unfused', 'fusedScalarKernel', 'planConstructionOnly']
-    print("\n### E/F — fusion and the cost of the fluent API (µs/op)\n")
+    print("\n### E — fusion and the cost of the fluent API (µs/op)\n")
     print("| rows | predicates | " + " | ".join(f"`{a}`" for a in arms) + " | unfused/fused |")
     print("|---:|---:|" + "---:|" * (len(arms) + 1))
     for p in sorted(fus):
@@ -85,5 +85,33 @@ if fus:
         ratio = (f"**{scores['unfused'] / scores['fused']:.2f}x**"
                  if 'fused' in scores and 'unfused' in scores else "—")
         print(f"| {p[0]:,} | {p[1]} | " + " | ".join(cells) + f" | {ratio} |")
+
+# ── Component F: the row-store facet scan ────────────────────────────────────────────────────
+fscan = collections.defaultdict(dict)
+for r in rows:
+    if 'F_RowStoreFacetScan' not in r['Benchmark'] or not r.get('Param: rows'):
+        continue
+    fscan[int(r['Param: rows'])][key(r)] = (num(r, 'Score'), num(r, 'Score Error (99.9%)'))
+
+if fscan:
+    arms = ['native_facetMatch', 'java_vectorApi', 'java_scalar']
+    print("\n### F — the row-store facet scan (µs/op, mean ± 99.9% CI)\n")
+    print("| rows | row KiB | " + " | ".join(f"`{a}`" for a in arms)
+          + " | fastest | native/vector |")
+    print("|---:|---:|" + "---:|" * (len(arms) + 2))
+    for n in sorted(fscan):
+        cells, scores = [], {}
+        for a in arms:
+            if a in fscan[n]:
+                sc, e = fscan[n][a]
+                scores[a] = sc
+                cells.append(f"{sc:.3f} ±{e:.3f}")
+            else:
+                cells.append("—")
+        best = min(scores, key=scores.get) if scores else "—"
+        ratio = (f"{scores['native_facetMatch'] / scores['java_vectorApi']:.2f}x"
+                 if 'native_facetMatch' in scores and 'java_vectorApi' in scores else "—")
+        print(f"| {n:,} | {n * 512 // 1024} | " + " | ".join(cells)
+              + f" | **{best}** | {ratio} |")
 print()
 PY

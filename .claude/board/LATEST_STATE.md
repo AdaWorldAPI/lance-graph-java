@@ -1,3 +1,29 @@
+## 2026-08-17 (dispatch 2) — W4 measured: the boundary re-asked on the REAL layout
+
+`wave-substrate-w3-w4.md` Dispatch 2 executed: one Sonnet worker
+(Component F: `F_RowStoreFacetScan` + `RowStoreData` + the two
+`Kernels` facet-match arms, mirroring the Rust kernel's chunk algorithm
+line-for-line incl. the `& 0x1111` classid-position mask), orchestrator-run
+JMH, 9/9 combos, the cross-check green at every row count before anything
+was timed.
+
+**The finding: Component C's direction survives; its margin collapses.**
+The Vector API still wins the per-row 32-facet scan at every row count —
+but by **2.51× / 1.92× / 1.14×** (4K / 65K / 1M rows) against C's 56×, and
+at 512 MiB traversed all three arms converge on memory bandwidth
+(~6–7 GB/s on this container). More work per byte narrows the boundary
+exactly as `execution-boundary.md` predicted; it now says so as
+measurement. One disclosed asymmetry: the native arm allocates its output
+per call (`facetMatchesInto` named as the follow-up if the small-row gap
+ever matters).
+
+Also: `summarise.sh` gained the F table (and its old "E/F" section title —
+a real collision with the new component — was corrected to "E");
+`TABLES.md` regenerated from the merged CSV; `RESULTS.md` §F written;
+`RowStore` gained a package-private `handle()` (mirroring
+`NativePattern`'s, for the bench's split-package `NativeAccess` bridge
+only). Substrate wave file fully executed — both dispatches shipped.
+
 ## 2026-08-17 (dispatch 1) — W3 shipped: the Java `RowStore` facade, from the calcified wave map
 
 First real dispatch of the wave system: `wave-substrate-w3-w4.md` Dispatch 1

@@ -28,9 +28,23 @@ public final class NativeAccess {
     /** Lane 2 — {@code i32} signed values. */
     public static final int LANE_VALUE = 2;
 
+    /**
+     * {@link RowStore} lane 0 — the raw {@code n_rows * 512}-byte buffer, {@code U8}/stride 1,
+     * {@code READABLE | CONTIGUOUS} (abi.md §11). Distinct constant from {@link #LANE_ID} even
+     * though both are numerically 0: they describe different resource kinds ({@link NativePattern}
+     * vs {@link RowStore}), and giving the row-store raw lane its own name avoids a reader
+     * mistaking one resource's lane 0 for the other's.
+     */
+    public static final int LANE_ROWSTORE_RAW = 0;
+
     /** The generation-checked registry handle behind a pattern. Opaque; for describe calls only. */
     public static long handleOf(NativePattern pattern) {
         return pattern.handle();
+    }
+
+    /** The generation-checked registry handle behind a row store. Opaque; for describe calls only. */
+    public static long handleOf(RowStore store) {
+        return store.handle();
     }
 
     /**
