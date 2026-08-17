@@ -171,5 +171,44 @@ public final class RowStoreParityTest {
         c.throwsUp("FacetId(32) is rejected", IllegalArgumentException.class, () -> new FacetId(32));
         c.eq("FacetId(0) is accepted", 0, new FacetId(0).index());
         c.eq("FacetId(31) is accepted", 31, new FacetId(31).index());
+
+        // The THIRD independent read path (the wave file's original spec item, closing the gap
+        // the W3 dispatch honestly flagged as dropped): Java reads every classid DIRECTLY from
+        // the raw lane-0 segment, addressing it through ROW_LAYOUT's own byteOffset arithmetic —
+        // no native kernel, no mask, no FacetMatchView anywhere on this path. Three ways now
+        // reach the same numbers: the native kernels (sections above), the pure-Java generator
+        // transcription, and the structured-layout segment read below. This is also
+        // Layouts.ROW_LAYOUT's first real consumer — before this section its byteOffset
+        // arithmetic was defined, size-checked at class-init, and read by nothing.
+        c.section("raw lane-0 segment reads through ROW_LAYOUT offsets vs the generator");
+        try (RowStore store = RowStore.open(n1000, seed)) {
+            com.adaworldapi.lancegraph.internal.ffm.Engine.LaneWindow win =
+                    com.adaworldapi.lancegraph.internal.ffm.Engine.describeLane(store.handle(), 0);
+            // The raw lane's own description first: contiguous U8, exactly n*512 bytes — the
+            // exact-span rule for a contiguous lane (abi.md §11).
+            c.eq("raw lane byte length is n_rows * 512", (long) n1000 * 512L, win.byteLength());
+            c.that("raw lane reports contiguous", win.isContiguous());
+
+            java.lang.foreign.MemorySegment raw = win.segment();
+            long rowBytes = com.adaworldapi.lancegraph.internal.ffm.Layouts.ROW_LAYOUT.byteSize();
+            int layoutMismatches = 0;
+            for (int row = 0; row < n1000; row++) {
+                for (int facet = 0; facet < FACETS_PER_ROW; facet++) {
+                    // The offset comes from the LAYOUT, not from hand-multiplied constants —
+                    // that is the point: this section proves ROW_LAYOUT's carving agrees with
+                    // the generator, not merely that 16*facet does.
+                    long off = com.adaworldapi.lancegraph.internal.ffm.Layouts.ROW_LAYOUT.byteOffset(
+                            java.lang.foreign.MemoryLayout.PathElement.sequenceElement(facet),
+                            java.lang.foreign.MemoryLayout.PathElement.groupElement("classid"));
+                    int got = raw.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED,
+                            (long) row * rowBytes + off);
+                    if (got != classids1000[row][facet]) {
+                        layoutMismatches++;
+                    }
+                }
+            }
+            c.eq("all " + (n1000 * FACETS_PER_ROW) + " classids read through ROW_LAYOUT match the"
+                    + " transcribed generator", 0, layoutMismatches);
+        }
     }
 }

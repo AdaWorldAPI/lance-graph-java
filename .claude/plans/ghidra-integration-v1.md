@@ -64,6 +64,18 @@ tree, not the README alone:
    pushing or PRs against r2sleigh require re-attaching with push access.
    Any fix we need upstream goes through the operator first.
 
+## HANDOFF BOUNDARY (operator, 2026-08-17) — r2sleigh/ruff arrives from ANOTHER session
+
+> *"we will hand you via another session a proper integration of r2sleigh
+> and ruff after the other session implements R2IL."*
+
+Consequence: **this session does not build toward r2sleigh, ruff, or R2IL.**
+The G0 addendum above stays as recorded context; lift-candidate C and the
+r2dec decompiler direction are FROZEN until that handoff lands. When it
+does, the receiving session should reconcile the handoff against this
+plan's G-waves (they may supersede G1's lift-path decision entirely) rather
+than running both designs in parallel.
+
 ## The integration shape — two roles, both offline
 
 ```
