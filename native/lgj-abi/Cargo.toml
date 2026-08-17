@@ -1,0 +1,41 @@
+[package]
+name = "lgj-abi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "The lance-graph-java machine membrane: a self-describing, versioned, bulk-only psABI surface. No C, no JNI, no headers."
+
+[lib]
+name = "lgj_abi"
+# cdylib  -> the artifact Java's Linker.nativeLinker() dlopen's.
+# rlib    -> so the in-crate #[cfg(test)] suite can link and exercise the
+#            same code the cdylib exports (a separate build of the same
+#            source would not prove anything about the shipped artifact's
+#            layout, but the compile-time size asserts in abi.rs do, and
+#            they are compiled in both crate types).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The ONLY dependency, and the ONLY source of SIMD in this crate (abi.md §8).
+#
+# default-features = false + "std":
+#   ndarray's own defaults are ["std", "hpc-extras"]; hpc-extras pulls the
+#   `p64` and `fractal` path crates, which nothing here needs. "std" alone
+#   is what gates `ndarray::simd`, `ndarray::simd_int_ops`, `ndarray::hpc`
+#   and `ndarray::bitwise` — i.e. every module this crate consumes.
+ndarray = { path = "../../../ndarray", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# panic = "abort" is DELIBERATELY ABSENT (abi.md §9). Every extern "C" body
+# wraps itself in std::panic::catch_unwind so a panic becomes a negative
+# status instead of an unwind into JVM frames (which is UB). catch_unwind
+# requires unwinding to be available, so "abort" would silently turn the
+# panic-safety layer into a process kill.
+
+[profile.dev]
+# Same rule as release: no panic = "abort".

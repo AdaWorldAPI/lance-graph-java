@@ -1,0 +1,6 @@
+[toolchain]
+# Stable only. Matches ndarray / lance-graph / the rest of the AdaWorldAPI
+# stack. No nightly features anywhere in this crate — in particular no
+# `core::simd` / portable-simd (abi.md §8).
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
