@@ -1,0 +1,4 @@
+(1) new LaneId[8]                     flat=true  accepts null=true  (nullable-flat: pays for a null marker)
+(2) LaneId![]                         DOES NOT PARSE ? no null-restricted type syntax
+(3) ValueClass.newNullRestricted...   flat=true  accepts null=false  (jdk.internal, needs --add-exports)
+(4) List<LaneId>.toArray()            flat=false  ? generics erase to Object[]; the flattening is undone at the collection boundary

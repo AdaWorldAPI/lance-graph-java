@@ -1,0 +1,132 @@
+3,4c3,4
+< platform                                     stable
+< java.vm.version                              26.0.2+10-55
+---
+> platform                                     valhalla
+> java.vm.version                              27-jep401ea3+1-1
+6c6
+< jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so]
+---
+> jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, --enable-preview, --add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED, --add-exports=java.base/jdk.internal.value=ALL-UNNAMED]
+9,14c9,14
+< platform                                     stable ? stable-record vocabulary; arrays are reference arrays; fields are references
+< LaneId.class.isValue()                       false
+< Ordinal.class.isValue()                      false
+< MaskId.class.isValue()                       false
+< RowRange.class.isValue()                     false
+< Row.class.isValue()                          false
+---
+> platform                                     valhalla ? value-record vocabulary; null-restricted non-atomic arrays; @NullRestricted fields
+> LaneId.class.isValue()                       true
+> Ordinal.class.isValue()                      true
+> MaskId.class.isValue()                       true
+> RowRange.class.isValue()                     true
+> Row.class.isValue()                          true
+19,20c19,20
+< a == b  (reference equality)                 false
+< identityHashCode(a) == identityHashCode(b)   false
+---
+> a == b  (reference equality)                 true
+> identityHashCode(a) == identityHashCode(b)   true
+23,25c23,25
+< array flatness                               UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+< array slot accepts null                      true
+< synchronized(x) legality                     legal but never used by the production API
+---
+> array flatness                               FLAT
+> array slot accepts null                      false
+> synchronized(x) legality                     COMPILE ERROR under Valhalla (required: a type with identity)
+28c28
+< platform                                     stable
+---
+> platform                                     valhalla
+30,34c30,34
+< LaneId     1 int            payload= 4 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+< Ordinal    1 int            payload= 4 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+< MaskId     1 long           payload= 8 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+< RowRange   2 long           payload=16 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+< Row        1 long + 2 int   payload=16 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+---
+> LaneId     1 int            payload= 4 B   array=FLAT
+> Ordinal    1 int            payload= 4 B   array=FLAT
+> MaskId     1 long           payload= 8 B   array=FLAT
+> RowRange   2 long           payload=16 B   array=NOT-FLAT
+> Row        1 long + 2 int   payload=16 B   array=NOT-FLAT
+37c37
+< platform                                     stable
+---
+> platform                                     valhalla
+40,46c40,46
+< construct N LaneId, store into array         15.26 MiB
+<   ... per LaneId                             16.00 B
+< construct N LaneId, never escaping           6.71 MiB
+<   ... per LaneId                             7.03 B
+< LaneId[1024] flatness                        UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+< allocate+fill LaneId[N] (array + elements)   19.07 MiB
+<   ... per element                            20.00 B
+---
+> construct N LaneId, store into array         2.75 MiB
+>   ... per LaneId                             2.89 B
+> construct N LaneId, never escaping           7.63 MiB
+>   ... per LaneId                             8.00 B
+> LaneId[1024] flatness                        FLAT
+> allocate+fill LaneId[N] (array + elements)   6.57 MiB
+>   ... per element                            6.89 B
+49,55c49,55
+< Descriptor kind                              identity class with two reference fields
+< Descriptor fields null-restricted            false
+< construct N Descriptor (2 wrappers each)     53.41 MiB
+<   ... per Descriptor                         56.00 B
+< pass 2 wrappers through 3 call levels        7.90 MiB
+<   ... per call                               8.29 B
+< read 65,536 LaneId from array                  median=   44182.0 ns  [min    41690.0 .. max    59914.0]  n=51
+---
+> Descriptor kind                              value class with two @NullRestricted value fields
+> Descriptor fields null-restricted            true
+> construct N Descriptor (2 wrappers each)     37.05 MiB
+>   ... per Descriptor                         38.84 B
+> pass 2 wrappers through 3 call levels        9.97 MiB
+>   ... per call                               10.45 B
+> read 65,536 LaneId from array                  median=    5349.0 ns  [min     5179.0 .. max    11356.0]  n=51
+59c59
+< platform                                     stable
+---
+> platform                                     valhalla
+61,65c61,65
+< bare long index                                median=   59148.0 ns  [min    59077.0 .. max   114952.0]  n=51
+< RowRange bounds (wrapper hoisted)              median=   47952.0 ns  [min    47759.0 .. max    65535.0]  n=51
+< per-element wrapper: bytes allocated         1.00 MiB
+<   ... per element                            16.00 B
+< Ordinal built per element                      median=   50062.0 ns  [min    49790.0 .. max    61194.0]  n=51
+---
+> bare long index                                median=   63304.0 ns  [min    59079.0 .. max   131743.0]  n=51
+> RowRange bounds (wrapper hoisted)              median=   57557.0 ns  [min    56212.0 .. max    87932.0]  n=51
+> per-element wrapper: bytes allocated         1.50 MiB
+>   ... per element                            24.00 B
+> Ordinal built per element                      median=   50021.0 ns  [min    49762.0 .. max    75999.0]  n=51
+68c68
+< platform                                     stable
+---
+> platform                                     valhalla
+79,83c79,83
+< (2)/(3) hydrate 65536 Row ? allocated        2.00 MiB
+<         ... per row                          32.00 B
+<         array flatness                       UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
+<         ratio vs native lane bytes           2.00x
+<         retained heap (APPROX, gc-delta)     2.25 MiB
+---
+> (2)/(3) hydrate 65536 Row ? allocated        2.50 MiB
+>         ... per row                          40.00 B
+>         array flatness                       NOT-FLAT
+>         ratio vs native lane bytes           2.50x
+>         retained heap (APPROX, gc-delta)     2.75 MiB
+86,89c86,89
+< (1) native  one crossing, fused plan           median=   16378.0 ns  [min    15962.0 .. max    33819.0]  n=51
+< (2/3) hydrate 65536 Row objects                median=  603139.0 ns  [min   529172.0 .. max  5246059.0]  n=51
+< (2/3) scan the materialised objects            median=  151886.0 ns  [min   112687.0 .. max   201271.0]  n=51
+< (2/3) hydrate THEN scan (honest total)         median=  788227.0 ns  [min   710221.0 .. max  1146017.0]  n=51
+---
+> (1) native  one crossing, fused plan           median=   18805.0 ns  [min    15515.0 .. max    38457.0]  n=51
+> (2/3) hydrate 65536 Row objects                median=  768624.0 ns  [min   645509.0 .. max  1229947.0]  n=51
+> (2/3) scan the materialised objects            median=   91178.0 ns  [min    83390.0 .. max   141648.0]  n=51
+> (2/3) hydrate THEN scan (honest total)         median=  898955.0 ns  [min   822997.0 .. max  5059624.0]  n=51

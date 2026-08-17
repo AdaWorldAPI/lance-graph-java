@@ -1,0 +1,91 @@
+Picked up JAVA_TOOL_OPTIONS: 
+lance-graph-java :: valhalla lab
+platform                                     valhalla
+java.vm.version                              27-jep401ea3+1-1
+java.vendor.version                          -
+jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, --enable-preview, --add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED, --add-exports=java.base/jdk.internal.value=ALL-UNNAMED, -XX:+UnlockDiagnosticVMOptions, -XX:-UseFieldFlattening]
+
+== (a) SEMANTIC TRUTH ? is identity observable? ==============================
+platform                                     valhalla ? value-record vocabulary; null-restricted non-atomic arrays; @NullRestricted fields
+LaneId.class.isValue()                       true
+Ordinal.class.isValue()                      true
+MaskId.class.isValue()                       true
+RowRange.class.isValue()                     true
+Row.class.isValue()                          true
+equal state => equals()                      true
+different state => !equals()                 true
+equal state => equal hashCode()              true
+equal state => equal toString()              true
+a == b  (reference equality)                 true
+identityHashCode(a) == identityHashCode(b)   true
+a local of this type accepts null            true
+array kind                                   LaneId[]
+array flatness                               FLAT
+array slot accepts null                      false
+synchronized(x) legality                     COMPILE ERROR under Valhalla (required: a type with identity)
+
+== FLATTENING CLIFF ? which payload shapes does the VM flatten? ==============
+platform                                     valhalla
+note                                         payload = declared field bytes, ignoring any header
+LaneId     1 int            payload= 4 B   array=FLAT
+Ordinal    1 int            payload= 4 B   array=FLAT
+MaskId     1 long           payload= 8 B   array=FLAT
+RowRange   2 long           payload=16 B   array=NOT-FLAT
+Row        1 long + 2 int   payload=16 B   array=NOT-FLAT
+
+== (b)/(c) REPRESENTATION ? allocation, arrays, fields, arguments ============
+platform                                     valhalla
+allocation instrument baseline               0 B
+N (operations per measurement)               1000000
+construct N LaneId, store into array         2.75 MiB
+  ... per LaneId                             2.89 B
+construct N LaneId, never escaping           8.22 MiB
+  ... per LaneId                             8.61 B
+LaneId[1024] flatness                        FLAT
+allocate+fill LaneId[N] (array + elements)   6.58 MiB
+  ... per element                            6.90 B
+bare LaneId[N] with no elements stored       3.81 MiB
+  ... per slot                               4.00 B
+Descriptor kind                              value class with two @NullRestricted value fields
+Descriptor fields null-restricted            true
+construct N Descriptor (2 wrappers each)     76.29 MiB
+  ... per Descriptor                         80.00 B
+pass 2 wrappers through 3 call levels        11.14 MiB
+  ... per call                               11.68 B
+read 65,536 LaneId from array                  median=    4959.0 ns  [min     4870.0 .. max     5886.0]  n=51
+native runtime                               lance-graph native runtime: abi 0.1, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
+
+== FFM ADDRESSING ? is the wrapper free where it touches native memory? ======
+platform                                     valhalla
+sum (identical across all three)             6929623
+bare long index                                median=   59187.0 ns  [min    59075.0 .. max   123125.0]  n=51
+RowRange bounds (wrapper hoisted)              median=   56980.0 ns  [min    56652.0 .. max    73287.0]  n=51
+per-element wrapper: bytes allocated         1.50 MiB
+  ... per element                            24.00 B
+Ordinal built per element                      median=   49851.0 ns  [min    49727.0 .. max    66813.0]  n=51
+
+== THE THESIS ? 65,536 entities, three representations =======================
+platform                                     valhalla
+rows                                         65536
+question                                     count(class==7 AND value>100) and sum(value)
+answer (identical across all paths)          2173 rows, sum 499246
+selectivity                                  3.32%
+
+==   heap cost ===============================================================
+(1) native ? Java bytes allocated (warm)     816 B  per query, for the fluent chain itself
+(1) native ? Java objects per row            0
+(1) native ? native lane bytes               1.00 MiB  (u64 id + u32 class + i32 value)
+(1) native ? mask bytes                      8.0 KiB  (1 bit per row, packed)
+(2)/(3) hydrate 65536 Row ? allocated        2.50 MiB
+        ... per row                          40.01 B
+        array flatness                       NOT-FLAT
+        ratio vs native lane bytes           2.50x
+        retained heap (APPROX, gc-delta)     2.75 MiB
+
+==   time to answer the question =============================================
+(1) native  one crossing, fused plan           median=   15964.0 ns  [min    15779.0 .. max    40503.0]  n=51
+(2/3) hydrate 65536 Row objects                median=  789127.0 ns  [min   628024.0 .. max  4599451.0]  n=51
+(2/3) scan the materialised objects            median=   78249.0 ns  [min    75327.0 .. max   111755.0]  n=51
+(2/3) hydrate THEN scan (honest total)         median= 1122018.0 ns  [min   812442.0 .. max  1695253.0]  n=51
+
+lab complete.

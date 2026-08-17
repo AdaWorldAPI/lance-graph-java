@@ -1,0 +1,8 @@
+Picked up JAVA_TOOL_OPTIONS: 
+type   payload  NR-nonAtomic     NR-atomic        nullable-atomic
+P4         4 B  true             true             true
+P8i        8 B  true             true             false
+P8l        8 B  true             true             false
+P12       12 B  false            false            false
+P16       16 B  false            false            false
+P16l      16 B  false            false            false
