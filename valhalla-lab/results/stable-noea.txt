@@ -3,10 +3,10 @@ lance-graph-java :: valhalla lab
 platform                                     stable
 java.vm.version                              26.0.2+10-55
 java.vendor.version                          -
-jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, -XX:-DoEscapeAnalysis]
+jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dstdout.encoding=UTF-8, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, -XX:-DoEscapeAnalysis]
 
-== (a) SEMANTIC TRUTH ? is identity observable? ==============================
-platform                                     stable ? stable-record vocabulary; arrays are reference arrays; fields are references
+== (a) SEMANTIC TRUTH — is identity observable? ==============================
+platform                                     stable — stable-record vocabulary; arrays are reference arrays; fields are references
 LaneId.class.isValue()                       false
 Ordinal.class.isValue()                      false
 MaskId.class.isValue()                       false
@@ -24,7 +24,7 @@ array flatness                               UNKNOWN(no ValueClass API on a stab
 array slot accepts null                      true
 synchronized(x) legality                     legal but never used by the production API
 
-== FLATTENING CLIFF ? which payload shapes does the VM flatten? ==============
+== FLATTENING CLIFF — which payload shapes does the VM flatten? ==============
 platform                                     stable
 note                                         payload = declared field bytes, ignoring any header
 LaneId     1 int            payload= 4 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
@@ -33,7 +33,7 @@ MaskId     1 long           payload= 8 B   array=UNKNOWN(no ValueClass API on a 
 RowRange   2 long           payload=16 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
 Row        1 long + 2 int   payload=16 B   array=UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
 
-== (b)/(c) REPRESENTATION ? allocation, arrays, fields, arguments ============
+== (b)/(c) REPRESENTATION — allocation, arrays, fields, arguments ============
 platform                                     stable
 allocation instrument baseline               0 B
 N (operations per measurement)               1000000
@@ -52,19 +52,19 @@ construct N Descriptor (2 wrappers each)     53.41 MiB
   ... per Descriptor                         56.00 B
 pass 2 wrappers through 3 call levels        30.52 MiB
   ... per call                               32.00 B
-read 65,536 LaneId from array                  median=   44861.0 ns  [min    42156.0 .. max    69264.0]  n=51
+read 65,536 LaneId from array                  median=   39359.0 ns  [min    39266.0 .. max    63844.0]  n=51
 native runtime                               lance-graph native runtime: abi 0.1, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
 
-== FFM ADDRESSING ? is the wrapper free where it touches native memory? ======
+== FFM ADDRESSING — is the wrapper free where it touches native memory? ======
 platform                                     stable
 sum (identical across all three)             6929623
-bare long index                                median=   59417.0 ns  [min    59067.0 .. max   140131.0]  n=51
-RowRange bounds (wrapper hoisted)              median=   48136.0 ns  [min    47847.0 .. max   105233.0]  n=51
+bare long index                                median=   59174.0 ns  [min    59067.0 .. max   117139.0]  n=51
+RowRange bounds (wrapper hoisted)              median=   47949.0 ns  [min    47870.0 .. max    61164.0]  n=51
 per-element wrapper: bytes allocated         1.00 MiB
   ... per element                            16.00 B
-Ordinal built per element                      median= 5166233.0 ns  [min  4636587.0 .. max 10323741.0]  n=51
+Ordinal built per element                      median=  621827.0 ns  [min   584504.0 .. max   873212.0]  n=51
 
-== THE THESIS ? 65,536 entities, three representations =======================
+== THE THESIS — 65,536 entities, three representations =======================
 platform                                     stable
 rows                                         65536
 question                                     count(class==7 AND value>100) and sum(value)
@@ -72,20 +72,20 @@ answer (identical across all paths)          2173 rows, sum 499246
 selectivity                                  3.32%
 
 ==   heap cost ===============================================================
-(1) native ? Java bytes allocated (warm)     816 B  per query, for the fluent chain itself
-(1) native ? Java objects per row            0
-(1) native ? native lane bytes               1.00 MiB  (u64 id + u32 class + i32 value)
-(1) native ? mask bytes                      8.0 KiB  (1 bit per row, packed)
-(2)/(3) hydrate 65536 Row ? allocated        2.00 MiB
+(1) native — Java bytes allocated (warm)     816 B  per query, for the fluent chain itself
+(1) native — Java objects per row            0
+(1) native — native lane bytes               1.00 MiB  (u64 id + u32 class + i32 value)
+(1) native — mask bytes                      8.0 KiB  (1 bit per row, packed)
+(2)/(3) hydrate 65536 Row — allocated        2.00 MiB
         ... per row                          32.00 B
         array flatness                       UNKNOWN(no ValueClass API on a stable JDK; a reference array is never flat)
         ratio vs native lane bytes           2.00x
         retained heap (APPROX, gc-delta)     2.22 MiB
 
 ==   time to answer the question =============================================
-(1) native  one crossing, fused plan           median=   17631.0 ns  [min    15693.0 .. max    40703.0]  n=51
-(2/3) hydrate 65536 Row objects                median=  575654.0 ns  [min   513071.0 .. max  4428601.0]  n=51
-(2/3) scan the materialised objects            median=  129828.0 ns  [min   108841.0 .. max   159354.0]  n=51
-(2/3) hydrate THEN scan (honest total)         median=  703240.0 ns  [min   642514.0 .. max   789762.0]  n=51
+(1) native  one crossing, fused plan           median=   15431.0 ns  [min    15368.0 .. max    28346.0]  n=51
+(2/3) hydrate 65536 Row objects                median=  537476.0 ns  [min   478467.0 .. max  4136743.0]  n=51
+(2/3) scan the materialised objects            median=  118276.0 ns  [min   108392.0 .. max   199142.0]  n=51
+(2/3) hydrate THEN scan (honest total)         median=  805562.0 ns  [min   689612.0 .. max  1107352.0]  n=51
 
 lab complete.
