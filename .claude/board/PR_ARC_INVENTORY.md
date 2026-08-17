@@ -8,6 +8,40 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #12 — consumer example: Bricks, mask-first authorization (merged 2026-08-17, squash `8f16e8d`)
+
+- **Added:** `consumers/bricks/` — the second consumer proof over the
+  unchanged core. `Bricks`/`BricksSession`/`BricksQuery`/`Role`/`Orders`/
+  `UnauthorizedQueryException`; `BricksAuthTest` 62/62. Wave
+  `wave-consumer-bricks.md`, 2 Sonnet workers (K1 main / K2 test,
+  disjoint), orchestrator-gated.
+- **Locked:** authorization is a **predicate in the same lazy chain** as
+  `where(...)`, composed before execution and fused into the same single
+  crossing — not a post-filter. `Role.EU_ONLY` = `REGION.eq(EU)`;
+  `DENY_ALL` = `REGION.eq(0xFFFF)`, a real impossible predicate that pays
+  a real crossing and counts 0; fail-closed throws BEFORE any crossing
+  (no default-allow path exists); aggregate-only egress is **structural**
+  (`BricksQuery`/`long`/`Map` are the only public return types — asserted
+  by reflection, so no row-shaped type can be added without breaking the
+  test). Disable-run: `requireAuthorized` short-circuited → exactly the
+  3 can-fire fail-closed checks red, 59 green; restored 62/62.
+- **A measured correction, recorded rather than smoothed over:** a **sum
+  terminal costs 2 crossings** (plan eval into the mask +
+  `lgj_reduce_sum_i32`), unlike `count()`'s 1 — so `sumBy()` is **32
+  crossings (16 groups × 2), IDENTICAL at 1K and 64K rows**. K1's Javadoc
+  claimed one crossing per group; the measurement corrected the doc. The
+  thesis assertion is the shape (crossings ∝ groups, never rows), which
+  is why the same literal is pinned at both row counts.
+- **Deferred:** a native grouped-aggregate kernel (one crossing, 16
+  buckets) — named in the Javadoc as the W6-tier follow-up, deliberately
+  not built because nothing has measured a need; W5c graph (shelved on
+  the D1 ruling + the edge-bearing generator substrate change).
+- **Docs:** STATUS_BOARD D-LGJ-W5 → bricks DONE; LATEST_STATE dispatch-4
+  entry, which also owns that W5a (#11) shipped without one.
+- **Confidence:** High — zero new membrane surface, zero core changes,
+  core suite unaffected at 188/188; every falsifier disable-verified.
+  Both bot reviewers at usage limits (no human or bot review obtained).
+
 ## PR #11 — consumer example: World/Trades (merged 2026-08-17, squash `db7bdf1`)
 
 - **Added:** `consumers/trades/` — own compile unit, core consumed as a
