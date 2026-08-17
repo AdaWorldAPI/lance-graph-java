@@ -8,6 +8,27 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #9 — bench Component F: the boundary on the real layout (merged 2026-08-17, squash `b28bd34`)
+
+- **Added:** `F_RowStoreFacetScan` + `RowStoreData` + two `Kernels`
+  facet-match arms (Java mirrors of the Rust chunk algorithm,
+  line-for-line traceable); `summarise.sh` F-table generator (old "E/F"
+  section retitled "E" — real naming collision); `RESULTS.md` §F;
+  `execution-boundary.md` re-measured paragraph; `RowStore.handle()`
+  (package-private, bench bridge only); the r2sleigh plan addendum
+  (lift candidate C + decompiler candidate, `libsla-sys` FFI fact pinned).
+- **Locked:** the W4 finding — Component C's direction survives on the
+  512-byte-row layout, its margin collapses: Vector API wins the 32-facet
+  strided scan 2.51×/1.92×/1.14× (4K/65K/1M rows) vs C's 56×; all arms
+  converge on memory bandwidth at 512 MiB. Cross-check-before-timing held
+  at every row count. Native arm's per-call allocation asymmetry
+  disclosed; `facetMatchesInto` named as follow-up.
+- **Deferred:** consumer waves (operator-gated shelf); W6 (named).
+- **Docs:** RESULTS/TABLES regenerated mechanically from the merged CSV.
+- **Confidence:** High — real JMH, 9/9 combos, cross-checks green, main
+  suite re-verified 185/185 against the fresh minor-2 `.so`. Bot
+  reviewers at usage limits, did not run.
+
 ## PR #8 — Java RowStore facade: W3 shipped (merged 2026-08-17, squash `320808d`)
 
 - **Added:** `RowStore`/`FacetMatchView`/`FacetId`/`NativeResource` public
