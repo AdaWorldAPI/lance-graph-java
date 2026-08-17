@@ -35,7 +35,7 @@ import java.util.List;
  * <p>Terminal operations reuse one internal scratch selection, so they are serialised on this
  * instance. Distinct resources do not contend with each other.
  */
-public final class NativePattern implements AutoCloseable {
+public final class NativePattern implements NativeResource, AutoCloseable {
 
     /**
      * The seed used by {@link #open(long)}.

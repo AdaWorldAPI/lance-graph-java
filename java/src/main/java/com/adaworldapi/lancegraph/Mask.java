@@ -21,11 +21,11 @@ import com.adaworldapi.lancegraph.internal.ffm.Engine;
  */
 public final class Mask implements AutoCloseable {
 
-    private final NativePattern parent;
+    private final NativeResource parent;
     private final long handle;
     private boolean closed;
 
-    Mask(NativePattern parent, long handle) {
+    Mask(NativeResource parent, long handle) {
         this.parent = parent;
         this.handle = handle;
     }
@@ -41,8 +41,8 @@ public final class Mask implements AutoCloseable {
         return new MaskId(handle);
     }
 
-    /** The resource whose rows this selects. */
-    public NativePattern source() {
+    /** The resource whose rows this selects — a {@link NativePattern} or a {@link RowStore}. */
+    public NativeResource source() {
         return parent;
     }
 

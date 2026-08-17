@@ -138,6 +138,42 @@ public final class Abi {
         return LIBRARY_PATH;
     }
 
+    /**
+     * Guard a feature introduced at a later ABI minor than this Java build's own base load gate.
+     *
+     * <p>The base load gate in {@link #readAndVerifyManifest} only requires {@code minor >=
+     * }{@link Layouts#LGJ_ABI_MINOR} (currently {@code 1}), per docs/abi.md §2's additive-minor
+     * promise: an older Java build against a newer {@code .so} always loads. That promise runs in
+     * one direction only. It says nothing about a Java build that was compiled against a
+     * <em>later</em> minor — e.g. the row store at minor 2 (docs/abi.md §11) — being run against an
+     * {@code .so} that is old enough to clear the base gate but too old to export the symbol that
+     * specific feature needs. Left unchecked, that combination would fail deep inside the downcall
+     * resolution in {@link Downcalls} with a bare "no such symbol" message, after the library has
+     * already loaded and after other, older features have already been used successfully. This
+     * method instead fails loudly, before any downcall for the feature is attempted, naming exactly
+     * which minor the feature needs against exactly which minor loaded — e.g. a row-store entry
+     * point calls {@code requireMinor(2)} and, on an older library, reports "row store requires ABI
+     * minor >= 2".
+     *
+     * <p>Does not change, gate, or replace the base load gate — {@code minor >= 1} at load time is
+     * unconditional and untouched by this method.
+     *
+     * @param required the minimum {@code abi_minor} the calling feature needs
+     * @throws AbiMismatchException if the loaded library's manifest reports a lower minor
+     */
+    public static void requireMinor(int required) {
+        int loaded = manifest().abiMinor();
+        if (loaded < required) {
+            throw new AbiMismatchException(String.format(
+                    "this feature requires ABI minor >= %d, but the loaded library at %s reports"
+                            + " minor %d. This Java build's base load gate (minor >= %d) was"
+                            + " satisfied, but this specific feature is newer than what that gate"
+                            + " alone guarantees is present; rebuild or replace the native library"
+                            + " with one at minor >= %d.",
+                    required, libraryPath(), loaded, Layouts.LGJ_ABI_MINOR, required));
+        }
+    }
+
     /** Human-readable name of the SIMD backend the artifact was compiled with. Reported, never negotiated. */
     public static String simdBackendName() {
         return manifest().simdBackendName();

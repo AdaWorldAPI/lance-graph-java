@@ -2,6 +2,7 @@ package com.adaworldapi.lancegraph.internal.ffm;
 
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemoryLayout.PathElement;
+import java.lang.foreign.SequenceLayout;
 import java.lang.foreign.StructLayout;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.VarHandle;
@@ -213,6 +214,42 @@ public final class Layouts {
     public static final VarHandle OP_COMBINE = field(OP_DESC, "combine");
     public static final VarHandle OP_RESERVED = field(OP_DESC, "_reserved");
 
+    // ── LgjRow — the SoA row store (512 bytes, docs/abi.md §11, ABI minor ≥ 2) ──────────────
+    //
+    // 32 facet lanes of 16 bytes each: a 4-byte little-endian classid followed by a 12-byte opaque
+    // payload (.claude/knowledge/soa-row-store-layout.md — the lance-graph V3 content-blind facet
+    // shape). A facet is naturally 4-byte aligned within the row (offset f*16, always a multiple of
+    // 4), so no repr(C)-style padding member is introduced between classid and payload, or between
+    // consecutive facets — the struct-in-sequence composition below is exactly 512 bytes with no
+    // gaps, which SELF_CHECK proves rather than assumes.
+    //
+    // JAVA_INT_UNALIGNED, not plain JAVA_INT, deliberately breaking with every other layout in this
+    // file: those structs (LgjLaneDesc / LgjResourceInfo / LgjOpDesc / LgjAbiManifest) come from
+    // Rust #[repr(C)] types whose own alignment is 8 and is cross-checked field-by-field against the
+    // manifest in Abi — so a segment holding one is always properly aligned. The row store's buffer
+    // is different by explicit ABI statement: "the base is u8-aligned (Arc<[u8]>; stable Rust
+    // promises no more)" (docs/abi.md §11 "Alignment", stated honestly). A plain aligned JAVA_INT
+    // VarHandle throws IllegalArgumentException the moment the backing segment's actual address
+    // isn't 4-byte aligned, which this ABI does not guarantee here — so every classid read in this
+    // layout uses the unaligned value layout, exactly as §11 prescribes ("Java reads via
+    // JAVA_INT_UNALIGNED-class layouts"). This is the one facet field with numeric interpretation;
+    // the 12-byte payload is opaque bytes and has no alignment requirement either way.
+    public static final StructLayout ROW_FACET = MemoryLayout.structLayout(
+            ValueLayout.JAVA_INT_UNALIGNED.withName("classid"),
+            MemoryLayout.sequenceLayout(12, ValueLayout.JAVA_BYTE).withName("payload"))
+            .withName("LgjRowFacet");
+
+    /** One 512-byte row: 32 facets of 16 bytes each. {@link #SELF_CHECK} proves the byte size. */
+    public static final SequenceLayout ROW_LAYOUT = MemoryLayout.sequenceLayout(32, ROW_FACET)
+            .withName("LgjRow");
+
+    /**
+     * Element layout of the caller-allocated {@code lgj_row_facet_match} out buffer (docs/abi.md
+     * §11): one {@code u32} bitset per row, into a Java-arena segment the caller owns — so, unlike
+     * {@link #ROW_FACET}, ordinary alignment applies and no unaligned variant is needed.
+     */
+    public static final ValueLayout.OfInt FACET_MATCH_ELEM = ValueLayout.JAVA_INT;
+
     /**
      * Compile-time-ish self check: the byte sizes the ABI document states in prose, checked against
      * the sizes these layouts actually derive. If a layout is edited wrongly this fails at class
@@ -230,6 +267,11 @@ public final class Layouts {
         expect("LgjResourceInfo align", 8, RESOURCE_INFO.byteAlignment());
         expect("LgjOpDesc size", 24, OP_DESC.byteSize());
         expect("LgjOpDesc align", 8, OP_DESC.byteAlignment());
+        // docs/abi.md §11: "64K rows x 512 bytes per row, 32 facet lanes of 16 bytes each" — this is
+        // the substrate truth the whole stack converges on, so a hand-edit that silently changes
+        // facet count or facet width must fail loudly here, at class init, before any row-store call.
+        expect("LgjRowFacet size", 16, ROW_FACET.byteSize());
+        expect("LgjRow (row store, docs/abi.md §11) size", 512, ROW_LAYOUT.byteSize());
         // The manifest's size is not stated in prose; it is stated by the artifact itself and
         // cross-checked in Abi. What is checked here is that the two trailing byte arrays land
         // where the repr(C) rule puts them, which is the only place a hand-written layout could

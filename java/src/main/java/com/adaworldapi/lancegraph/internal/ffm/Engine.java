@@ -162,6 +162,48 @@ public final class Engine {
         return Downcalls.reduceSumI32(resource, laneId, mask, s.out);
     }
 
+    // ── row store (docs/abi.md §11, ABI minor ≥ 2) ──────────────────────────────────────────
+    //
+    // Every entry point below calls Abi.requireMinor(2) before touching the membrane at all, so a
+    // Java build compiled against the row store never reaches a missing symbol inside Downcalls —
+    // it fails here, first, naming the version gap (see Abi#requireMinor's own doc for why the base
+    // load gate at minor >= 1 cannot cover this by itself).
+
+    /**
+     * Open the 64K×512-byte SoA row store, generated deterministically from {@code seed}
+     * (docs/abi.md §11). Returns the resource handle. Requires ABI minor &gt;= 2.
+     */
+    public static long openRowStore(long nRows, long seed) {
+        Abi.requireMinor(2);
+        Scratch s = SCRATCH.get();
+        return Downcalls.rowstoreOpen(nRows, seed, s.out);
+    }
+
+    /**
+     * Overwrite {@code dstMask} with {@code classid(facet, row) == classId} for every row of
+     * {@code store} (docs/abi.md §11). {@code facet} is a facet index {@code 0..32} into the row's
+     * 32 facet lanes, not a lane id. Requires ABI minor &gt;= 2.
+     */
+    public static void eqClassid(long store, int facet, int classId, long dstMask) {
+        Abi.requireMinor(2);
+        Downcalls.opEqClassid(store, facet, classId, dstMask);
+    }
+
+    /**
+     * Write, for every row of {@code store}, a {@code u32} bitset of which of its 32 facets carry
+     * {@code classId} as classid, into the caller's {@code out} segment — one crossing, zero-copy
+     * out, nothing serialized (docs/abi.md §11). Requires ABI minor &gt;= 2.
+     *
+     * @param out          a caller-owned segment, at least {@code outLenElems} {@link
+     *                     Layouts#FACET_MATCH_ELEM}-wide elements; capacity is checked natively
+     *                     before anything is written
+     * @param outLenElems  the element count (not byte count) {@code out} was allocated for
+     */
+    public static void rowFacetMatch(long store, int classId, MemorySegment out, long outLenElems) {
+        Abi.requireMinor(2);
+        Downcalls.rowFacetMatch(store, classId, out, outLenElems);
+    }
+
     private static MemorySegment marshal(List<PlanOp> plan) {
         int n = plan.size();
         if (n == 0) {
