@@ -1,0 +1,21 @@
+# Rust
+/target/
+/native/**/target/
+Cargo.lock.bak
+**/*.rs.bk
+
+# Java
+*.class
+/java/out/
+/java/target/
+/bench/out/
+/bench/lib/*.jar
+/valhalla-lab/out/
+
+# JDKs and downloaded artifacts (never committed — see docs/abi.md and
+# .claude/knowledge/jdk-toolchain-facts.md for how to obtain them)
+*.tar.gz
+
+# OS / editor noise
+.DS_Store
+*.swp
