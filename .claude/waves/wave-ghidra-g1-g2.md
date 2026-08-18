@@ -1,11 +1,26 @@
 # Wave: Ghidra G1 (lift proof) + G2 (program image format)
 
-> Executes `ghidra-integration-v1.md` G1 then G2. **DO NOT DISPATCH** —
+> **SUPERSEDED — 2026-08-18, do not dispatch under any circumstance.**
+> `AdaWorldAPI/ruff` PR #94 (`crates/ruff_r2il`) merged a typed intake arm
+> that consumes r2sleigh's R2IL/SSA DIRECTLY — in-process, ~43s, no JVM
+> roundtrip, no bespoke text-dump format to invent and parse. That plan's
+> own stop condition already closed the question this wave existed to
+> answer: *"§22.1: direct r2il/r2ssa consumption solves the upstream seam
+> — YES."* Building G1 (an `analyzeHeadless` post-script emitting a custom
+> P-code text dump) or G2 (a second, bespoke LE image format) now would be
+> a competing, throwaway lift path duplicating work already merged and
+> typed. Full reconciliation record:
+> `.claude/board/EPIPHANIES.md` `E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1`.
+> This file is kept for its archaeology (G0's real 74-opcode/`PcodeEmulator`
+> findings still stand as reference) — never dispatch the two waves below.
+
+> ~~Executes `ghidra-integration-v1.md` G1 then G2. **DO NOT DISPATCH** —
 > shelved with the consumer waves per the operator's calcify-first ruling;
 > G1 is technically independent of W3 but momentum stays on the substrate
 > waves until called. Cross-repo: G1's script lands in `AdaWorldAPI/ghidra`
 > (cloned at `/workspace/ghidra`, 12.2 DEV, Java 25+); G2's loader lands
-> here. One PR per repo; ghidra PR merges first.
+> here. One PR per repo; ghidra PR merges first.~~ *(pre-supersession text,
+> kept for the record.)*
 
 ---
 

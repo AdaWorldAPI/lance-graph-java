@@ -4,6 +4,381 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (measured) — the graph-consumer STOP condition was real, and is now cleared
+
+**Status:** FINDING + a correction of MY OWN earlier claim. **Confidence:**
+High — measured (`examples/graph_density_probe.rs`), not argued.
+
+### What "in the meantime" surfaced
+
+Asked what was available to build while `ruff_r2il` PR2/PR3 are blocked.
+First instinct was W5c (graph consumer) — I'd twice previously argued its
+D1a design needs zero substrate change (mask words are writable, facet-
+match already exists). Both times I checked the MECHANISM and skipped
+`wave-consumer-graph.md`'s own STOP condition, which names a DIFFERENT,
+real blocker: `RowStore::generate()`'s payload is uniform-random noise, so
+a decoded 1-2 hop BFS over it saturates to nearly every row regardless of
+decode convention — vacuous under the wave's own falsifier #4 ("seed / 1-
+hop / 2-hop must be three different, non-empty, non-total sizes"). No
+mechanism fix (writable masks, zero-copy reads) touches this; it is a
+DATA-SHAPE problem, not a decode-ambiguity problem, and the wave file says
+so explicitly: *"this wave NEEDS a deliberate edge-bearing generator arm:
+that is a substrate change, not a consumer hack."* I was about to dispatch
+G1/G2 into it before re-reading the STOP block in full — caught before any
+workers spawned.
+
+### The fix, measured before committing to parameters
+
+`RowStore::generate_with_edges(n_rows, seed, edge_classid, edge_gate_mask,
+edge_radius)` (native/lgj-abi/src/rowstore.rs) — additive, `generate()`
+untouched. Classid assignment is byte-identical to `generate()` (same
+SplitMix64 draws, same `(a>>>33)&0xF` formula; unused bits 37..64 of `a`
+become an independent sparsity gate, so `edge_classid=16` — out of range —
+reproduces `generate()` exactly, pinned by test). A gated, sparse subset of
+`edge_classid`-matching facets get a BOUNDED local-neighbourhood target
+(`row + offset mod n`, `offset` drawn from `b`, clamped to `±edge_radius`)
+instead of raw noise.
+
+`examples/graph_density_probe.rs` swept `(gate_mask, radius)` before any
+parameter was chosen — first pass at `n_rows=1000` was too small (avg
+degree < 1, everything collapsed to zero); widened to `n_rows=20_000` and
+got real, usable numbers (`gate_mask=0x0, radius=25`: seed=20 → 1hop=30 →
+2hop=40). Re-measured at a smaller, test-suite-friendly `n_rows=2000` for
+the pinned regression: seed=10 → **1hop=19 → 2hop=29** — three different,
+non-empty, non-total sizes, exactly the falsifier's own shape, now pinned
+as `measured_hop_counts_are_three_distinct_non_empty_non_total_sizes`.
+
+**Two disable-runs, both as specified:**
+- Broke the radius-wrap formula (dropped `rem_euclid`) → exactly the three
+  tests touching the target formula went red (the transcription test, the
+  in-bounds/radius invariant, the pinned hop-count regression); the seven
+  tests that don't touch target computation stayed green. Restored.
+- Ignored the sparsity gate mask (fired on classid match alone) → only the
+  transcription test went red. The in-bounds/radius invariant test
+  correctly stayed green — density and target-correctness are orthogonal
+  properties, and the disable changes density, not correctness. Verified
+  this is the RIGHT outcome, not a vacuous test: geometry validity doesn't
+  depend on WHICH facets get the treatment, only on the treatment itself
+  once applied. Restored.
+
+Gates: `lgj-abi` 90/90 (was 84; +6 new tests), fmt clean, clippy
+`--all-targets --all-features` clean.
+
+### Consequence
+
+`wave-consumer-graph.md` updated in place: the STOP condition marked
+RESOLVED with the measured numbers, and the file's own dispatch header
+corrected — the "calcify, do not dispatch" gate was already lifted
+session-wide (W5a/W5b shipped under the identical wording); this wave's
+GENUINE extra gate was the generator, now cleared. **The graph consumer
+(G1/G2) is dispatchable.** Not dispatched in this same pass — this PR is
+scoped to the substrate-tier generator only, per the wave file's own rule
+that a generator extension is NOT a consumer hack and lands as its own
+change.
+
+## 2026-08-18 (R2IL handshake) — E-LGJ-VALHALLA-IS-INTEGRATED-AS-A-PROPERTY-NOT-A-CONCEPT-1
+
+**Status:** FINDING + a storno of my own handoff premise (operator-caught).
+**Confidence:** High — verified against the tree, not recalled.
+
+### The handshake, first
+
+The R2IL session answered all five questions of the cross-session prompt:
+(1) `0xC4` acknowledged as a fixed point — PR3 mints INTO it, provenance
+fence as specified, concept names/slots arrive in the PR body; (2) the
+stale `ogar_codebook` mirror confirmed first-hand at lance-graph `db488f5`
+— and the sync is explicitly handed to THIS session ("don't wait on me...
+open it separately, now"; serialize on one owner, which is now me); (3)
+commitment: PR2 ships an abi.md-§11-style layout doc IN the same PR, and
+the two ⚠ stability flags flip in that same commit — build against the
+doc, never against `furnace.rs`; (4) `0xC0` is **Panama alone** — Valhalla
+gets no domain representation; (5) a Java-side consumer IS the expected
+end-state: `consumers/ghidra/` beside `trades/` and `bricks/`, gated on
+(2)+(3) — shape W6/W7 toward it, keep the read-only fence until the PR2
+doc exists and PR3's classids are real. Status note: the ruff session is
+mid upstream-catch-up merge (~1500 commits, separate branch); PR2→PR3
+queue after it settles.
+
+### The storno — my premise was understated, the ruling survives anyway
+
+My handoff prompt told the R2IL session Valhalla "was a laboratory phase
+here, not a door." The operator demanded a double-check, and the tree says
+that summary was WRONG about integration while right about addressability:
+
+- **Valhalla IS integrated, by design, in the shipping API.** All five
+  production descriptor types (`LaneId`/`Ordinal`/`MaskId`/`RowRange`/
+  `FacetId`) carry a "Valhalla A/B candidate" Javadoc contract: the same
+  source compiles as `value record` under JEP 401 — migration is ONE WORD
+  per type. That constraint is load-bearing on the shipping surface; it is
+  the arc's "Panama and Valhalla become the supraconductor" request
+  honored at the vocabulary level.
+- **A real EA build ran the A/B** (`27-jep401ea3`, in-container):
+  flattening cliff measured at 8-byte payload (`RowRange` at 16 B landing
+  on the wrong side, recorded as the one over-optimistic expectation);
+  `LaneId`/`Ordinal` arrays 5.5× smaller, reads up to 8.3× faster where
+  flattening applies; the bulk thesis unchanged — native wins 38–57× on
+  BOTH platforms, which is exactly why bulk data stays native and only the
+  descriptor vocabulary is Valhalla-shaped.
+- **Deliberately NOT adopted:** the three preview-only mechanisms (no
+  `--add-exports`, no `jdk.internal.*`) — "distorting a public API to fit
+  a preview VM's current budget would bake a temporary constraint into a
+  permanent surface."
+
+**Why the ruling stands on the corrected premise:** a `ConceptDomain` is a
+vocabulary of ADDRESSABLE things. Valhalla's integration here is a designed
+PROPERTY of the C0 concepts' Java vocabulary (one-word readiness +
+measured flattening payoff), and properties of concepts do not get
+domains. The R2IL session's own phrase — "a facet on an existing concept,
+not a domain" — described the true state better than my premise did.
+
+**Landed:** OGAR PR #277 (merged, `386a6fd`) corrects the `JavaRuntime`
+doc comment to "Panama FFM alone," states the integrated-as-property
+argument IN the doc so the ruling cannot be misread as "Valhalla is
+unintegrated," updates the layout-doc band row, and APPENDS a dated
+correction to `D-CBAND-ALTITUDE` (original text kept, per append-only).
+
+**The meta-lesson, same family as the shape-vs-altitude storno:** a
+one-line characterization written to justify a conclusion can be
+simultaneously right about the conclusion and wrong as a description —
+and it is the DESCRIPTION that calcifies when quoted into doc comments.
+The operator's "double check whether you didn't integrate it or the other
+session just isn't aware" is the exact question that separates the two.
+
+### Now owned by this session (from the handshake)
+
+1. **The `ogar_codebook` mirror sync in lance-graph-contract** — add
+   `Ontology`(0x03)/`Blocks`(0x17)/`JavaRuntime`(0xC0)/`Analytics`(0xC1)/
+   `BinaryLifting`(0xC4) to the wire-mirror + parity pins. Opening now.
+2. **Shape W6/W7 toward `consumers/ghidra/`** — with the read-only fence
+   held until PR2's layout doc + PR3's real classids exist.
+
+## 2026-08-18 (even later) — ruff #96 is a DIFFERENT arm; the real find was already on main: a staging guide addressed to THIS session
+
+**Status:** FINDING. **Confidence:** High — read the merged PR body and the
+in-tree harvest artifacts directly, not summarized.
+
+### PR #96 is not the drill-down proposer this repo is waiting on
+
+`AdaWorldAPI/ruff` PR #96 ("residual ledger for the plain arm") extends
+`ruff_python_spo`'s PLAIN Python-source harvest (PR #95: dismech/A2UI-sdk/
+ruff-scripts corpora, CURIE-shaped constants — `MONDO`/`KISAO`/`infores`
+prefixes, bio-ontology work). It is its own "self-adaptive drill loop," but
+over a **different crate, different corpus family, different consumer**
+(ontology/MedCare-rs-shaped harvest) than `ruff_r2il` (binary/R2IL lifting,
+the one `E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1` tracks). Zero overlap with
+this repo's C-band/Ghidra/JavaRuntime concerns — recorded here only so a
+future session doesn't wire a false connection between the two arms because
+they share vocabulary ("residual ledger," "drill loop," "proposer").
+
+### What IS relevant, sitting on `ruff` main since a same-day, non-PR commit
+
+Commit `bbaebda` (between PR #94 and PR #95, pushed directly to main) added
+`.claude/harvest/r2il/STAGED-CODEGEN-GUIDE.md`, explicitly addressed:
+*"Audience: the sibling session that consumes this arc's output (the Ghidra
+console work...)"* — this repo, by description if not by name. It confirms
+what the prior reconciliation already found (PR 2 routes→V3 has NOT landed)
+and adds the piece that entry lacked: **a 5-stage staging order (S1–S5) that
+does NOT wait on PR 2**, with "do not skip to S3" stated plainly (S3 is
+codegen into an additive landing zone; S1/S2 are read-only ledger/ore
+inspection). Also pins the stability table per artifact — `FlatFact`'s two
+payload slots and the provisional `VarnodeFacet` classid (`0x0000`,
+placeholder for the PR-3 `ogar_codebook` mint) are explicitly **not**
+stable; slag/census/provenance/convention are.
+
+### S1 done — read the ledger, no codegen, no PR2 dependency
+
+The pass-1 harvest artifacts are already in-tree at `ruff/.claude/harvest/
+r2il/` (gitignored, present on disk). Read directly:
+
+- **B1 conservation: PASS** — `dropped=0`, `harvested(54304) =
+  classified(17557) + residual(36747)`.
+- **B2 seven-opcode coverage: INVESTIGATE (91.30%)** — inside the declared
+  90–99% band, not a KILL.
+- **B3 slag named-and-addressed: PASS** — 43 distinct residual shapes,
+  `dominant_share = 0.215` (well under the 0.60 ceiling), every bucket
+  except `no_facet_coordinate` carries an example address.
+- **The non-bar prediction MISSED, and was recorded honestly rather than
+  hidden**: only 14.15% of `Op` facts classified, against a pre-registered
+  60–80% guess. Dominant residual reason is `opcode_not_in_convention` —
+  expected, since pass 1 deliberately classifies only 7 of P-code's 74
+  opcodes (Copy/IntAdd/Load/Store/CBranch/Call/Return); the other ~67 are
+  correctly unclassified, not mis-measured.
+- **Corpus is r2sleigh's own e2e stress-test fixtures** (143 functions,
+  x86-64, commit `60942f6`), not yet a Ghidra-shaped real binary — still a
+  bring-up-scale run, not production scale.
+
+### Consequence: still nothing to physically consume, and that's correct
+
+`wave-ghidra-g1-g2.md` / `wave-ogar-machine-pm1.md` gate #3 are unchanged —
+PR2/PR3 remain unmerged, and the stability table says explicitly not to
+persist `FlatFact` payload bytes or the placeholder classid yet. The
+concrete, unblocked next step for this repo — whenever there is a driving
+reason to spend it, not scheduled here — is **S2** (join ore rows back to
+native addresses via `ore::instruction_addr`, still read-only) as
+preparation, so S3 (an additive landing-zone crate here, `// @generated`,
+never edited into existing files) is measured before it is built, per the
+guide's own "the MedCare and OpenProject transcodes earned their numbers by
+measuring at S1/S2 first" precedent.
+
+## 2026-08-18 (later) — E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1
+
+**Status:** FINDING (reconciliation, per `ghidra-integration-v1.md`'s own
+HANDOFF BOUNDARY note: *"the receiving session should reconcile the handoff
+against this plan's G-waves — they may supersede G1's lift-path decision
+entirely — rather than running both designs in parallel."*). **Confidence:**
+High — read against the merged PR, not inferred from the operator's summary.
+
+### What landed elsewhere, verified directly
+
+`AdaWorldAPI/ruff` PR #94 (merged, `10fab88`'s ancestor) shipped
+`crates/ruff_r2il`: a typed intake arm reading r2sleigh's R2IL/SSA directly
+(`../../../r2sleigh/crates/{r2il,r2ssa}`, in-process, ~43s) into
+`ore → furnace → slag`. `dropped == 0` by construction
+(`harvested = classified + residual`); slag is a **named, addressed**
+residual ledger (`ResidualLedger::by_address`), not a catch-all — and B3's
+own falsifier makes `residual == 0` a **KILL**, meaning the ladder was
+deliberately left unfinished for a follow-on pass. That follow-on —
+reading `by_address` and proposing finer `ConventionRow`s at each address,
+re-running, converging pass over pass — is the "drill-down proposer" the
+operator flagged as in progress in another session. It is PR2 in the R2IL
+plan's own wave ladder (`.claude/plans/r2il-behavioral-ir-v1.md`), gated on
+PR1's corpus numbers; PR3 (the classid mint for the R2IL container concept
+in `lance-graph-contract::ogar_codebook`, item O5) is gated on PR2 proving
+the route set. **Neither PR2 nor PR3 has landed as of this entry.**
+
+### The reconciliation
+
+`ghidra-integration-v1.md`'s G1 (an `analyzeHeadless` post-script dumping a
+bespoke P-code text form) and G2 (a hand-rolled versioned LE image format +
+Rust loader) are **superseded**, not merely lower-priority. The R2IL plan's
+own stop condition already answers the question G1/G2 existed to answer:
+*"§22.1: direct r2il/r2ssa consumption solves the upstream seam — YES
+(43s)."* Dispatching `wave-ghidra-g1-g2.md` now would build a second,
+throwaway lift path and a second, competing image format next to one that
+is already merged, typed, and further along. `wave-ghidra-g1-g2.md` marked
+superseded in place (kept for G0's real archaeology — the 74-opcode count,
+the `PcodeEmulator` oracle precedent — which is still true and reusable,
+just not via a Ghidra-side script). `wave-ogar-machine-pm1.md`'s gate #3
+repointed from "Ghidra G1+G2 merged" to "ruff_r2il PR2+PR3 merged," so the
+next session checking that gate finds the real dependency instead of a
+dead one.
+
+### Consequence for the C-band ruling
+
+None to the reservation itself — `E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1`'s
+`0xC4 BinaryLifting` fence ("Ghidra and r2sleigh are two consumers of the
+same SLEIGH specs over ONE vocabulary") is now literally true in code, not
+just anticipated: `ruff_r2il` path-deps r2sleigh's SLEIGH-driven crates
+directly. PR3's classid mint, when it lands, is the first real tenant of
+that slot.
+
+### A separate, independently-found gap — flagged, not fixed here
+
+`lance-graph-contract::ogar_codebook` documents itself as a **wire-compatible
+mirror** of OGAR `ogar-vocab::ConceptDomain` under an explicit drift guard
+("if OGAR's CODEBOOK ever moves an id, BOTH sides must update together").
+Read directly against OGAR post-PR-#276: the mirror is missing `Ontology`
+(`0x03`, present in OGAR before this session) and `Blocks` (`0x17`, added
+2026-08-04) — **pre-existing drift, not caused by this session's C-band PR**
+— and will also lack `JavaRuntime`/`Analytics`/`BinaryLifting` (`0xC0`/
+`0xC1`/`0xC4`) once PR3 needs to route on them. Out of scope to fix
+speculatively from here (lance-graph-contract is on this branch but not
+under active work this session, and the mirror's own convention is to catch
+up via its parity tests, not via an unprompted sync); recorded so PR3 does
+not silently trip on it.
+
+## 2026-08-18 — E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1
+
+**Status:** RULING (operator, 2026-08-18: *"Java is an entire different layer
+that's why I chose another higher level"*). **Confidence:** High for the
+ruling; the reservation itself is OGAR-side and NOT yet made.
+
+### The ruling
+
+The classid's domain byte (`0xDDCC`'s `DD`, canon hi u16) is **stratified by
+altitude**, not a flat namespace where placement is mnemonic or next-free.
+Numerically higher = architecturally higher layer. The **C-band is the layer
+above the Rust substrate**, and within it:
+
+| slot | owner | why there |
+|---|---|---|
+| **C0** | **Java · Panama · Valhalla** | the supraconductor membrane over the SoA substrate — the FLOOR of that layer, the door everything else in it arrives through |
+| **C1** | **ogar-bricks + Databricks** | the analyst estate |
+| **C4** | **Ghidra** | bolted onto C0 (Ghidra *is* a JVM application — this repo's own G0 archaeology: fork at 12.2 DEV, minimum Java 25, Gradle ≥ 9.1), and explosive — C4 the plastic explosive, for the blast radius of turning any binary into addressable rows |
+
+C4 is a **tenant** of the layer C0 floors, not a peer of C0. That internal
+ordering is part of the ruling, not decoration.
+
+### Why the axis is structurally sound (not just mnemonic)
+
+The domain byte is the first two nibbles of the classid, so its **top nibble
+is a 16-way altitude selector**: one mask separates "substrate ontology" from
+"host layer" with zero lookup and zero value decode — the canon's *the key
+prerenders nodes with zero value decode*, applied to layering. A first-nibble
+split is the most expensive split available in the 16-ary cascade; spending it
+on **altitude** is what makes it worth spending.
+
+### What this corrects (storno — three of my own proposals, all wrong)
+
+I mapped by **subject matter** ("P-code is an opcode vocabulary, Blocks is an
+opcode vocabulary, therefore adjacent") when the actual axis is **altitude**.
+Withdrawn, in order:
+
+1. **"Seat P-code at `0x1718` as a loco consumer slot."** Wrong tier. `0x17`
+   is ogar-loco = **lance-graph's own internal orchestration** (elixir-on-rails
+   shaped, rs-graph-llm as the graph executor, Rig marking the replayability
+   boundary between external LLM and internal low-code). It is a tier with a
+   job, not a container for any palette whose ops fit in a byte. The `0x1717`+
+   consumer slots are frontends *of that orchestration*.
+2. **"Put P-code at `0x18`, next to Blocks."** Same error, one slot over.
+3. **"A separate substrate/layout-contract domain"** as my third pick. Not a
+   separate thing — it is **C0's content**. See the consequence below.
+
+Root cause, worth keeping because it recurred three times in one session: I
+flattened distinct motifs into one family because they share a **shape**
+(everything becomes `(function : value)` calls in a 512-byte node). Loco's ABI
+being *reusable* does not make `0x17` a parking lot. **Shape-similarity is not
+domain-identity** — the dilution failure this workspace names by name.
+
+### What survives, and is the useful half
+
+**Reuse loco's node shape; own your own domain.** Loco says it itself — the
+classid naming *a function body* "belongs here, at the substrate, and a
+frontend references it rather than minting its own" (`ogar-loco` module doc,
+`LocoConcept::FunctionBody` = `0x1701`). So a C4 P-code body can BE a loco
+`FunctionBody` while every P-code concept lives in C4; likewise a C1 pipeline.
+**Borrowing the container is not joining the domain.**
+
+Also surviving, unchanged: the **two registers** point. An *op vocabulary*
+(palette bytes) and an *artifact ontology* (concept ids) are different
+registers. Ghidra: P-code ops vs function/section/symbol. Databricks: pipeline
+verbs vs catalog/table/column/type — and the latter already has a real seam
+here, `lance-graph-catalog/src/unity_catalog.rs`, with Delta as a table reader.
+
+### The one consequence for code in THIS repo
+
+**W6's schema/classid field on `LgjResourceInfo`/`LgjLaneDesc` carries a C0
+concept.** A row store stamping which layout contract its bytes obey is the
+membrane naming itself from inside its own layer — not a substrate concept
+borrowed downward. Nothing else on the current wave list depends on the
+allocation, so W5c/W6 are unblocked either way.
+
+### Open, and NOT ours to close
+
+The reservation is an **OGAR-side, operator-gated** act (`ogar-vocab`'s
+`ConceptDomain` + the §2 allocation table; minting is gated on the 5+3 pass,
+while *reserving* explicitly "costs nothing"). Two mechanical notes for
+whoever makes it:
+
+- **C2/C3 fall between C1 and C4.** Blocks set the precedent that a deliberate
+  gap gets a **pinned test asserting it stays `Unassigned`** (`ogar-vocab`
+  `lib.rs:5624-5644`, guarding the `0x10`–`0x16` gap) so a later pass cannot
+  "tidy" a domain downward into it. The C-band wants the same three lines.
+- **`0xC0` is a digit-swap of `0x0C` Automation** (`0xC001_0000` vs
+  `0x0C01_0000`). Raised once, not decisive, recorded so it is not
+  re-discovered as if new.
+
+
 ## 2026-08-17 — E-LGJ-WAVE-DISPATCH-VALIDATED-1
 
 **Status:** FINDING (first real dispatch of the wave system). **Confidence:**

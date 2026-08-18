@@ -1,3 +1,111 @@
+## 2026-08-18 (measured) — W5c's real blocker found + cleared: RowStore::generate_with_edges
+
+Asked what was buildable while ruff_r2il PR2/PR3 are blocked. Was about to
+dispatch the graph consumer (W5c) on the strength of D1a's mechanism
+(writable masks, existing facet-match) being sufficient -- twice claimed
+this in earlier turns -- before re-reading `wave-consumer-graph.md`'s own
+STOP condition in full and catching a real, different blocker: plain
+`RowStore::generate()`'s payload is uniform noise, so any 1-2 hop BFS over
+it saturates to nearly every row regardless of decode convention --
+vacuous under the wave's own anti-vacuity falsifier. A data-shape problem,
+not a mechanism problem; caught before any workers spawned.
+
+Fixed with `RowStore::generate_with_edges` (native/lgj-abi) -- additive,
+`generate()` byte-identical for out-of-range `edge_classid` (pinned).
+Parameters chosen from a real measurement sweep
+(`examples/graph_density_probe.rs`), not guessed: at `n_rows=2000,
+gate_mask=0x0, radius=25`, a 10-row seed reaches 19 rows at 1 hop, 29 at 2
+hops -- pinned as a regression test. Two disable-runs (radius-wrap
+formula; sparsity gate) both went red exactly where expected, including
+one case (the gate disable) correctly NOT failing an orthogonal geometry
+test -- verified as the right outcome, not a vacuous one.
+
+`wave-consumer-graph.md` updated: STOP condition marked RESOLVED with the
+measured numbers; the file's stale "calcify, do not dispatch" header
+corrected (that gate was already lifted session-wide). **The graph
+consumer is now genuinely dispatchable** -- not dispatched in this pass,
+scoped to the generator only. Gates: lgj-abi 90/90 (+6), fmt/clippy clean.
+Full record: `EPIPHANIES.md`, the entry above the R2IL handshake one.
+
+## 2026-08-18 (even later) — ruff #96 is a different arm; found + read the REAL staging guide
+
+Checked "ruff 96 merged." It's `ruff_python_spo`'s plain-Python residual
+ledger (dismech/CURIE-constant harvest, ontology-shaped) — a sibling
+drill-loop, but a DIFFERENT crate and consumer than `ruff_r2il`, and
+unrelated to this repo's C-band/Ghidra/JavaRuntime track. No action needed
+here; recorded so the two arms aren't confused later since they share
+vocabulary.
+
+The genuinely relevant find was already on `ruff` main, unrelated to #96:
+`.claude/harvest/r2il/STAGED-CODEGEN-GUIDE.md`, explicitly addressed to
+"the sibling session ... (the Ghidra console work)" — this repo. It
+confirms PR2 (routes→V3) still hasn't landed and gives a 5-stage staging
+order (S1 ledger-read → S2 ore-join → S3 additive codegen → S4 one
+consumer → S5 target-profile fork) that does NOT wait on PR2 for its first
+two stages. Ran S1 against the real in-tree harvest artifacts: B1
+conservation PASS (dropped=0), B3 addressed-slag PASS (43 shapes,
+dominant_share 0.215), B2 at 91.30% (INVESTIGATE band), and the
+pre-registered 60-80%-classified prediction MISSED at a measured 14.15% —
+recorded honestly, which is the point of pre-registering it. Dominant
+residual is `opcode_not_in_convention`, expected: pass 1 only classifies 7
+of P-code's 74 opcodes by design. Full record + the stability table
+(FlatFact payload bytes and the placeholder VarnodeFacet classid are
+explicitly NOT stable yet): `EPIPHANIES.md`, the entry above
+`E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1`.
+
+No wave-gate change — PR2/PR3 still unmerged, `wave-ogar-machine-pm1.md`
+gate #3 stands as previously repointed. Next unblocked step (not scheduled,
+available when there's a reason to spend it): S2, still read-only.
+
+## 2026-08-18 (later) — Ghidra G1/G2 waves reconciled: superseded by ruff_r2il, not built
+
+Checked what "the other session writing the autoadapting drill-down proposer"
+(ruff/r2sleigh) actually unblocks here, against the merged PR rather than the
+summary. `AdaWorldAPI/ruff` PR #94 shipped `crates/ruff_r2il` — a typed
+intake arm (ore/furnace/slag) reading r2sleigh's R2IL/SSA directly, with an
+addressed residual ledger deliberately left non-empty for a follow-on pass.
+That follow-on IS the drill-down proposer: PR2 in the R2IL plan's own wave
+ladder, reading `ResidualLedger::by_address` and proposing finer convention
+rows, converging pass over pass. **Not landed yet** — gated on PR1's corpus
+numbers. PR3 (the classid mint in `lance-graph-contract::ogar_codebook`,
+item O5) is gated on PR2. So there is nothing new to CONSUME here today.
+
+What there IS: `wave-ghidra-g1-g2.md` (a bespoke `analyzeHeadless` lift
+script + a hand-rolled LE image format) is now superseded, not merely
+lower-priority — the R2IL plan's own stop condition already answers the
+question those waves existed to answer ("direct r2il/r2ssa consumption
+solves the upstream seam — YES, 43s"). Marked superseded in place;
+`wave-ogar-machine-pm1.md`'s gate #3 repointed from "Ghidra G1+G2 merged" to
+"ruff_r2il PR2+PR3 merged" so the real dependency is visible instead of a
+dead one. Full record + a separately-found, pre-existing `ogar_codebook`
+mirror-drift gap (flagged, not fixed): `EPIPHANIES.md`
+`E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1`.
+
+No code changed; C-band ruling (`E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1`,
+merged as OGAR PR #276) is unaffected — its `0xC4` fence is now literally
+true in code rather than anticipated.
+
+## 2026-08-18 — C-band ruling recorded: the domain byte carries ALTITUDE
+
+Operator ruling (*"Java is an entire different layer that's why I chose
+another higher level"*): the classid domain byte is **stratified by layer**,
+not a flat namespace. The C-band is the stratum ABOVE the Rust substrate —
+**C0** Java/Panama/Valhalla (the membrane, and the FLOOR of that layer),
+**C1** ogar-bricks + Databricks (the analyst estate), **C4** Ghidra (a tenant
+of C0's layer — Ghidra is itself a JVM application per this repo's G0
+archaeology — and explosive, for the blast radius of turning any binary into
+addressable rows).
+
+Full entry, including the three of my own proposals it corrects and the
+root-cause (I clustered by SHAPE — everything becomes `(function : value)`
+calls in a 512-byte node — where the real axis is ALTITUDE):
+`EPIPHANIES.md` `E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1`.
+
+**Consequence for this repo, and it is the only one:** W6's schema/classid
+field on `LgjResourceInfo`/`LgjLaneDesc` carries a **C0** concept. Nothing on
+the current wave list is blocked by the allocation — the reservation is
+OGAR-side and operator-gated (reserving costs nothing; minting is 5+3-gated).
+
 ## 2026-08-17 (dispatch 4) — W5b bricks shipped: authorization IS a mask, measured
 
 `wave-consumer-bricks.md` executed (2 Sonnet workers K1/K2, disjoint main/test
