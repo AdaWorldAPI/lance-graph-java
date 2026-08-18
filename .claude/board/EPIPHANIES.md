@@ -4,6 +4,82 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (R2IL handshake) — E-LGJ-VALHALLA-IS-INTEGRATED-AS-A-PROPERTY-NOT-A-CONCEPT-1
+
+**Status:** FINDING + a storno of my own handoff premise (operator-caught).
+**Confidence:** High — verified against the tree, not recalled.
+
+### The handshake, first
+
+The R2IL session answered all five questions of the cross-session prompt:
+(1) `0xC4` acknowledged as a fixed point — PR3 mints INTO it, provenance
+fence as specified, concept names/slots arrive in the PR body; (2) the
+stale `ogar_codebook` mirror confirmed first-hand at lance-graph `db488f5`
+— and the sync is explicitly handed to THIS session ("don't wait on me...
+open it separately, now"; serialize on one owner, which is now me); (3)
+commitment: PR2 ships an abi.md-§11-style layout doc IN the same PR, and
+the two ⚠ stability flags flip in that same commit — build against the
+doc, never against `furnace.rs`; (4) `0xC0` is **Panama alone** — Valhalla
+gets no domain representation; (5) a Java-side consumer IS the expected
+end-state: `consumers/ghidra/` beside `trades/` and `bricks/`, gated on
+(2)+(3) — shape W6/W7 toward it, keep the read-only fence until the PR2
+doc exists and PR3's classids are real. Status note: the ruff session is
+mid upstream-catch-up merge (~1500 commits, separate branch); PR2→PR3
+queue after it settles.
+
+### The storno — my premise was understated, the ruling survives anyway
+
+My handoff prompt told the R2IL session Valhalla "was a laboratory phase
+here, not a door." The operator demanded a double-check, and the tree says
+that summary was WRONG about integration while right about addressability:
+
+- **Valhalla IS integrated, by design, in the shipping API.** All five
+  production descriptor types (`LaneId`/`Ordinal`/`MaskId`/`RowRange`/
+  `FacetId`) carry a "Valhalla A/B candidate" Javadoc contract: the same
+  source compiles as `value record` under JEP 401 — migration is ONE WORD
+  per type. That constraint is load-bearing on the shipping surface; it is
+  the arc's "Panama and Valhalla become the supraconductor" request
+  honored at the vocabulary level.
+- **A real EA build ran the A/B** (`27-jep401ea3`, in-container):
+  flattening cliff measured at 8-byte payload (`RowRange` at 16 B landing
+  on the wrong side, recorded as the one over-optimistic expectation);
+  `LaneId`/`Ordinal` arrays 5.5× smaller, reads up to 8.3× faster where
+  flattening applies; the bulk thesis unchanged — native wins 38–57× on
+  BOTH platforms, which is exactly why bulk data stays native and only the
+  descriptor vocabulary is Valhalla-shaped.
+- **Deliberately NOT adopted:** the three preview-only mechanisms (no
+  `--add-exports`, no `jdk.internal.*`) — "distorting a public API to fit
+  a preview VM's current budget would bake a temporary constraint into a
+  permanent surface."
+
+**Why the ruling stands on the corrected premise:** a `ConceptDomain` is a
+vocabulary of ADDRESSABLE things. Valhalla's integration here is a designed
+PROPERTY of the C0 concepts' Java vocabulary (one-word readiness +
+measured flattening payoff), and properties of concepts do not get
+domains. The R2IL session's own phrase — "a facet on an existing concept,
+not a domain" — described the true state better than my premise did.
+
+**Landed:** OGAR PR #277 (merged, `386a6fd`) corrects the `JavaRuntime`
+doc comment to "Panama FFM alone," states the integrated-as-property
+argument IN the doc so the ruling cannot be misread as "Valhalla is
+unintegrated," updates the layout-doc band row, and APPENDS a dated
+correction to `D-CBAND-ALTITUDE` (original text kept, per append-only).
+
+**The meta-lesson, same family as the shape-vs-altitude storno:** a
+one-line characterization written to justify a conclusion can be
+simultaneously right about the conclusion and wrong as a description —
+and it is the DESCRIPTION that calcifies when quoted into doc comments.
+The operator's "double check whether you didn't integrate it or the other
+session just isn't aware" is the exact question that separates the two.
+
+### Now owned by this session (from the handshake)
+
+1. **The `ogar_codebook` mirror sync in lance-graph-contract** — add
+   `Ontology`(0x03)/`Blocks`(0x17)/`JavaRuntime`(0xC0)/`Analytics`(0xC1)/
+   `BinaryLifting`(0xC4) to the wire-mirror + parity pins. Opening now.
+2. **Shape W6/W7 toward `consumers/ghidra/`** — with the read-only fence
+   held until PR2's layout doc + PR3's real classids exist.
+
 ## 2026-08-18 (even later) — ruff #96 is a DIFFERENT arm; the real find was already on main: a staging guide addressed to THIS session
 
 **Status:** FINDING. **Confidence:** High — read the merged PR body and the
