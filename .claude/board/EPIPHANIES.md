@@ -4,6 +4,70 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 — E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1 (STORNO, operator-ruled, council-ratified)
+
+**Status:** RULED — operator CORRECTION WAVE + RULING CLARIFICATION +
+A1 ARCHITECTURE RULING (all 2026-08-18), ratified by the full 5+3
+council (spec v3: `.claude/plans/mask-native-navigation-correction-v1.md`).
+**Confidence:** Operator-locked.
+
+### What this corrects
+
+`Graph.java:18-19`'s claim that the `long[]` frontier is *"a deliberate
+simplification for this consumer example, not a workaround."* That
+sentence is VALID for the bounded fixture it shipped in — and INVALID
+as target precedent. The entries below in this log (the graph-wave
+entries of 2026-08-18) accurately recorded the decision as made; what
+they could not know is that the currency itself was drift. The
+sharpest evidence that fixtures calcify: `GraphHopTest:459`'s own
+reflective allowlist had begun ENFORCING `long[]` as the sanctioned
+non-scalar egress — the guard test was defending the drift.
+
+### What PR #18 DID prove (preserved, not deleted)
+
+Membrane-surviving edge data (the 10/19/29 pinned hop counts reproduced
+cross-language), falsifiable hop semantics (set-equality caught a +4
+decode corruption a count check missed), measurable crossing cost
+(first-hop 2 / steady-state 1 — measured, then pinned), and a viable
+fluent vocabulary (`from`/`hop`/`minus`/`count`). It remains the SCALAR
+REFERENCE ORACLE — both independent BFS transcriptions stay verbatim.
+
+### What it did NOT prove
+
+That `long[]` is a frontier currency, that `TreeSet<Long>` is a query
+substrate, or that per-row payload reads are a target execution model.
+**Zero serialization does not imply zero-copy semantic navigation — a
+`long[]` of selected row IDs is still a materialised population.**
+
+### The ruling (the law this repo now carries)
+
+The three currencies — ClassView (meaning, late-bound provider) /
+WideFieldMask–FieldMask (facet participation) / Mask (population) —
+come from `lance-graph-contract`, THE semantic law; the contract split
+from the engine is blast-radius containment, NOT semantic optionality.
+The correction is one architectural closure: contract →
+ClassView/FieldMask/WideFieldMask → mask-native population ops →
+lgj-abi → Java ergonomic facade, complete only when Java ergonomics
+navigate the contract-governed substrate without row hydration. The A1
+ARCHITECTURE RULING extends the same law to COMPUTE: the 64K parallel
+SoA / deterministic-landing / batch-version model is inherited as
+architecture (parallel compute PROVEN in-tree via the EXP-KIA
+concurrency probe; the ~125/233 ms figures are operator-measured with
+the receipt currently out-of-tree; the batch-publication sole writer is
+shipped but not yet production-wired) — with the landing-key Rubicon:
+CastId/arrival order never becomes semantic, and the generic parallel
+write API stays BLOCKED until landing identity is arrival-order
+independent. Root `CLAUDE.md` (created with this entry) is the policy
+guard; wave D-LGJ-W8 (STATUS_BOARD) is the execution record.
+
+### Honest note
+
+The drift was self-documented at every step by this repo's own board
+hygiene — the D1 ruling, the javadoc, this log — which is exactly why
+it was correctable by audit instead of archaeology. The failure mode
+was not silence; it was a locally-reasonable decision calcifying into
+precedent because its own guard test enforced it.
+
 ## 2026-08-18 (final for now) — the graph wave's own crossing-cost assumption was wrong, measured and fixed before shipping
 
 **Status:** FINDING, caught during orchestrator review of dispatched

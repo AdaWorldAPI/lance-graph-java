@@ -1,4 +1,15 @@
-## lgj-vertical-slice-v1 — the first Panama×Valhalla×ndarray::simd proof (PRE-REGISTERED 2026-08-17)
+## mask-native-navigation-correction-v1 — D-LGJ-W8 (operator CORRECTION WAVE, 2026-08-18)
+
+Plan: `.claude/plans/mask-native-navigation-correction-v1.md` (spec v3,
+council-ratified). Storno: `EPIPHANIES.md`
+`E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1`. Root `CLAUDE.md` =
+the policy guard, created at the A3 freeze.
+
+| D-id | Deliverable | Status |
+|---|---|---|
+| D-LGJ-W8 | Mask-native navigation correction + 64K-compute architecture inheritance. Gate ladder: AUDIT → SPEC → COUNCIL → FREEZE → SUBSTRATE (ndarray PR-N + lgj-abi PR-W8a) → FACADE (PR-W8b) → GRAPH MIGRATION → FALSIFIERS → POLICY | **AUDIT ✓** (A0 6-lens, drift CONFIRMED) → **SPEC ✓** (combined mask + compute, two audit fleets: 44 savant findings + 37 spine findings) → **COUNCIL ✓** (operator A2 verdict + 3 reviewers: 1 P0 resolved — model identifiers de-named from the spec; 6 P1 + ~20 P2 applied; v3 ratified 2026-08-18) → **FREEZE: this commit (PR-0)** → SUBSTRATE/FACADE/MIGRATION queued per spec §3.10 |
+
+
 
 Plan: `.claude/plans/lgj-vertical-slice-v1.md`. Every D-id below maps 1:1 to
 a phase in that plan and to a Phase-tracking task in this session's task
