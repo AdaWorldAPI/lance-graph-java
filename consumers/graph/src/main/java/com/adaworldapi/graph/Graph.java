@@ -1,207 +1,255 @@
 package com.adaworldapi.graph;
 
-import com.adaworldapi.lancegraph.FacetId;
-import com.adaworldapi.lancegraph.FacetMatchView;
+import com.adaworldapi.lancegraph.Mask;
 import com.adaworldapi.lancegraph.RowStore;
+import com.adaworldapi.lancegraph.WideFieldMask;
 
 import java.util.Objects;
-import java.util.TreeSet;
 
 /**
  * An immutable, fluent description of a set of row indices reached by traversing a {@link RowStore}
  * opened with {@link RowStore#openWithEdges} — one hop at a time.
  *
- * <h2>Currency: a plain row-index set, not a native {@code Mask}</h2>
+ * <h2>Currency: a native {@link Mask}, not a Java-heap row-index array</h2>
  *
- * <p>{@link com.adaworldapi.lancegraph.Mask} has no public constructor from an arbitrary Java-side
- * collection of row indices in this codebase today, so a traversal frontier here is a plain sorted
- * {@code long[]} — a Java-heap value, not a native resource. This is a deliberate simplification for
- * this consumer example, not a workaround: it still satisfies zero-serialization (a {@code long[]}
- * living on the Java heap is neither {@code byte[]} nor JSON, and nothing crosses the membrane to
- * build, narrow, or reduce it), and it still gives crossings proportional to hops rather than to
- * rows — {@link #hop(int)} pays exactly <strong>one</strong> native crossing
- * ({@link RowStore#facetMatches}) for the whole hop, regardless of how many rows are in the current
- * frontier, and {@link #from(long...)}, {@link #minus(long...)}, and {@link #count()} pay zero —
- * they are plain Java-heap set operations over an already-fetched result.
+ * <p>A traversal frontier here is a native {@link Mask} — packed bits behind a generation-checked
+ * handle, exactly the currency {@code where}/{@code hop}/{@code authorize}/{@code navigate} are
+ * required to use everywhere in this repo (see the root {@code CLAUDE.md}'s "mask-native
+ * invariant"). This class previously carried its frontier as a plain {@code long[]}/{@code
+ * TreeSet<Long>}, decoding each matched row's payload directly in Java; that implementation's own
+ * javadoc called the choice "a deliberate simplification … not a workaround." {@code EPIPHANIES.md}'s
+ * {@code E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1} corrects that: the old shape was a valid
+ * <strong>scalar reference oracle</strong> — preserved verbatim as {@code GraphHopTest}'s two
+ * independent BFS transcriptions — but never a valid target for how this class's own execution
+ * engine should carry a population. Java-surface convenience must never dictate substrate
+ * representation. {@link #hop(int)} and {@link #hop(int, WideFieldMask)} now delegate entirely to
+ * {@link RowStore#hop(int, Mask)} / {@link RowStore#hop(int, WideFieldMask, Mask)}, which perform
+ * the classid match, the payload decode, and the scatter into the destination {@link Mask}
+ * natively, in one crossing — no row is ever read into Java to decide whether a hop follows it.
  *
- * <h2>Immutable, chainable steps</h2>
+ * <h2>The three currencies, briefly</h2>
  *
- * <p>{@link #from(long...)}, {@link #hop(int)}, and {@link #minus(long...)} each return a
- * <strong>new</strong> {@code Graph} holding the next frontier; none of them mutate the receiver.
- * This mirrors {@code com.adaworldapi.bricks.BricksQuery}'s own chaining shape (each step wraps a
- * new, immutable value around the previous one) rather than {@code com.adaworldapi.lancegraph.View}'s
- * lazy-until-terminal-operation shape — there is no laziness to preserve here, since every step
- * (other than a hop) is already a zero-cost Java-heap operation with nothing to defer.
+ * <p>{@link Mask} — which rows. {@link WideFieldMask} — which of a row's 32 facets participate in a
+ * hop (the default, {@link #hop(int)}, is all of them). {@code ClassView} — what a facet's
+ * classid/payload combination <em>means</em>; consulted natively via {@code lgj-abi}'s late-bound
+ * provider (a deterministic fixture today; a real ontology/cache provider is a named seam, not this
+ * class's concern). See the root {@code CLAUDE.md} for the full table.
  *
  * <pre>{@code
  * try (var store = RowStore.openWithEdges(2000, 0xF00D_CAFEL, Edge.KNOWS, 0x0L, 25)) {
+ *     // the flagship: zero row-ids anywhere, a predicate-born seed straight into a hop chain.
  *     long twoHopCount = Graph.open(store)
- *             .from(5, 42, 79, 116, 153, 190, 227, 264, 301, 338)
+ *             .from(store.maskOfFacetClass(FacetId.of(7), 5))
  *             .hop(Edge.KNOWS)
  *             .hop(Edge.KNOWS)
  *             .count();
  * }
  * }</pre>
  *
+ * <p>{@link #from(long...)} remains the ONE documented external-selection import on this class —
+ * for when row ids genuinely come from outside (a caller's own list, a prior fixture) — and it
+ * delegates to {@link RowStore#importRows}, the root {@code CLAUDE.md}'s named escape hatch. It is
+ * never the internal currency of a hop chain; {@link #from(Mask)} is. The old {@code
+ * minus(long...)} overload is removed: a caller with row ids to exclude composes {@code
+ * .minus(store.importRows(rows))}, so the import stays lexically visible at the call site rather
+ * than hiding inside this class.
+ *
+ * <h2>Immutable, chainable steps</h2>
+ *
+ * <p>{@link #from(long...)}, {@link #from(Mask)}, {@link #hop(int)}, {@link #hop(int,
+ * WideFieldMask)}, {@link #minus(Graph)}, and {@link #minus(Mask)} each return a
+ * <strong>new</strong> {@code Graph} holding the next frontier; none of them mutate the receiver.
+ *
  * <h2>Ownership — the store is the caller's, never this class's</h2>
  *
  * <p>{@link #open(RowStore)} wraps an already-open {@link RowStore}; a {@code Graph} never opens or
- * closes one. This differs from {@code com.adaworldapi.bricks.BricksSession}, which does own its
- * {@code NativePattern} — a graph traversal's caller typically wants to keep hopping, re-seed, and
- * inspect the same store across many independent {@code Graph} chains, so ownership stays with
- * whichever code opened the store, exactly as {@code com.adaworldapi.lancegraph.View} does not own
- * the {@code NativePattern} it describes. {@link #close()} is therefore a no-op: a {@code Graph}
- * holds no resource of its own to release, only a reference to one it does not own.
+ * closes it, and {@link #open} itself crosses the membrane zero times — its frontier starts unset,
+ * so there is nothing to fetch until a {@link #from(long...)} or {@link #from(Mask)} call gives it
+ * one.
  *
- * <h2>The decode convention a hop applies</h2>
+ * <h2>Lifecycle — this IS something to release now</h2>
  *
- * <p>{@link RowStore#facetMatches} reports, per row, a 32-bit bitset of which facets carry a given
- * classid. Not every facet that carries {@link Edge#KNOWS}'s classid is a real structured edge —
- * see {@link RowStore#payloadHi32At}'s documentation: a real edge target has high payload bits
- * exactly {@code 0}; ordinary noise that happens to share the classid does not, overwhelmingly. A
- * hop therefore reads {@link RowStore#payloadHi32At} for every matched facet and only follows the
- * ones where it is {@code 0}, then reads the target row from {@link RowStore#payloadLow64At}.
+ * <p>Unlike the old {@code long[]}-frontier implementation, whose {@link #close()} was a permanent
+ * no-op (a Java-heap array owns nothing native), a {@code Graph} now owns exactly one native
+ * resource — its own frontier {@link Mask} — and {@link #close()} releases it. It does
+ * <strong>not</strong> reach back and close any ancestor {@code Graph}'s frontier in the same chain:
+ * each step in a fluent chain owns only the {@link Mask} it itself was constructed with.
+ *
+ * <p>A caller who wants to release memory sooner than "when the store closes" holds and closes an
+ * intermediate {@code Graph} explicitly. A caller who does not is not leaking in any sense this
+ * repo treats as an error: words-proportional retention — at most {@code n_rows/8} bytes (one bit
+ * per row, matching {@link Mask}'s own documented cost — "selecting 64,000 of 64,000 entities
+ * costs 8,000 bytes") per un-closed step — until the store closes IS the sanctioned currency (root
+ * {@code CLAUDE.md}'s "Forbidden as normal execution state" list is about row-id collections, not
+ * about this).
+ *
+ * <p>{@link #from(Mask)} takes logical ownership of the {@link Mask} it is given: do not separately
+ * close that {@link Mask} afterward — closing the {@code Graph} it became the frontier of releases
+ * it. {@link #minus(Mask)}'s argument is different: it is read once to compute a brand-new result
+ * and is never retained, so its lifecycle stays entirely the caller's.
  */
 public final class Graph implements AutoCloseable {
 
-    private static final long[] EMPTY = new long[0];
-
     private final RowStore store;
-    private final long[] rows;
 
-    private Graph(RowStore store, long[] rows) {
+    // null means "no frontier set yet" (see #open) -- never an empty long[] or an empty-but-real
+    // Mask paid for just to have something non-null to hold. Every other state is a real, native
+    // Mask -- there is no Java-heap row-id representation anywhere in this class.
+    private final Mask frontier;
+
+    private Graph(RowStore store, Mask frontier) {
         this.store = store;
-        this.rows = rows;
+        this.frontier = frontier;
     }
 
     /**
-     * Wrap an already-open {@code store} with an empty frontier. Call {@link #from(long...)} to seed
-     * it before hopping.
+     * Wrap an already-open {@code store} with no frontier set yet. Call {@link #from(long...)} or
+     * {@link #from(Mask)} to seed it before hopping.
      *
      * <p>Crosses the membrane zero times: this method reads nothing from {@code store} at all.
      */
     public static Graph open(RowStore store) {
         Objects.requireNonNull(store, "store");
-        return new Graph(store, EMPTY);
+        return new Graph(store, null);
     }
 
     /**
-     * A new {@code Graph}, over the same store, whose frontier is exactly {@code seedRows} —
-     * deduplicated and sorted, replacing whatever frontier this chain had before.
+     * A new {@code Graph}, over the same store, whose frontier is exactly {@code seedRows} — the
+     * ONE documented external-selection import on this class (root {@code CLAUDE.md}'s "named
+     * exceptions": external row ids in). Delegates to {@link RowStore#importRows}; it is never the
+     * internal currency of a hop chain — see {@link #from(Mask)} for that.
      *
-     * <p>Crosses the membrane zero times. Row-index validity is not checked here; an out-of-range
-     * row surfaces as {@link IndexOutOfBoundsException} the first time a subsequent {@link
-     * #hop(int)} tries to read it, from {@link RowStore#classidAt} and friends — the same place
-     * every other row-index bounds check in this codebase already lives, so this method does not
-     * duplicate it.
+     * <p>Row-index validity is not checked here; an out-of-range row surfaces as an exception the
+     * first time a subsequent {@link #hop(int)} tries to read it natively.
      */
     public Graph from(long... seedRows) {
         Objects.requireNonNull(seedRows, "seedRows");
-        TreeSet<Long> next = new TreeSet<>();
-        for (long row : seedRows) {
-            next.add(row);
-        }
-        return new Graph(store, toArray(next));
+        return new Graph(store, store.importRows(seedRows));
     }
 
     /**
-     * A new {@code Graph}, over the same store, whose frontier is every row reached from the current
-     * frontier by exactly one {@code edgeClassid} edge — deduplicated: a target reached from two
-     * different source rows in the current frontier counts once.
+     * A new {@code Graph}, over the same store, whose frontier IS {@code population} — the
+     * predicate-born seeding entry point: {@code Graph.open(store).from(store.maskOfFacetClass(f,
+     * c)).hop(...)} composes a traversal with zero row-id values anywhere.
      *
-     * <p>Pays exactly <strong>one</strong> native crossing ({@link RowStore#facetMatches}) for the
-     * whole hop — called once, before iterating the frontier, never once per row. Every row in the
-     * current frontier is then checked against that single already-fetched bitset ({@link
-     * FacetMatchView#matchesOf}).
+     * <p>Takes logical ownership of {@code population} — see the class documentation's "Lifecycle"
+     * section: do not separately close it once it has been passed here.
+     */
+    public Graph from(Mask population) {
+        Objects.requireNonNull(population, "population");
+        return new Graph(store, population);
+    }
+
+    /**
+     * A new {@code Graph}, over the same store, whose frontier is every row reached from the
+     * current frontier by exactly one {@code edgeClassid} edge, over ALL 32 facets — equivalent to
+     * {@link #hop(int, WideFieldMask)} with {@link WideFieldMask#allFacets()}.
      *
-     * <p><strong>Measured, not merely designed:</strong> the very first row-level read against a
-     * given {@code store} — the first call to {@link RowStore#payloadHi32At} or {@link
-     * RowStore#payloadLow64At} anywhere in that store's life, which the first hop on a fresh store
-     * always triggers — pays one additional, one-time crossing of its own ({@code
-     * RowStore}'s lazily-resolved raw lane-0 window; see {@code RowStore#rawLane()}'s doc). That
-     * cost is paid once per {@code RowStore}, not once per hop or once per {@code Graph}: every
-     * {@code Graph} derived from the same {@link #open(RowStore)} call shares the same underlying
-     * store, so the SECOND and every later hop on that store cost exactly the documented one
-     * crossing, steady-state. Measured directly: hop 1 costs 2, hops 2/3/4 each cost exactly 1.
+     * <p>Pays exactly one native crossing ({@link RowStore#hop(int, Mask)}), which performs the
+     * classid match, the payload decode, and the scatter into the destination {@link Mask} entirely
+     * natively — flat, regardless of how many rows are in the current frontier or which hop number
+     * this is in a chain (see {@code GraphHopTest}'s crossing section for the measured, pinned
+     * cost).
      *
-     * <p>An empty current frontier short-circuits before paying even the {@code facetMatches}
-     * crossing — there is nothing to hop from, so nothing is fetched.
+     * <p>An unseeded {@code Graph} — the result of {@link #open} with no {@link #from(long...)} or
+     * {@link #from(Mask)} call yet — short-circuits to an equally-unseeded result without any
+     * native crossing at all: there is nothing to hop from.
      */
     public Graph hop(int edgeClassid) {
-        if (rows.length == 0) {
-            return new Graph(store, EMPTY);
+        if (frontier == null) {
+            return new Graph(store, null);
         }
-        FacetMatchView view = store.facetMatches(edgeClassid);
-        TreeSet<Long> next = new TreeSet<>();
-        for (long row : rows) {
-            int bits = view.matchesOf(row);
-            while (bits != 0) {
-                int facetIndex = Integer.numberOfTrailingZeros(bits);
-                bits &= bits - 1; // clear the lowest set bit
-                FacetId facet = FacetId.of(facetIndex);
-                if (store.payloadHi32At(row, facet) == 0) {
-                    next.add(store.payloadLow64At(row, facet));
-                }
-            }
+        return new Graph(store, store.hop(edgeClassid, frontier));
+    }
+
+    /**
+     * As {@link #hop(int)}, but restricted to the facets named by {@code facets} — the wire form of
+     * the contract's {@code FieldMask}. Pays exactly one native crossing ({@link RowStore#hop(int,
+     * WideFieldMask, Mask)}); the effective participation the native side applies is {@code facets}
+     * intersected with the {@code ClassView} provider's own declared edge participation for {@code
+     * edgeClassid} — a caller cannot widen participation past what the provider allows.
+     */
+    public Graph hop(int edgeClassid, WideFieldMask facets) {
+        Objects.requireNonNull(facets, "facets");
+        if (frontier == null) {
+            return new Graph(store, null);
         }
-        return new Graph(store, toArray(next));
+        return new Graph(store, store.hop(edgeClassid, facets, frontier));
     }
 
     /**
      * A new {@code Graph}, over the same store, whose frontier is the current frontier with {@code
-     * excludedRows} removed — plain set difference, no membrane crossing.
+     * other}'s frontier removed — {@code this.frontier & !other.frontier} — one native crossing
+     * ({@link Mask#minus}).
      */
-    public Graph minus(long... excludedRows) {
-        Objects.requireNonNull(excludedRows, "excludedRows");
-        TreeSet<Long> next = new TreeSet<>();
-        for (long row : rows) {
-            next.add(row);
+    public Graph minus(Graph other) {
+        Objects.requireNonNull(other, "other");
+        if (frontier == null) {
+            return new Graph(store, null);
         }
-        for (long excluded : excludedRows) {
-            next.remove(excluded);
-        }
-        return new Graph(store, toArray(next));
+        return new Graph(store, frontier.minus(other.frontierOrEmpty()));
     }
 
-    /** How many rows are in the current frontier. Pure Java, zero crossings. */
+    /**
+     * A new {@code Graph}, over the same store, whose frontier is the current frontier with {@code
+     * other} removed — {@code this.frontier & !other} — one native crossing ({@link Mask#minus}).
+     *
+     * <p>{@code other} is read once to compute the result and is never retained; its lifecycle
+     * stays entirely the caller's, unlike {@link #from(Mask)}'s argument. This is the replacement
+     * for the removed {@code minus(long...)} overload: a caller with row ids to exclude composes
+     * {@code graph.minus(store.importRows(rows))}.
+     */
+    public Graph minus(Mask other) {
+        Objects.requireNonNull(other, "other");
+        if (frontier == null) {
+            return new Graph(store, null);
+        }
+        return new Graph(store, frontier.minus(other));
+    }
+
+    /** How many rows are in the current frontier. One native popcount ({@link Mask#count()}). */
     public long count() {
-        return rows.length;
+        return frontier == null ? 0L : frontier.count();
     }
 
     /**
-     * The current frontier's row indices, sorted ascending, deduplicated. Returns a defensive copy —
-     * mutating the result never affects this {@code Graph}.
+     * The current frontier's row indices — the ONE named materialising terminal on this class (root
+     * {@code CLAUDE.md}'s "named exceptions": row ids out). {@code O(n)} in the frontier's
+     * population; see {@link Mask#materializeRows()} for the exact cost shape (a one-time describe,
+     * then zero further crossings for repeated calls against the same underlying {@link Mask}).
      */
-    public long[] rows() {
-        return rows.clone();
+    public long[] materializeRows() {
+        return frontier == null ? new long[0] : frontier.materializeRows();
     }
 
     /**
-     * A no-op. This {@code Graph} does not own {@code store} — see the class documentation's
-     * ownership section — so there is nothing here to release. Present so a {@code Graph} chain can
-     * be used in a try-with-resources block alongside the store it wraps without special-casing it,
-     * and so a future version that does need to release something has a place to put it without an
-     * API change.
+     * Closes this {@code Graph}'s own frontier {@link Mask}, if it has one. Does not close the
+     * {@link RowStore} — see the class documentation's "Ownership" section — and does not close any
+     * ancestor {@code Graph}'s frontier in the same chain — see "Lifecycle".
+     *
+     * <p>A no-op, exactly as before, ONLY for a {@code Graph} whose frontier was never set (fresh
+     * from {@link #open}). Once a frontier exists, closing this {@code Graph} twice is an error —
+     * the same discipline every other native resource in this codebase applies.
      */
     @Override
     public void close() {
-        // Deliberately empty -- see the class doc's "Ownership" section.
+        if (frontier != null) {
+            frontier.close();
+        }
     }
 
-    private static long[] toArray(TreeSet<Long> set) {
-        if (set.isEmpty()) {
-            return EMPTY;
-        }
-        long[] out = new long[set.size()];
-        int i = 0;
-        for (long row : set) {
-            out[i++] = row;
-        }
-        return out;
+    /**
+     * This {@code Graph}'s frontier, or a freshly imported empty {@link Mask} if none was ever set.
+     * Used only by {@link #minus(Graph)}, so that operating against an unseeded {@code other} never
+     * has to special-case "there is no {@link Mask} here yet" inside {@link Mask#minus}: an empty
+     * import composes correctly (subtracting nothing) with zero extra logic at the call site.
+     */
+    private Mask frontierOrEmpty() {
+        return frontier != null ? frontier : store.importRows();
     }
 
     @Override
     public String toString() {
-        return "Graph[" + rows.length + " rows]";
+        return "Graph[" + (frontier == null ? "unseeded" : frontier.toString()) + "]";
     }
 }

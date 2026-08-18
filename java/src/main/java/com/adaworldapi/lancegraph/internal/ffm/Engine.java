@@ -223,6 +223,41 @@ public final class Engine {
         Downcalls.rowFacetMatch(store, classId, out, outLenElems);
     }
 
+    // ── mask complement + hop (docs/abi.md §13, ABI minor ≥ 4) ─────────────────────────────
+    //
+    // Same requireMinor-before-any-downcall discipline as the row store section above: a Java
+    // build compiled against this feature never reaches a missing symbol inside Downcalls, it
+    // fails here, first, naming the version gap.
+
+    /**
+     * {@code dst = a & !b}, word-wise (docs/abi.md §13). Not commutative — unlike {@link
+     * Downcalls#maskAnd}/{@link Downcalls#maskOr}, swapping {@code a} and {@code b} changes the
+     * answer. Requires ABI minor &gt;= 4.
+     */
+    public static void maskAndNot(long a, long b, long dst) {
+        Abi.requireMinor(4);
+        Downcalls.maskAndNot(a, b, dst);
+    }
+
+    /**
+     * Overwrite {@code dstMask} with the one-hop reachable set from {@code srcMask} over
+     * {@code store}'s {@code edgeClassid}-matching facets, gated by the effective participation
+     * {@code facetMask ∩ provider.edge_participation(edgeClassid)} (docs/abi.md §13). Requires
+     * ABI minor &gt;= 4.
+     *
+     * @param facetMask  the wire form of the contract's {@code FieldMask}; bits &gt;= 32 are
+     *                   ignored by this store
+     * @param decodeMode {@code 0} is the only mode this build implements (the §12 fixture
+     *                   convention); {@code 1..=3} are RESERVED and fail with the ABI's
+     *                   {@code UNSUPPORTED_DECODE_MODE} status, checked before {@code store}/
+     *                   {@code srcMask}/{@code dstMask} are even resolved
+     */
+    public static void hop(long store, int edgeClassid, long facetMask, int decodeMode,
+                           long srcMask, long dstMask) {
+        Abi.requireMinor(4);
+        Downcalls.hop(store, edgeClassid, facetMask, decodeMode, srcMask, dstMask);
+    }
+
     private static MemorySegment marshal(List<PlanOp> plan) {
         int n = plan.size();
         if (n == 0) {
@@ -326,6 +361,19 @@ public final class Engine {
         /** Read one 64-bit element (an id, or a packed mask word). */
         public long getU64(long index) {
             return segment.get(ValueLayout.JAVA_LONG, index * strideBytes);
+        }
+
+        /**
+         * Write one 64-bit element (a mask word) — in-process, no membrane crossing.
+         *
+         * <p>The caller is responsible for having already confirmed {@link #isWritable()}: mask
+         * word lanes are ({@code lgj_mask_describe}, docs/abi.md §5); pattern and row-store lanes
+         * are not, and this method does not itself re-check the flag on every call — the same
+         * "describe once, trust the flags you already read" discipline every other accessor here
+         * follows.
+         */
+        public void setU64(long index, long value) {
+            segment.set(ValueLayout.JAVA_LONG, index * strideBytes, value);
         }
     }
 }

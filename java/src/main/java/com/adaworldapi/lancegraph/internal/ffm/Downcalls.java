@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.LongAdder;
  * Every downcall handle in the project, resolved <strong>once</strong> into static finals.
  *
  * <p>Resolution is not free — {@code Linker.downcallHandle} builds a native stub — so doing it per
- * call would be a per-crossing tax on top of the crossing itself. There are 17 downcall symbols
- * resolved here (docs/abi.md §7 + §11) and 17 handles; the 18th ABI symbol, {@code
+ * call would be a per-crossing tax on top of the crossing itself. There are 20 downcall symbols
+ * resolved here (docs/abi.md §7 + §11 + §13) and 20 handles; the 21st ABI symbol, {@code
  * lgj_abi_manifest}, resolves separately in {@link Abi} because it returns a pointer rather than a
  * status and has no failure mode.
  *
@@ -115,6 +115,21 @@ public final class Downcalls {
             FunctionDescriptor.of(ValueLayout.JAVA_INT,
                     ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
                     ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+    // Mask complement + one-hop graph traversal (docs/abi.md §13, ABI minor 4). Two new symbols,
+    // one status code (Status#UNSUPPORTED_DECODE_MODE); no existing symbol's semantics changed.
+    private static final MethodHandle MASK_ANDNOT = mh("lgj_mask_andnot",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG));
+
+    private static final MethodHandle HOP = mh("lgj_hop",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                    ValueLayout.JAVA_LONG,   // store
+                    ValueLayout.JAVA_INT,    // edge_classid
+                    ValueLayout.JAVA_LONG,   // facet_mask
+                    ValueLayout.JAVA_INT,    // decode_mode
+                    ValueLayout.JAVA_LONG,   // src_mask
+                    ValueLayout.JAVA_LONG)); // dst_mask
 
     private static MethodHandle mh(String symbol, FunctionDescriptor descriptor) {
         MemorySegment addr = Abi.lookup().find(symbol).orElseThrow(() ->
@@ -413,6 +428,44 @@ public final class Downcalls {
             throw wrap("lgj_row_facet_match", t);
         }
         Status.check("lgj_row_facet_match", st);
+    }
+
+    // ── mask complement + one-hop graph traversal (docs/abi.md §13, ABI minor 4) ─────────────
+    //
+    // Same discipline as the row store section above: callers above this class are expected to
+    // have already checked Abi.requireMinor(4) (see Engine's maskAndNot/hop) — these wrappers
+    // marshal and map status only.
+
+    /**
+     * {@code dst = a & !b}, word-wise. Not commutative: {@code dst} aliasing {@code a} is a
+     * different case from {@code dst} aliasing {@code b} (docs/abi.md §13's full aliasing rule).
+     */
+    public static void maskAndNot(long a, long b, long dst) {
+        crossed();
+        int st;
+        try {
+            st = (int) MASK_ANDNOT.invokeExact(a, b, dst);
+        } catch (Throwable t) {
+            throw wrap("lgj_mask_andnot", t);
+        }
+        Status.check("lgj_mask_andnot", st);
+    }
+
+    /**
+     * Overwrites {@code dstMask} with the one-hop reachable set from {@code srcMask} over
+     * {@code store}'s {@code edgeClassid}-matching facets, gated by the effective participation
+     * {@code facetMask ∩ provider.edge_participation(edgeClassid)} (docs/abi.md §13).
+     */
+    public static void hop(long store, int edgeClassid, long facetMask, int decodeMode,
+                           long srcMask, long dstMask) {
+        crossed();
+        int st;
+        try {
+            st = (int) HOP.invokeExact(store, edgeClassid, facetMask, decodeMode, srcMask, dstMask);
+        } catch (Throwable t) {
+            throw wrap("lgj_hop", t);
+        }
+        Status.check("lgj_hop", st);
     }
 
     private static LanceGraphException wrap(String symbol, Throwable t) {

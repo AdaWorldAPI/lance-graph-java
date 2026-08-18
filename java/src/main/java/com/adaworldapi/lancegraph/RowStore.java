@@ -108,8 +108,10 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * <p>The result is an ordinary {@link Mask}: it composes with the whole existing mask algebra
      * (and/or/count/describe) unchanged, because a row store is just as valid a {@link Mask}
      * parent as a {@link NativePattern} — abi.md §11: "masks may parent onto a pattern OR a row
-     * store — both are read-only, row-shaped resources." This is one native crossing
-     * ({@code lgj_op_eq_classid}).
+     * store — both are read-only, row-shaped resources." This is two native crossings
+     * ({@code lgj_mask_create} then {@code lgj_op_eq_classid}) — a flat, per-call cost,
+     * independent of row count. (Measured 2026-08-18; this sentence previously claimed
+     * "one native crossing" while the body below visibly makes both calls.)
      *
      * @param facet   which of the 32 facet lanes to read — a facet index, not a lane id
      * @param classId the classid to match against that facet
@@ -135,6 +137,85 @@ public final class RowStore implements NativeResource, AutoCloseable {
         MemorySegment out = arena.allocate(ValueLayout.JAVA_INT, rowCount);
         Engine.rowFacetMatch(handle, classId, out, rowCount);
         return new FacetMatchView(this, out, rowCount);
+    }
+
+    /**
+     * The one-hop reachable set from {@code src} over this store's {@code edgeClassid}-matching
+     * facets, restricted to {@code facets} and narrowed further by the class's {@code ClassView}
+     * -resolved edge participation (docs/abi.md §13; {@code lgj_hop}). Two native crossings,
+     * flat ({@code lgj_mask_create} then {@code lgj_hop}) — measured 2026-08-18, pinned by
+     * {@code GraphHopTest}; never per-row, never per-frontier-size.
+     *
+     * <p>THE §5 conceptual op on the substrate facade (root CLAUDE.md's mask-native invariant):
+     * {@code src} and the returned {@link Mask} are both native population handles the whole way
+     * through. No row id, {@code long[]}, or per-row Java loop is ever part of this call's own
+     * execution — "hop may look like hop; it must execute as Mask × ClassView/WideFieldMask →
+     * Mask."
+     *
+     * @param edgeClassid the classid a facet must carry to be treated as an edge for this hop
+     * @param facets      which of the 32 facet lanes to consider; the ABI narrows this further by
+     *                    the class's own edge-participation law — a caller cannot widen past what
+     *                    the class actually permits merely by passing {@link
+     *                    WideFieldMask#allFacets()}
+     * @param src         the population to hop FROM
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 4
+     */
+    public Mask hop(int edgeClassid, WideFieldMask facets, Mask src) {
+        java.util.Objects.requireNonNull(facets, "facets");
+        java.util.Objects.requireNonNull(src, "src");
+        requireOpen("hop()");
+        long dst = Engine.createMask(handle, false);
+        Engine.hop(handle, edgeClassid, facets.bits(), 0, src.handle(), dst);
+        return new Mask(this, dst);
+    }
+
+    /**
+     * {@link #hop(int, WideFieldMask, Mask)} over every one of this store's 32 facets ({@link
+     * WideFieldMask#allFacets()}).
+     */
+    public Mask hop(int edgeClassid, Mask src) {
+        return hop(edgeClassid, WideFieldMask.allFacets(), src);
+    }
+
+    /**
+     * The ONE named external-selection import: build a selection from row ids the caller already
+     * has, from outside this library.
+     *
+     * <p><strong>Classification (root CLAUDE.md's mask-native invariant, operator §7):</strong>
+     * this is an escape hatch / external-selection import / test utility. It is NEVER the
+     * internal currency of {@code where}/{@code hop}/{@code authorize}/{@code navigate} — every
+     * other operation on this facade stays mask-native from end to end, and the only way a
+     * {@code long[]} of row ids may enter this library at all is through this method, by name,
+     * visibly, at the call site.
+     *
+     * <p>Implementation: two native crossings, flat — one to allocate the destination selection
+     * ({@code lgj_mask_create}) and one to describe its writable word lane ({@code
+     * lgj_mask_describe}) — then one in-process word write per row through that window: no
+     * crossing per row, and zero new ABI surface. (Measured 2026-08-18: 3 rows and 29 rows cost
+     * identically, pinned by {@code GraphHopTest}'s row-count-independence check.)
+     *
+     * @throws IndexOutOfBoundsException if any row is not in {@code [0, rowCount())}; every row
+     *                                   is validated before any native allocation, so a caller
+     *                                   never sees a partially built, unreachable selection on
+     *                                   failure
+     */
+    public Mask importRows(long... rows) {
+        java.util.Objects.requireNonNull(rows, "rows");
+        requireOpen("importRows()");
+        for (long row : rows) {
+            if (row < 0 || row >= rowCount) {
+                throw new IndexOutOfBoundsException(
+                        "row " + row + " is out of range [0, " + rowCount + ")");
+            }
+        }
+        long dst = Engine.createMask(handle, false);
+        Engine.LaneWindow window = Engine.describeMask(dst);
+        for (long row : rows) {
+            long word = row >>> 6;
+            int bit = (int) (row & 63);
+            window.setU64(word, window.getU64(word) | (1L << bit));
+        }
+        return new Mask(this, dst);
     }
 
     private static final long ROW_BYTES = 512;
@@ -180,6 +261,10 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * row, this for reading one row a caller already knows it wants — e.g. decoding a graph hop's
      * target row after {@link #facetMatches} has already named which facet matched.
      *
+     * <p><strong>Low-level inspection / diagnostics.</strong> High-level query or traversal
+     * implementations MUST NOT use this as their execution engine — see the root CLAUDE.md
+     * mask-native policy; {@link #hop} is the mask-native path this method is not a substitute for.
+     *
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public int classidAt(long row, FacetId facet) {
@@ -194,6 +279,10 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * generator's own convention is {@code classidAt(row, facet) == edgeClassid &&
      * payloadHi32At(row, facet) == 0}.
      *
+     * <p><strong>Low-level inspection / diagnostics.</strong> High-level query or traversal
+     * implementations MUST NOT use this as their execution engine — see the root CLAUDE.md
+     * mask-native policy; {@link #hop} is the mask-native path this method is not a substitute for.
+     *
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public long payloadLow64At(long row, FacetId facet) {
@@ -205,6 +294,10 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * #openWithEdges}'s generator wrote a structured edge target here (docs/abi.md §12);
      * overwhelmingly non-zero, by construction, for ordinary noise payload — including every
      * facet of a store opened with plain {@link #open}.
+     *
+     * <p><strong>Low-level inspection / diagnostics.</strong> High-level query or traversal
+     * implementations MUST NOT use this as their execution engine — see the root CLAUDE.md
+     * mask-native policy; {@link #hop} is the mask-native path this method is not a substitute for.
      *
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */

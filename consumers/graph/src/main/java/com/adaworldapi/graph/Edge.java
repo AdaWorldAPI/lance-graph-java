@@ -24,19 +24,29 @@ import com.adaworldapi.lancegraph.RowStore;
  * natively (docs/abi.md §12, {@link RowStore#openWithEdges}) is a fixture-generator convention: a
  * sparse, gated subset of facets whose classid equals a chosen constant carry a real target row in
  * their payload (recognizable because {@link RowStore#payloadHi32At} reads exactly {@code 0} for
- * those facets) instead of uniform noise. That is deliberately weaker than a real graph edge in a
- * lance-graph deployment, where an edge's predicate is resolved through a real {@code ClassView} /
- * ontology binding (see the lance-graph {@code CLAUDE.md} "CANON — Minimal SoA node" section and its
- * {@code EdgeCodecFlavor} discussion) — a classid there names a *concept*, minted and resolved
- * through the shared vocabulary, not merely "the value the fixture generator happened to gate on."
+ * those facets) instead of uniform noise.
+ *
+ * <p>Since the mask-native migration (docs/abi.md §13, {@code lgj_hop}), that decode convention is
+ * no longer merely a comment about what the fixture happens to do — it is the LAW a real {@code
+ * lance_graph_contract::class_view::ClassView} implementation states, consulted natively on every
+ * hop: {@code native/lgj-abi}'s {@code FixtureClassView} answers "which facets participate" and
+ * "how to decode this classid's payload" for the deterministic 32-facet domain this class's fixture
+ * lives in. That is a genuine {@code ClassView} provider — the same trait a real ontology/cache
+ * provider would implement — deliberately late-bound (see the lance-graph {@code CLAUDE.md}
+ * "CANON — Minimal SoA node" section and its {@code EdgeCodecFlavor} discussion, and this repo's
+ * own root {@code CLAUDE.md} on late-bound providers): only its ANSWERS are fixture-local, not the
+ * LAW itself. A classid here still does not name a concept minted anywhere — that half of the
+ * honesty caveat stands — but "resolved through the shared vocabulary" is no longer aspirational
+ * prose; it is what {@code RowStore.hop(...)} actually consults, natively, on every call.
  *
  * <p>{@link #KNOWS} names classid {@code 0} for exactly that reason: it is the constant this
  * example's own pinned regression fixture ({@code RowStore.openWithEdges(2000, 0xF00D_CAFEL, 0, 0x0L,
- * 25)}) already uses, not a concept minted anywhere. A future integration against a real
- * ClassView-backed store replaces this single constant with real, ontology-resolved predicate
- * classids — the point where this class's honesty caveat above stops applying — without changing
- * {@link Graph}'s shape at all: {@link Graph#hop(int)} already takes the classid as a plain
- * argument, so it does not care whether the caller supplies {@link #KNOWS} or a minted concept id.
+ * 25)}) already uses, not a concept minted anywhere. A future integration against a real,
+ * non-fixture ontology/cache {@code ClassView} provider replaces only {@code FixtureClassView}'s
+ * ANSWERS — the point where this class's remaining honesty caveat stops applying — without changing
+ * {@link Graph} or {@code RowStore.hop(...)}'s shape at all: the classid travels as a plain
+ * {@code int} argument either way, so it does not care whether the caller supplies {@link #KNOWS}
+ * or a minted concept id.
  */
 public final class Edge {
 
