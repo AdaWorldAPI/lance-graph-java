@@ -4,6 +4,74 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (even later) — ruff #96 is a DIFFERENT arm; the real find was already on main: a staging guide addressed to THIS session
+
+**Status:** FINDING. **Confidence:** High — read the merged PR body and the
+in-tree harvest artifacts directly, not summarized.
+
+### PR #96 is not the drill-down proposer this repo is waiting on
+
+`AdaWorldAPI/ruff` PR #96 ("residual ledger for the plain arm") extends
+`ruff_python_spo`'s PLAIN Python-source harvest (PR #95: dismech/A2UI-sdk/
+ruff-scripts corpora, CURIE-shaped constants — `MONDO`/`KISAO`/`infores`
+prefixes, bio-ontology work). It is its own "self-adaptive drill loop," but
+over a **different crate, different corpus family, different consumer**
+(ontology/MedCare-rs-shaped harvest) than `ruff_r2il` (binary/R2IL lifting,
+the one `E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1` tracks). Zero overlap with
+this repo's C-band/Ghidra/JavaRuntime concerns — recorded here only so a
+future session doesn't wire a false connection between the two arms because
+they share vocabulary ("residual ledger," "drill loop," "proposer").
+
+### What IS relevant, sitting on `ruff` main since a same-day, non-PR commit
+
+Commit `bbaebda` (between PR #94 and PR #95, pushed directly to main) added
+`.claude/harvest/r2il/STAGED-CODEGEN-GUIDE.md`, explicitly addressed:
+*"Audience: the sibling session that consumes this arc's output (the Ghidra
+console work...)"* — this repo, by description if not by name. It confirms
+what the prior reconciliation already found (PR 2 routes→V3 has NOT landed)
+and adds the piece that entry lacked: **a 5-stage staging order (S1–S5) that
+does NOT wait on PR 2**, with "do not skip to S3" stated plainly (S3 is
+codegen into an additive landing zone; S1/S2 are read-only ledger/ore
+inspection). Also pins the stability table per artifact — `FlatFact`'s two
+payload slots and the provisional `VarnodeFacet` classid (`0x0000`,
+placeholder for the PR-3 `ogar_codebook` mint) are explicitly **not**
+stable; slag/census/provenance/convention are.
+
+### S1 done — read the ledger, no codegen, no PR2 dependency
+
+The pass-1 harvest artifacts are already in-tree at `ruff/.claude/harvest/
+r2il/` (gitignored, present on disk). Read directly:
+
+- **B1 conservation: PASS** — `dropped=0`, `harvested(54304) =
+  classified(17557) + residual(36747)`.
+- **B2 seven-opcode coverage: INVESTIGATE (91.30%)** — inside the declared
+  90–99% band, not a KILL.
+- **B3 slag named-and-addressed: PASS** — 43 distinct residual shapes,
+  `dominant_share = 0.215` (well under the 0.60 ceiling), every bucket
+  except `no_facet_coordinate` carries an example address.
+- **The non-bar prediction MISSED, and was recorded honestly rather than
+  hidden**: only 14.15% of `Op` facts classified, against a pre-registered
+  60–80% guess. Dominant residual reason is `opcode_not_in_convention` —
+  expected, since pass 1 deliberately classifies only 7 of P-code's 74
+  opcodes (Copy/IntAdd/Load/Store/CBranch/Call/Return); the other ~67 are
+  correctly unclassified, not mis-measured.
+- **Corpus is r2sleigh's own e2e stress-test fixtures** (143 functions,
+  x86-64, commit `60942f6`), not yet a Ghidra-shaped real binary — still a
+  bring-up-scale run, not production scale.
+
+### Consequence: still nothing to physically consume, and that's correct
+
+`wave-ghidra-g1-g2.md` / `wave-ogar-machine-pm1.md` gate #3 are unchanged —
+PR2/PR3 remain unmerged, and the stability table says explicitly not to
+persist `FlatFact` payload bytes or the placeholder classid yet. The
+concrete, unblocked next step for this repo — whenever there is a driving
+reason to spend it, not scheduled here — is **S2** (join ore rows back to
+native addresses via `ore::instruction_addr`, still read-only) as
+preparation, so S3 (an additive landing-zone crate here, `// @generated`,
+never edited into existing files) is measured before it is built, per the
+guide's own "the MedCare and OpenProject transcodes earned their numbers by
+measuring at S1/S2 first" precedent.
+
 ## 2026-08-18 (later) — E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1
 
 **Status:** FINDING (reconciliation, per `ghidra-integration-v1.md`'s own

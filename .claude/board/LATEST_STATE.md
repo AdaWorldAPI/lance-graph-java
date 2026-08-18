@@ -1,3 +1,33 @@
+## 2026-08-18 (even later) — ruff #96 is a different arm; found + read the REAL staging guide
+
+Checked "ruff 96 merged." It's `ruff_python_spo`'s plain-Python residual
+ledger (dismech/CURIE-constant harvest, ontology-shaped) — a sibling
+drill-loop, but a DIFFERENT crate and consumer than `ruff_r2il`, and
+unrelated to this repo's C-band/Ghidra/JavaRuntime track. No action needed
+here; recorded so the two arms aren't confused later since they share
+vocabulary.
+
+The genuinely relevant find was already on `ruff` main, unrelated to #96:
+`.claude/harvest/r2il/STAGED-CODEGEN-GUIDE.md`, explicitly addressed to
+"the sibling session ... (the Ghidra console work)" — this repo. It
+confirms PR2 (routes→V3) still hasn't landed and gives a 5-stage staging
+order (S1 ledger-read → S2 ore-join → S3 additive codegen → S4 one
+consumer → S5 target-profile fork) that does NOT wait on PR2 for its first
+two stages. Ran S1 against the real in-tree harvest artifacts: B1
+conservation PASS (dropped=0), B3 addressed-slag PASS (43 shapes,
+dominant_share 0.215), B2 at 91.30% (INVESTIGATE band), and the
+pre-registered 60-80%-classified prediction MISSED at a measured 14.15% —
+recorded honestly, which is the point of pre-registering it. Dominant
+residual is `opcode_not_in_convention`, expected: pass 1 only classifies 7
+of P-code's 74 opcodes by design. Full record + the stability table
+(FlatFact payload bytes and the placeholder VarnodeFacet classid are
+explicitly NOT stable yet): `EPIPHANIES.md`, the entry above
+`E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1`.
+
+No wave-gate change — PR2/PR3 still unmerged, `wave-ogar-machine-pm1.md`
+gate #3 stands as previously repointed. Next unblocked step (not scheduled,
+available when there's a reason to spend it): S2, still read-only.
+
 ## 2026-08-18 (later) — Ghidra G1/G2 waves reconciled: superseded by ruff_r2il, not built
 
 Checked what "the other session writing the autoadapting drill-down proposer"
