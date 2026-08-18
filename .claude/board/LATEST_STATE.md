@@ -1,3 +1,31 @@
+## 2026-08-18 — PR-W8b (FACADE + GRAPH MIGRATION) — the mask-native correction reaches the Java surface
+
+### Current surface changes (java/ + consumers/graph)
+
+- NEW public: `WideFieldMask` (record; `allFacets()`/`ofFacets(int...)`
+  validated/`ofMatchBits(int)` zero-extending; `EMPTY`), `RowStore.hop(int,
+  WideFieldMask, Mask)` + `hop(int, Mask)`, `RowStore.importRows(long...)`
+  (the ONE named import exception), `Mask.minus(Mask)`,
+  `Mask.materializeRows()` (the ONE named materialiser), `Status
+  UNSUPPORTED_DECODE_MODE(−14)`. `Graph` migrated: native `Mask` frontier,
+  `from(Mask)` new, `minus(long...)` REMOVED, `rows()` renamed
+  `materializeRows()`, real `close()`. Zero FFM types in any public
+  signature (ApiSurfaceTest inside the green AllTests run).
+- Crossing constants MEASURED-THEN-PINNED (ABI 0.4, release .so, JDK
+  26.0.2): hop = 2 (createMask + lgj_hop), importRows = 2 (createMask +
+  describeMask; per-row word writes in-process — 3-vs-29-row cost
+  identical), count = 1, minus = 2, materialize-first = 1. Two predictions
+  were wrong in exactly the direction the worker's own brief flagged; three
+  stale "one native crossing" javadoc claims corrected at the source
+  (maskOfFacetClass / hop / importRows).
+- Gates: `.so` rebuilt FIRST (the root-level copy was STALE from 11:54 —
+  the eager-clinit trap, caught before any suite ran); `javac -Xlint:all`
+  0 new warnings; AllTests 245 + GraphHopTest 66 + TradesParity 12 +
+  TradesAllocation 3 + BricksAuth 62 = 388 checks; reflective-allowlist
+  disable-run red-then-green (injected `long[] rows()` fired exactly G1/G8).
+- Docs: wave-consumer-graph.md + consumer-graph-traversal-v1.md carry
+  dated supersession notes (spec §3.7); original text preserved.
+
 ## 2026-08-18 — D-LGJ-W8 SUBSTRATE landed: ABI minor 4 (lgj_mask_andnot + lgj_hop), contract dep live, 21 symbols
 
 PR-N (ndarray #280) then PR-W8a, per the spec's merge order. The lgj-abi

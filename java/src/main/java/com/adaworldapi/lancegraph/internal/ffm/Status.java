@@ -31,6 +31,15 @@ public enum Status {
     ALLOCATION_FAILED(-12, "the allocator refused"),
     READ_ONLY(-13, "write attempted against a read-only lane"),
     /**
+     * {@code lgj_hop} (docs/abi.md §13, ABI minor &ge; 4) called with a {@code decode_mode} this
+     * build does not yet implement. Mode {@code 0} (the §12 fixture convention) is the only mode
+     * implemented today; modes {@code 1..=3} are RESERVED, mirroring {@code EdgeCodecFlavor as u32
+     * + 1}, until real class data lands. This check runs before {@code store}/{@code src_mask}/
+     * {@code dst_mask} are even resolved, so {@code dst_mask} is provably untouched on this status.
+     */
+    UNSUPPORTED_DECODE_MODE(-14, "lgj_hop was called with a decode_mode this build does not yet"
+            + " implement"),
+    /**
      * Not tabulated in docs/abi.md §3 (reported as a doc gap) but required by §9: a panic is caught
      * at the boundary and becomes a negative status rather than unwinding into JVM frames, which
      * would be undefined behaviour. This is that status.

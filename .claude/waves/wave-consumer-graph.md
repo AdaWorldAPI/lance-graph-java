@@ -7,6 +7,20 @@
 > file's design rulings below are kept as the historical record of how
 > the dispatch was scoped, not restated in the DONE note.
 
+> **⊘ SUPERSEDED IN PART — D-LGJ-W8 mask-native correction (2026-08-18).**
+> The implementation this DONE note describes (a `long[]`/`TreeSet` frontier
+> inside `Graph`, `rows()`, chained `minus(long...)`) was demoted by the
+> operator's CORRECTION WAVE and replaced in PR-W8b: `Graph` now carries a
+> native `Mask` frontier, `hop` executes as Mask × ClassView/WideFieldMask →
+> Mask (`lgj_hop`, ABI minor 4), `minus(long...)` is REMOVED, `rows()` is
+> renamed `materializeRows()`, and `from(long...)` delegates to the named
+> import exception `RowStore.importRows`. The D1 ruling below ("start D1a,
+> promote to D1b only if measured") is partially reversed — D1b ships as the
+> required path per the correction spec §3.8. Everything below is the
+> historical record of the original dispatch, preserved append-only. See
+> `.claude/plans/mask-native-navigation-correction-v1.md` + `STATUS_BOARD.md`
+> D-LGJ-W8.
+
 > Executes `consumer-graph-traversal-v1.md`. Gates: W3 merged (DONE) AND
 > the hop-decode capability question resolved (Decision D1 below — ruled
 > D1a) AND the edge-bearing generator STOP condition resolved (DONE,

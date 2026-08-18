@@ -1,6 +1,13 @@
 # consumer-graph-traversal-v1 — traversal as facet addressing, no middleware
 
-> **Status: PLANNED** (2026-08-17). W5 consumer example #3, from the
+> **Status: SHIPPED 2026-08-18 (as-dispatched), then CORRECTED same day** —
+> the wave landed (see `wave-consumer-graph.md`), and its `long[]`-frontier
+> surface was subsequently demoted by the D-LGJ-W8 mask-native correction
+> (PR-W8b: `Mask` frontier, `lgj_hop`, `materializeRows()`, `importRows`).
+> This plan is the historical dispatch record; the governing spec is
+> `mask-native-navigation-correction-v1.md`. (Header previously said
+> PLANNED — pre-existing staleness, corrected per spec §3.7.)
+> Originally: **PLANNED** (2026-08-17). W5 consumer example #3, from the
 > operator's "Java Graph Stack (Heute) vs Project Panama + lance-graph
 > (richtig gemacht)" poster. Gated on `lgj-soa-substrate-v1.md` W3.
 

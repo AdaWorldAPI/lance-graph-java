@@ -13,6 +13,26 @@ question (named in MedCare-rs commitment #10 and spec NG8) — surfaced
 here, deliberately NOT resolved here. Closes when upstream unifies the
 width or rules the split permanent.
 
+**REGRADED 2026-08-18 (operator correction, verified at file:line): the
+SPLIT is ratified design, not drift.** `rbac::ClassId = u32` targets the
+FULL composed classid — rbac.rs:98-103's own doc: "the NodeGuid classid
+(its canon half is the codebook id; compose via render_classid)" — i.e.
+`domain::appid`, both halves, so an authorization can target one app's
+class instead of blocking a whole domain (and a domain-wide policy stays
+expressible by matching the canon half). `class_view::ClassId = u16` is
+a DIFFERENT KIND, not a narrower address: "Per-row class discriminator —
+the Cognitive-RISC class_id/shape_id... OD-CLASSID-WIDTH ratified...
+reuses the width of MailboxSoaView::class_id" (class_view.rs:48-54) — a
+compact per-row shape-family discriminator, width-matched to the SoA
+accessor. What REMAINS open here is only the u16 shape-space capacity
+ceiling for relation minting (MedCare #10's "8 of 280 ids over the
+ceiling") — not the existence of two widths. Follow-up for the
+provider-slot wave: `class_view_provider::class_id_for`'s doc should say
+a real provider keys ClassView by the shape discriminator (or the render
+half via render_classid decomposition), never by bounds-truncating the
+full u32 — the fixture ignores the value, so behavior is unaffected
+today.
+
 ## ISS-LGJ-FANOUT-UNREVIEWED (2026-08-17) — PARTIALLY RESOLVED
 
 **Resolution for the core (Rust ABI + Java facade), same day:** all three
