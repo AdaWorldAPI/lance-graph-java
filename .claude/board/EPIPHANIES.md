@@ -4,6 +4,78 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (measured) — the graph-consumer STOP condition was real, and is now cleared
+
+**Status:** FINDING + a correction of MY OWN earlier claim. **Confidence:**
+High — measured (`examples/graph_density_probe.rs`), not argued.
+
+### What "in the meantime" surfaced
+
+Asked what was available to build while `ruff_r2il` PR2/PR3 are blocked.
+First instinct was W5c (graph consumer) — I'd twice previously argued its
+D1a design needs zero substrate change (mask words are writable, facet-
+match already exists). Both times I checked the MECHANISM and skipped
+`wave-consumer-graph.md`'s own STOP condition, which names a DIFFERENT,
+real blocker: `RowStore::generate()`'s payload is uniform-random noise, so
+a decoded 1-2 hop BFS over it saturates to nearly every row regardless of
+decode convention — vacuous under the wave's own falsifier #4 ("seed / 1-
+hop / 2-hop must be three different, non-empty, non-total sizes"). No
+mechanism fix (writable masks, zero-copy reads) touches this; it is a
+DATA-SHAPE problem, not a decode-ambiguity problem, and the wave file says
+so explicitly: *"this wave NEEDS a deliberate edge-bearing generator arm:
+that is a substrate change, not a consumer hack."* I was about to dispatch
+G1/G2 into it before re-reading the STOP block in full — caught before any
+workers spawned.
+
+### The fix, measured before committing to parameters
+
+`RowStore::generate_with_edges(n_rows, seed, edge_classid, edge_gate_mask,
+edge_radius)` (native/lgj-abi/src/rowstore.rs) — additive, `generate()`
+untouched. Classid assignment is byte-identical to `generate()` (same
+SplitMix64 draws, same `(a>>>33)&0xF` formula; unused bits 37..64 of `a`
+become an independent sparsity gate, so `edge_classid=16` — out of range —
+reproduces `generate()` exactly, pinned by test). A gated, sparse subset of
+`edge_classid`-matching facets get a BOUNDED local-neighbourhood target
+(`row + offset mod n`, `offset` drawn from `b`, clamped to `±edge_radius`)
+instead of raw noise.
+
+`examples/graph_density_probe.rs` swept `(gate_mask, radius)` before any
+parameter was chosen — first pass at `n_rows=1000` was too small (avg
+degree < 1, everything collapsed to zero); widened to `n_rows=20_000` and
+got real, usable numbers (`gate_mask=0x0, radius=25`: seed=20 → 1hop=30 →
+2hop=40). Re-measured at a smaller, test-suite-friendly `n_rows=2000` for
+the pinned regression: seed=10 → **1hop=19 → 2hop=29** — three different,
+non-empty, non-total sizes, exactly the falsifier's own shape, now pinned
+as `measured_hop_counts_are_three_distinct_non_empty_non_total_sizes`.
+
+**Two disable-runs, both as specified:**
+- Broke the radius-wrap formula (dropped `rem_euclid`) → exactly the three
+  tests touching the target formula went red (the transcription test, the
+  in-bounds/radius invariant, the pinned hop-count regression); the seven
+  tests that don't touch target computation stayed green. Restored.
+- Ignored the sparsity gate mask (fired on classid match alone) → only the
+  transcription test went red. The in-bounds/radius invariant test
+  correctly stayed green — density and target-correctness are orthogonal
+  properties, and the disable changes density, not correctness. Verified
+  this is the RIGHT outcome, not a vacuous test: geometry validity doesn't
+  depend on WHICH facets get the treatment, only on the treatment itself
+  once applied. Restored.
+
+Gates: `lgj-abi` 90/90 (was 84; +6 new tests), fmt clean, clippy
+`--all-targets --all-features` clean.
+
+### Consequence
+
+`wave-consumer-graph.md` updated in place: the STOP condition marked
+RESOLVED with the measured numbers, and the file's own dispatch header
+corrected — the "calcify, do not dispatch" gate was already lifted
+session-wide (W5a/W5b shipped under the identical wording); this wave's
+GENUINE extra gate was the generator, now cleared. **The graph consumer
+(G1/G2) is dispatchable.** Not dispatched in this same pass — this PR is
+scoped to the substrate-tier generator only, per the wave file's own rule
+that a generator extension is NOT a consumer hack and lands as its own
+change.
+
 ## 2026-08-18 (R2IL handshake) — E-LGJ-VALHALLA-IS-INTEGRATED-AS-A-PROPERTY-NOT-A-CONCEPT-1
 
 **Status:** FINDING + a storno of my own handoff premise (operator-caught).

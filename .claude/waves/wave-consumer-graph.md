@@ -1,10 +1,13 @@
 # Wave: consumer example — graph traversal (facet edges, crossings ∝ hops)
 
-> Executes `consumer-graph-traversal-v1.md`. **DO NOT DISPATCH** —
-> operator ruling 2026-08-17: calcified, not executed, until called.
-> Gates: W3 merged AND the hop-decode capability question resolved (see
-> Decision D1 below — this wave has a genuine open design decision the
-> other two consumer waves do not).
+> Executes `consumer-graph-traversal-v1.md`. Gates: W3 merged (DONE) AND
+> the hop-decode capability question resolved (Decision D1 below — ruled
+> D1a) AND the edge-bearing generator STOP condition resolved (DONE,
+> `RowStore::generate_with_edges`, see below). **DISPATCHABLE** — the
+> calcify-only gate ("2026-08-17: calcified, not executed, until called")
+> was lifted session-wide once autonomous dispatch was authorized (W5a/W5b
+> both shipped under it); this wave's own, GENUINE extra gate (the
+> generator) is what actually held it back, and is now cleared.
 
 ## Decision D1 (orchestrator resolves BEFORE any worker spawns)
 
@@ -59,8 +62,22 @@ offset by 4 bytes → hop-correctness must go red (proves the decode is
 load-bearing); restore. Board + PR per rhythm; if D1b was chosen, the
 membrane PR merges FIRST and this wave's PR references it.
 
-**STOP conditions:** payload reading ambiguity (→ orchestrator, possibly
-a generator extension in a substrate-plan PR — the fixture's payload
-today is PRNG noise, so this wave NEEDS a deliberate edge-bearing
-generator arm: that is a substrate change, not a consumer hack — flagged
-here so nobody discovers it mid-dispatch).
+**STOP condition RESOLVED (2026-08-18):** the deliberate edge-bearing
+generator arm this wave's STOP condition named now exists —
+`RowStore::generate_with_edges(n_rows, seed, edge_classid, edge_gate_mask,
+edge_radius)` (native/lgj-abi, landed as its own substrate-tier change,
+NOT a consumer hack, per this file's own rule). It reuses `generate()`'s
+classid stream byte-for-byte (an out-of-range `edge_classid` reproduces
+`generate()` exactly — pinned by test) and, for a SPARSE, gated subset of
+`edge_classid`-matching facets, writes a bounded-local-neighbourhood
+target row instead of raw noise — the mechanism that keeps a 1-2 hop BFS
+non-vacuous. Measured (`examples/graph_density_probe.rs`, not guessed):
+plain `generate()`'s uniform-random payload saturates a 2-hop BFS to
+nearly every row (the ORIGINAL problem this STOP condition named); at
+`n_rows=2000, edge_classid=0, edge_gate_mask=0x0, edge_radius=25`, a
+10-row seed set reaches exactly 19 rows at 1 hop and 29 at 2 hops — three
+different, non-empty, non-total sizes, pinned as a regression test
+(`measured_hop_counts_are_three_distinct_non_empty_non_total_sizes`).
+**G1's payload-reading-convention documentation task now has real,
+measured ground to document** rather than an open question — this wave
+is dispatchable.

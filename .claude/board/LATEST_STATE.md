@@ -1,3 +1,32 @@
+## 2026-08-18 (measured) — W5c's real blocker found + cleared: RowStore::generate_with_edges
+
+Asked what was buildable while ruff_r2il PR2/PR3 are blocked. Was about to
+dispatch the graph consumer (W5c) on the strength of D1a's mechanism
+(writable masks, existing facet-match) being sufficient -- twice claimed
+this in earlier turns -- before re-reading `wave-consumer-graph.md`'s own
+STOP condition in full and catching a real, different blocker: plain
+`RowStore::generate()`'s payload is uniform noise, so any 1-2 hop BFS over
+it saturates to nearly every row regardless of decode convention --
+vacuous under the wave's own anti-vacuity falsifier. A data-shape problem,
+not a mechanism problem; caught before any workers spawned.
+
+Fixed with `RowStore::generate_with_edges` (native/lgj-abi) -- additive,
+`generate()` byte-identical for out-of-range `edge_classid` (pinned).
+Parameters chosen from a real measurement sweep
+(`examples/graph_density_probe.rs`), not guessed: at `n_rows=2000,
+gate_mask=0x0, radius=25`, a 10-row seed reaches 19 rows at 1 hop, 29 at 2
+hops -- pinned as a regression test. Two disable-runs (radius-wrap
+formula; sparsity gate) both went red exactly where expected, including
+one case (the gate disable) correctly NOT failing an orthogonal geometry
+test -- verified as the right outcome, not a vacuous one.
+
+`wave-consumer-graph.md` updated: STOP condition marked RESOLVED with the
+measured numbers; the file's stale "calcify, do not dispatch" header
+corrected (that gate was already lifted session-wide). **The graph
+consumer is now genuinely dispatchable** -- not dispatched in this pass,
+scoped to the generator only. Gates: lgj-abi 90/90 (+6), fmt/clippy clean.
+Full record: `EPIPHANIES.md`, the entry above the R2IL handshake one.
+
 ## 2026-08-18 (even later) — ruff #96 is a different arm; found + read the REAL staging guide
 
 Checked "ruff 96 merged." It's `ruff_python_spo`'s plain-Python residual

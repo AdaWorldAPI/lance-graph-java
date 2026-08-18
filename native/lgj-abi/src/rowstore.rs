@@ -134,6 +134,101 @@ impl RowStore {
         })
     }
 
+    /// Build a store whose classid stream is byte-identical to [`Self::generate`]
+    /// but with a sparse, bounded-neighbourhood subset of `edge_classid`-matching
+    /// facets carrying a *structured* payload (a nearby row index) instead of raw
+    /// random bits — the graph-consumer wave's "deliberate edge-bearing generator
+    /// arm" (`.claude/waves/wave-consumer-graph.md`'s STOP condition: the plain
+    /// [`Self::generate`] payload is PRNG noise, so a 1/2-hop BFS over it
+    /// saturates to nearly every row within one or two hops — vacuous under any
+    /// non-trivial anti-vacuity check, regardless of decode convention).
+    ///
+    /// # Why classid stays byte-identical to `generate()`
+    ///
+    /// `classid = (a >>> 33) & 0xF` consumes bits 33..37 of the SAME per-facet
+    /// `a` draw `generate()` makes; bits 37..64 (27 bits) are otherwise unused
+    /// by that formula and are spent here as an INDEPENDENT sparsity gate, so
+    /// this function never perturbs classid assignment — `edge_classid = 16`
+    /// (out of the 0..16 range) makes the gate structurally unreachable, and
+    /// the byte output is then provably identical to `generate()` (pinned by a
+    /// test, not merely argued).
+    ///
+    /// # The sparsity gate and why it exists
+    ///
+    /// A facet becomes a structured edge only when BOTH `classid ==
+    /// edge_classid` (probability `1/16`) AND `(a & edge_gate_mask) == 0`
+    /// (probability `1/(edge_gate_mask + 1)`, `edge_gate_mask` a power-of-two
+    /// minus one). The two gates compose multiplicatively and independently
+    /// (disjoint bit ranges of the same draw), so overall edge density per
+    /// facet is `1 / (16 * (edge_gate_mask + 1))` — tunable without touching
+    /// the classid formula. `examples/graph_density_probe.rs` measures real
+    /// 1-hop/2-hop set sizes across candidate gate masks; this function does
+    /// not itself pick "good" parameters — see that probe's recorded numbers
+    /// before choosing them for a real fixture.
+    ///
+    /// # The target encoding
+    ///
+    /// A structured edge's payload is `target_row` (LE u64, in the 8-byte
+    /// `b`-slot) with the trailing 4-byte `a`-slot zeroed as a marker —
+    /// `target_row = (row as i64 + offset).rem_euclid(n_rows as i64)`,
+    /// `offset` drawn from `b % (2*edge_radius+1)` recentred to
+    /// `-edge_radius..=+edge_radius` — a BOUNDED local neighbourhood, never a
+    /// uniform global target (the mechanism that keeps the graph sparse AND
+    /// local, which is what makes hop-count matter at all). A non-edge facet
+    /// (gate failed) keeps `generate()`'s raw `(b, a_lo32)` payload exactly.
+    ///
+    /// Returns `None` on the same overflow/allocation conditions as
+    /// [`Self::generate`], and if `edge_radius >= n_rows` (a radius that
+    /// cannot wrap meaningfully) or `n_rows == 0`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_with_edges(
+        n_rows: u64,
+        seed: u64,
+        edge_classid: u32,
+        edge_gate_mask: u64,
+        edge_radius: u32,
+    ) -> Option<Self> {
+        let n = usize::try_from(n_rows).ok()?;
+        if n == 0 || u64::from(edge_radius) >= n_rows {
+            return None;
+        }
+        let byte_len = n.checked_mul(ROW_BYTES as usize)?;
+
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(byte_len).ok()?;
+        bytes.resize(byte_len, 0u8);
+
+        let mut rng = SplitMix64::new(seed);
+        for row in 0..n {
+            for facet in 0..ROW_FACETS as usize {
+                let a = rng.next_u64();
+                let b = rng.next_u64();
+                let base = row * ROW_BYTES as usize + facet * FACET_BYTES as usize;
+                let classid = ((a >> 33) & (ROWSTORE_CLASS_CARDINALITY - 1)) as u32;
+
+                let (payload_lo64, payload_hi32) =
+                    if classid == edge_classid && (a & edge_gate_mask) == 0 {
+                        let span = 2 * u64::from(edge_radius) + 1;
+                        let raw_offset = (b % span) as i64 - i64::from(edge_radius);
+                        let target = (row as i64 + raw_offset).rem_euclid(n as i64) as u64;
+                        (target, 0u32)
+                    } else {
+                        (b, a as u32)
+                    };
+
+                bytes[base..base + 4].copy_from_slice(&classid.to_le_bytes());
+                bytes[base + 4..base + 12].copy_from_slice(&payload_lo64.to_le_bytes());
+                bytes[base + 12..base + 16].copy_from_slice(&payload_hi32.to_le_bytes());
+            }
+        }
+
+        Some(Self {
+            n_rows,
+            seed,
+            bytes: Arc::from(bytes),
+        })
+    }
+
     /// The whole buffer as a byte slice. Zero-copy; the address is stable for
     /// the store's life (see the module header).
     pub fn as_bytes(&self) -> &[u8] {
@@ -288,5 +383,175 @@ mod tests {
         let s = RowStore::generate(0, 1).unwrap();
         assert!(s.as_bytes().is_empty());
         assert_eq!(s.lane_raw(LANE_FACET_BASE).unwrap().1, 0);
+    }
+
+    // ── generate_with_edges: the graph-consumer wave's edge-bearing arm ──
+
+    /// Out-of-range `edge_classid` makes the sparsity gate structurally
+    /// unreachable — proves the edge mechanism is genuinely additive, not
+    /// merely documented as such.
+    #[test]
+    fn out_of_range_edge_classid_reproduces_plain_generate_byte_for_byte() {
+        let plain = RowStore::generate(200, 0xABCD).unwrap();
+        let edged = RowStore::generate_with_edges(
+            200,
+            0xABCD,
+            ROWSTORE_CLASS_CARDINALITY as u32, // 16, out of the 0..16 range
+            0,
+            10,
+        )
+        .unwrap();
+        assert_eq!(plain.as_bytes(), edged.as_bytes());
+    }
+
+    /// The independent transcription (mirrors
+    /// `the_documented_generator_is_the_actual_generator` above, extended
+    /// with the gate + target formula from this function's own doc comment)
+    /// — exactly what the Java-side parity test will do.
+    #[test]
+    fn the_documented_edge_mechanism_is_the_actual_mechanism() {
+        let n = 50u64;
+        let seed = 0x1234_5678;
+        let edge_classid = 3u32;
+        let edge_gate_mask = 0x3u64;
+        let edge_radius = 7u32;
+        let store =
+            RowStore::generate_with_edges(n, seed, edge_classid, edge_gate_mask, edge_radius)
+                .unwrap();
+
+        let mut rng = SplitMix64::new(seed);
+        for row in 0..n {
+            for facet in 0..ROW_FACETS {
+                let a = rng.next_u64();
+                let b = rng.next_u64();
+                let classid = ((a >> 33) & 0xF) as u32;
+                let base = (row * ROW_BYTES + facet as u64 * FACET_BYTES) as usize;
+                assert_eq!(store.classid_at(row, facet), classid);
+
+                if classid == edge_classid && (a & edge_gate_mask) == 0 {
+                    let span = 2 * u64::from(edge_radius) + 1;
+                    let raw_offset = (b % span) as i64 - i64::from(edge_radius);
+                    let target = (row as i64 + raw_offset).rem_euclid(n as i64) as u64;
+                    assert_eq!(
+                        &store.as_bytes()[base + 4..base + 12],
+                        &target.to_le_bytes(),
+                        "row {row} facet {facet}: structured edge target"
+                    );
+                    assert_eq!(&store.as_bytes()[base + 12..base + 16], &0u32.to_le_bytes());
+                } else {
+                    assert_eq!(&store.as_bytes()[base + 4..base + 12], &b.to_le_bytes());
+                    assert_eq!(
+                        &store.as_bytes()[base + 12..base + 16],
+                        &(a as u32).to_le_bytes()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Structural invariant: every structured-edge target is a valid,
+    /// in-bounds row index within `edge_radius` of its own row (accounting
+    /// for wraparound) — checked exhaustively, not sampled.
+    #[test]
+    fn every_structured_edge_target_is_in_bounds_and_within_radius() {
+        let n = 300u64;
+        let edge_classid = 5u32;
+        let edge_radius = 20u32;
+        let store =
+            RowStore::generate_with_edges(n, 0x9E37, edge_classid, 0x1, edge_radius).unwrap();
+
+        let mut checked = 0u32;
+        for row in 0..n {
+            for facet in 0..ROW_FACETS {
+                if store.classid_at(row, facet) != edge_classid {
+                    continue;
+                }
+                let base = (row * ROW_BYTES + facet as u64 * FACET_BYTES) as usize;
+                let hi32 =
+                    u32::from_le_bytes(store.as_bytes()[base + 12..base + 16].try_into().unwrap());
+                if hi32 != 0 {
+                    continue; // gate failed for this classid-matching facet
+                }
+                checked += 1;
+                let target =
+                    u64::from_le_bytes(store.as_bytes()[base + 4..base + 12].try_into().unwrap());
+                assert!(target < n, "target {target} out of bounds ({n} rows)");
+                let forward = (target as i64 - row as i64).rem_euclid(n as i64);
+                let backward = n as i64 - forward;
+                let wrapped_distance = forward.min(backward);
+                assert!(
+                    wrapped_distance <= i64::from(edge_radius),
+                    "row {row} -> target {target}: distance {wrapped_distance} exceeds radius {edge_radius}"
+                );
+            }
+        }
+        assert!(
+            checked > 0,
+            "anti-vacuity: this fixture must produce at least one structured edge"
+        );
+    }
+
+    /// The measured regression pin (`examples/graph_density_probe.rs`,
+    /// `n_rows=2000, gate_mask=0x0, radius=25`): a 10-row seed set reaches
+    /// exactly 19 distinct rows at 1 hop and 29 at 2 hops. Three different,
+    /// non-empty, non-total sizes — the graph-consumer wave's own
+    /// anti-vacuity falsifier, satisfied here at the GENERATOR level before
+    /// any consumer code exists to fail it. Recomputed by BFS, independent
+    /// of `generate_with_edges`'s own internals (reads only classid + raw
+    /// payload bytes, the same surface a real consumer sees).
+    #[test]
+    fn measured_hop_counts_are_three_distinct_non_empty_non_total_sizes() {
+        let n = 2_000u64;
+        let edge_classid = 0u32;
+        let store = RowStore::generate_with_edges(n, 0xF00D_CAFE, edge_classid, 0x0, 25).unwrap();
+
+        let hop = |from: &[u64]| -> Vec<u64> {
+            let mut seen = vec![false; n as usize];
+            let mut out = Vec::new();
+            for &row in from {
+                for facet in 0..ROW_FACETS {
+                    if store.classid_at(row, facet) != edge_classid {
+                        continue;
+                    }
+                    let base = (row * ROW_BYTES + facet as u64 * FACET_BYTES) as usize;
+                    let hi32 = u32::from_le_bytes(
+                        store.as_bytes()[base + 12..base + 16].try_into().unwrap(),
+                    );
+                    if hi32 != 0 {
+                        continue;
+                    }
+                    let target = u64::from_le_bytes(
+                        store.as_bytes()[base + 4..base + 12].try_into().unwrap(),
+                    );
+                    if !seen[target as usize] {
+                        seen[target as usize] = true;
+                        out.push(target);
+                    }
+                }
+            }
+            out
+        };
+
+        let seed: Vec<u64> = (0..10).map(|i| i * 37 + 5).collect();
+        let one_hop = hop(&seed);
+        let two_hop = hop(&one_hop);
+
+        assert_eq!(seed.len(), 10);
+        assert_eq!(one_hop.len(), 19);
+        assert_eq!(two_hop.len(), 29);
+        assert!(seed.len() != one_hop.len() && one_hop.len() != two_hop.len());
+        assert!(!one_hop.is_empty() && !two_hop.is_empty());
+        assert!((one_hop.len() as u64) < n && (two_hop.len() as u64) < n);
+    }
+
+    #[test]
+    fn zero_rows_is_rejected_for_generate_with_edges() {
+        assert!(RowStore::generate_with_edges(0, 1, 0, 0, 10).is_none());
+    }
+
+    #[test]
+    fn radius_that_cannot_fit_is_rejected() {
+        assert!(RowStore::generate_with_edges(10, 1, 0, 0, 10).is_none());
+        assert!(RowStore::generate_with_edges(10, 1, 0, 0, 9).is_some());
     }
 }
