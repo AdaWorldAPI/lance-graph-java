@@ -8,6 +8,57 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #20 — D-LGJ-W8 A3 freeze (PR-0): ratified correction spec v3 + root CLAUDE.md + board storno (merged 2026-08-18, squash `c479f76`)
+
+- **Added:** `.claude/plans/mask-native-navigation-correction-v1.md`
+  (SPEC v3, council-RATIFIED — Part I: the mask-native navigation
+  correction; Part II: the 64K parallel-SoA compute / deterministic
+  placement / batch-publication architecture, audited at file:line
+  across the lance-graph spine; full change ledger v1→v2→v2.1→v3);
+  root `CLAUDE.md` (CREATED — the repo's first root policy guard:
+  mask-native invariant covering query AND compute verbs, named
+  import/materialise exceptions, three-axes model, the GridLake hard
+  gate, missing-capability STOP rule, no model-policy section by
+  explicit rule); `EPIPHANIES.md` storno
+  `E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1`; `STATUS_BOARD.md`
+  D-LGJ-W8 row (gate ladder AUDIT✓→SPEC✓→COUNCIL✓→FREEZE=this PR);
+  `LATEST_STATE.md` correction-of-record.
+- **Locked:** the operator rulings of 2026-08-18 (CORRECTION WAVE +
+  RULING CLARIFICATION + A1 ARCHITECTURE RULING) as frozen decisions;
+  the three/four currencies; PR #18 demoted to scalar reference oracle
+  (NOT destroyed — both BFS transcriptions preserved verbatim); the
+  landing-key REQUIRED PROPERTIES (never an algorithm) with the
+  generic-parallel-write hard gate; W8 = mask correction only, GridLake
+  specified-not-implemented.
+- **Council record:** 5 savants (44 findings — incl. the
+  lock_masks_ordered aliasing DEADLOCK trap, the W1a free-fn deviation
+  surfaced not smuggled) + operator A2 verdict + 3 adversarial
+  reviewers: 1 BLOCK(P0) resolved (model identifiers de-named to roles
+  in the committed spec; the repo's pre-existing board occurrences
+  flagged to the operator, deliberately NOT swept), 6 FIX(P1) applied
+  (§8.4 evidence re-scoping — temporal.rs's objection is restart-only,
+  answered by the durable position_base cursor; the surviving
+  within-cycle arrival leak argued on its own evidence; §9 axis split
+  filing the leak on PUBLICATION; F-LAND scoped to the placement leg;
+  G2 respecified as a committed call-sites-only check; G11
+  contract-import fence; same-commit board artifacts in W8a/W8b gate
+  columns), ~20 FIX(P2). One reviewer-vs-savant factual conflict
+  settled by reading the file (Graph.java storno anchor = :18-19; the
+  S3-1 "correction" to :19-20 was itself wrong — stornoed in the
+  ledger).
+- **Deferred:** ALL implementation (PR-N ndarray → PR-W8a substrate →
+  PR-W8b facade/migration, per spec §3.10); the GridLake/compute wave
+  (hard-gated); decode modes 1..=3 (RESERVED, −14, promotion trigger
+  named); Wide-tier WideFieldMask promotion (NG12); fused multi-hop
+  traversal (NG10); mask reuse/pooling (NG11); the 125/233 ms
+  reproduction/receipt PR (operator-measured priors, receipt
+  out-of-tree — provenance split pinned in spec §8.3).
+- **Docs:** the spec is self-contained; root CLAUDE.md points at the
+  enforcing artifacts.
+- **Confidence:** High — no code changed; every normative claim in the
+  frozen text carries a council-verified file:line or an explicit
+  grade/seam.
+
 ## PR #18 — consumers/graph: traversal facade + falsifiers (merged 2026-08-18, squash `5d3e694`)
 
 - **Added:** `consumers/graph/` — the third and final planned consumer
