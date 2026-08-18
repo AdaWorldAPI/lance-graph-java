@@ -62,10 +62,10 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 18 symbols (minor 2; the "14" this line carried
+- It is **small** — currently 19 symbols (minor 3; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
-  minor 2's three additions are argued in §11.
+  minor 2's three additions are argued in §11, minor 3's one addition in §12.
 - It is **bulk-only**. Every call must be capable of doing work proportional to
   `n_rows` (see §6 — the anti-JNI rule).
 - It speaks **resource, lane, view, mask, operation, descriptor, status,
@@ -78,7 +78,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 2    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 3    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -269,7 +269,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (18 symbols)
+## 7. The function surface (19 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -484,3 +484,65 @@ Rows are 512-byte strided within it. Nothing in this slice needs more — Java
 reads via `JAVA_INT_UNALIGNED`-class layouts, and every `ndarray::simd` load
 is a register fill. The 64-byte-aligned base guarantee arrives with the real
 `NodeRow` (`#[repr(C, align(64))]`) wiring.
+
+## 12. The edge-bearing row store (ABI minor ≥ 3)
+
+`consumer-graph-traversal-v1.md`'s falsifiers need a 1-2 hop BFS that is
+*non-vacuous* — plain `lgj_rowstore_open`'s payload is uniform noise, so any
+hop over it saturates to nearly every row within one or two steps
+(`.claude/harvest/graph_density_probe.rs`'s own measurement). This is an
+alternative **constructor**, not a new resource kind, new lane shape, or new
+mask op — `LGJ_RESOURCE_ROWSTORE` and the whole §11 lane/operation surface
+apply to its output unchanged.
+
+### Resource
+
+```
+i32 lgj_rowstore_open_with_edges(u64 n_rows, u64 seed,
+                                 u32 edge_classid, u64 edge_gate_mask,
+                                 u32 edge_radius, u64* out_handle)
+```
+
+Reuses §11's classid stream **byte-for-byte** — same two SplitMix64 draws per
+facet, same `classid = (a >>> 33) & 0xF`. For a facet whose classid equals
+`edge_classid` AND whose draw clears the sparsity gate (`a & edge_gate_mask
+== 0`), the 12-byte payload instead carries a **structured target row**:
+
+```
+span   = 2 * edge_radius + 1
+offset = (b % span) - edge_radius              // signed, |offset| <= edge_radius
+target = (row + offset) mod n_rows              // bounded-local-neighbourhood
+payload_lo64 = target as u64                    // hi32 forced to 0 (the flag
+payload_hi32 = 0                                //  a hop reads to know "structured")
+```
+
+Every other facet (classid mismatch, or gate not cleared) is byte-identical
+to `lgj_rowstore_open`'s plain draw (`payload = le64(b) ++ le32(a &
+0xFFFFFFFF)`) — so an **out-of-range `edge_classid`** (one that never occurs
+in the classid stream, e.g. `16`) reproduces `lgj_rowstore_open` exactly,
+which is how `RowStore::generate_with_edges`'s own test suite proves the two
+generators share one code path rather than drifting apart.
+
+Density is governed by `edge_gate_mask`: the gate probability is
+`1 / (16 * (edge_gate_mask + 1))` (16 candidate classids × the mask's extra
+selectivity), so `edge_gate_mask = 0` is the densest edge-bearing setting.
+`edge_radius` must be `< n_rows` (an unsatisfiable bound is
+`LGJ_ERR_LENGTH_OVERFLOW`, matching every other overflow-shaped rejection in
+this generator family).
+
+### A hop, at the Java layer (no new op — composition of existing symbols)
+
+A hop is `lgj_row_facet_match(edge_classid)` (§11, unchanged) to find which
+of a row's facets carry the edge classid, followed by a **Java-side** decode
+of each matched facet's `payload_lo64` as the target row and a scatter into
+the next mask via `lgj_mask_describe`'s WRITABLE lane (§7) — one crossing per
+hop, zero new ABI surface. See `consumer-graph-traversal-v1.md` Decision D1a.
+A native `lgj_hop` symbol (D1b) remains a future ABI minor if Java-side
+scatter measurably dominates; it is not part of this minor.
+
+### SIMD provenance (unchanged §8 rule, applied)
+
+The generator's per-facet loop is scalar (SplitMix64 is inherently
+sequential per draw); the sparsity gate and target-row arithmetic are cheap
+integer ops on that same sequential stream — no new SIMD kernel, matching
+`RowStore::generate`'s own scalar generation loop.

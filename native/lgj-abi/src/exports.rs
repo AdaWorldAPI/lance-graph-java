@@ -138,6 +138,58 @@ pub unsafe extern "C" fn lgj_rowstore_open(n_rows: u64, seed: u64, out_handle: *
     })
 }
 
+/// Build the edge-bearing SoA **row store** (abi.md §12) and return its
+/// handle: byte-identical classid stream to [`lgj_rowstore_open`], plus a
+/// sparse, gated subset of `edge_classid`-matching facets carrying a
+/// bounded-local-neighbourhood target row (docs/abi.md §12; the mechanism
+/// `consumer-graph-traversal-v1.md`'s hop falsifiers need). ABI minor ≥ 3.
+///
+/// `edge_gate_mask` selects sparsity (a facet is edge-shaped iff `a &
+/// edge_gate_mask == 0` on its draw — abi.md §12); `edge_radius` bounds how
+/// far a structured target may land from its source row. An out-of-range
+/// `edge_classid` (one that never occurs in the plain classid stream)
+/// reproduces [`lgj_rowstore_open`] byte-for-byte — proven by
+/// `RowStore::generate_with_edges`'s own test suite.
+/// # Safety
+///
+/// A null pointer is *handled*, not UB: it returns `NULL_ARGUMENT`. Beyond
+/// that, `out_handle` must be a valid, aligned, writable `u64`. Written only
+/// on success.
+///
+/// `unsafe` here is a note to Rust callers linking the `rlib`. The JVM,
+/// which is the real caller, has no such concept — it upholds the same
+/// contract by construction, because every pointer it passes comes from a
+/// `MemorySegment` whose size and alignment it derived from the manifest.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_rowstore_open_with_edges(
+    n_rows: u64,
+    seed: u64,
+    edge_classid: u32,
+    edge_gate_mask: u64,
+    edge_radius: u32,
+    out_handle: *mut u64,
+) -> i32 {
+    guard(|| {
+        if out_handle.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        match registry::open_rowstore_with_edges(
+            n_rows,
+            seed,
+            edge_classid,
+            edge_gate_mask,
+            edge_radius,
+        ) {
+            Ok(h) => {
+                // SAFETY: non-null (checked above); written only on success.
+                unsafe { *out_handle = h };
+                LGJ_OK
+            }
+            Err(e) => e,
+        }
+    })
+}
+
 /// Free a resource: its lanes are dropped, its generation is bumped, and its
 /// children begin failing with `PARENT_CLOSED`.
 ///

@@ -180,6 +180,25 @@ public final class Engine {
     }
 
     /**
+     * Open the edge-bearing SoA row store (docs/abi.md §12): byte-identical classid stream to
+     * {@link #openRowStore}, plus a sparse, gated subset of {@code edgeClassid}-matching facets
+     * carrying a bounded-local-neighbourhood target row instead of raw noise — what a non-vacuous
+     * BFS over the row store needs. Returns the resource handle. Requires ABI minor &gt;= 3.
+     *
+     * @param edgeGateMask sparsity gate: a facet is edge-shaped iff {@code a & edgeGateMask == 0}
+     *                     on its draw; {@code 0} is the densest setting
+     * @param edgeRadius   bounds how far a structured target may land from its source row; must be
+     *                     {@code < nRows}
+     */
+    public static long openRowStoreWithEdges(long nRows, long seed, int edgeClassid,
+                                             long edgeGateMask, int edgeRadius) {
+        Abi.requireMinor(3);
+        Scratch s = SCRATCH.get();
+        return Downcalls.rowstoreOpenWithEdges(nRows, seed, edgeClassid, edgeGateMask, edgeRadius,
+                s.out);
+    }
+
+    /**
      * Overwrite {@code dstMask} with {@code classid(facet, row) == classId} for every row of
      * {@code store} (docs/abi.md §11). {@code facet} is a facet index {@code 0..32} into the row's
      * 32 facet lanes, not a lane id. Requires ABI minor &gt;= 2.

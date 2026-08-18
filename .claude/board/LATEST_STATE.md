@@ -1,3 +1,43 @@
+## 2026-08-18 (later still) — the graph wave's ABI gap, found and closed before dispatch: `lgj_rowstore_open_with_edges` (minor 3)
+
+Picked up the graph-consumer wave on "everything on track?" — it was marked
+DISPATCHABLE by the entry below, and idle capacity while ruff_r2il works its
+own PR2/3 track was worth using. Before spawning G1/G2, checked what Java
+would actually call to reach `RowStore::generate_with_edges` — and it was
+nothing: `Engine.openRowStore`/`registry::open_rowstore` only ever call plain
+`RowStore::generate`; no `extern "C"` symbol for the edge-bearing generator
+existed anywhere. The prior pass's STOP-condition-RESOLVED note proved the
+*generator*, not the *membrane path to it* — a real gap that would have
+surfaced mid-dispatch as "G1's scope requires touching a file outside your
+scope" the moment a worker tried to open an edge-bearing store from Java.
+
+Closed it as the wave's own D1b rule requires: "a new ABI symbol... must go
+through the substrate wave process FIRST as its own W-tier PR" — done here as
+orchestrator work (genuinely new ABI surface, not consumer scope), not
+delegated. `lgj_rowstore_open_with_edges` (ABI minor 2→3, docs/abi.md §12):
+byte-identical resource kind and lane shape to `lgj_rowstore_open`, purely an
+alternative constructor, following the row store's own minor-2
+`requireMinor` gating pattern exactly. `cargo test` 93/93 (+3), Java `AllTests`
+194/194 (+6). Full record (including the two disable-runs and the strongest
+result — Java independently reproducing the D1a hop mechanism's exact pinned
+numbers through raw-segment reads, not just the classid stream): see
+`STATUS_BOARD.md` D-LGJ-W6, `EPIPHANIES.md`.
+
+Not yet dispatched: G1 (traversal facade) and G2 (falsifier tests) are next,
+now against a genuinely complete substrate rather than one proven only at the
+Rust generator level.
+
+Meanwhile on ruff: PR #100 (upstream 1500-commit catch-up, explicitly marked
+"baseline, not for merge" in its own body) merged anyway by the operator —
+its own CI never completed (cancelled on every commit), but incidentally
+fixed a 13-day-old `main`-CI lint failure (`prek`/shellcheck on
+`.github/workflows/ci.yaml:443`) that predated this whole arc and was
+unrelated to it. PR #101 (`ruff_r2il` PR2 first slice — §12 corpus profile
+resolving O1, `RefinedTruthSink`) merged cleanly on top, ~1.5h turnaround,
+CI green through `prek` on the resulting `main` run — the standing lint issue
+stayed fixed. Neither event required action here; recorded for continuity
+since both landed mid-session.
+
 ## 2026-08-18 (measured) — W5c's real blocker found + cleared: RowStore::generate_with_edges
 
 Asked what was buildable while ruff_r2il PR2/PR3 are blocked. Was about to

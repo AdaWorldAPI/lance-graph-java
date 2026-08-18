@@ -4,6 +4,97 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (later still) — "the generator exists" ≠ "Java can reach it": the membrane gap the prior entry's own resolution note missed
+
+**Status:** FINDING + a correction of the entry directly below this one.
+**Confidence:** High — measured (`nm -D` before/after, full Rust + Java test
+suites, two disable-runs).
+
+### What the prior entry's "RESOLVED" undersold
+
+The STOP-condition entry below this one — and `wave-consumer-graph.md`'s own
+header — declared the graph wave DISPATCHABLE once
+`RowStore::generate_with_edges` existed and its numbers were pinned. True at
+the Rust level, but incomplete: `Engine.openRowStore` /
+`registry::open_rowstore` (the only path Java has to a `RowStore`) call
+plain `RowStore::generate` unconditionally. **No `extern "C"` symbol for the
+edge-bearing generator existed.** A worker briefed to build `Graph.java`
+against `RowStore.open` would have had no way to reach non-vacuous data at
+all — the exact STOP condition this wave was declared clear of, just moved
+one layer up the stack, and it would have surfaced as a live "the file I
+need is outside my scope" STOP report from a Sonnet worker mid-dispatch
+rather than being caught here, before any worker spawned.
+
+Same shape as the finding this whole sub-arc started from: checking the
+*mechanism* (does a hop composition exist) without checking the *path*
+(can a caller actually reach the data the mechanism needs). Twice now in
+one wave.
+
+### The fix — the wave's own D1b rule, applied to itself
+
+`wave-consumer-graph.md`'s Decision D1 already states the rule for exactly
+this shape of gap: *"a new ABI symbol... must go through the substrate wave
+process FIRST as its own W-tier PR (the consumer-never-grows-the-membrane
+rule)."* Applied it to the row-store CONSTRUCTOR, not just the hop op D1
+was originally about — same rule, same reasoning: growing the membrane is
+orchestrator/W-tier work, never a consumer worker's ad hoc addition.
+
+`lgj_rowstore_open_with_edges` (ABI minor 2→3, `docs/abi.md` §12):
+`registry::open_rowstore_with_edges` + the `extern "C"` export mirror
+`open_rowstore`/`lgj_rowstore_open` symbol-for-symbol — same
+`LGJ_RESOURCE_ROWSTORE` kind, same lane shape, no new mask op, purely an
+alternative constructor. Java: `Downcalls.rowstoreOpenWithEdges` +
+`Engine.openRowStoreWithEdges` (`Abi.requireMinor(3)`, matching the row
+store's own minor-2 gate pattern) + the public `RowStore.openWithEdges`
+factory.
+
+### The strongest new result: Java independently reproduces the D1a hop, not just the classid stream
+
+Added to `RowStoreParityTest` rather than deferred to G1/G2: a **Java-side
+transcription of the exact D1a mechanism** (`lgj_row_facet_match` crossing +
+raw lane-0 payload decode, zero new ABI op — the mechanism the wave's own
+Decision D1 chose to start with) at the SAME parameters as the Rust-pinned
+regression (`n=2000, seed=0xF00D_CAFE, edge_classid=0, gate_mask=0x0,
+radius=25`). Result: **19 rows at 1 hop, 29 at 2 hops — identical to the
+Rust side, to the row.** This is a stronger falsifier than the Rust
+regression alone: it proves the membrane doesn't just carry the same
+classid stream, it carries the same *edge structure*, read through the
+exact mechanism a real `Graph.hop()` will use.
+
+Two disable-runs, both red-then-green:
+1. **Registry level:** hardcoded `open_rowstore_with_edges`'s inner call to
+   pass `edge_classid = 0` regardless of the argument → the new
+   `out_of_range_edge_classid_matches_plain_open_through_the_registry` test
+   (which passes `edge_classid = 16`, expecting parity with plain `open`)
+   went red, because classid 0 with `gate_mask = 0x0` genuinely writes
+   structured edges the plain generator never would. Restored, 93/93.
+2. **Java level:** forced the hop transcription's classid-match check to
+   always skip (`if (true) { continue; }`) → 1-hop and 2-hop both collapsed
+   to 0 and the anti-vacuity assertion failed exactly as expected. Restored,
+   194/194.
+
+### Gates
+
+`cargo test` 93/93 (+3 over the prior entry's 90), clippy `-D warnings` +
+`fmt --check` clean, release build exports `lgj_rowstore_open_with_edges`
+(`nm -D`, confirmed present). Java `AllTests` 194/194 (+6, all in
+`RowStoreParityTest`) — full suite re-run, not just the new section, since
+the stale top-level `target/release/liblgj_abi.so` (pre-dating this pass,
+minor 2) initially made EVERY suite fail at class-init (`Downcalls`
+eagerly resolves all method handles including the new one) until rebuilt
+with `CARGO_TARGET_DIR=$ROOT/target cargo build --release` per the
+documented build convention — a real, if brief, self-inflicted false
+alarm, not a substrate defect; recorded so a future session doesn't
+re-diagnose the same eager-resolution behavior as a bug.
+
+### Consequence
+
+The graph-consumer wave is now genuinely dispatchable — the substrate is
+proven at BOTH the Rust generator level (prior entry) and the Java
+membrane level (this entry), through the exact D1a mechanism the wave
+already chose. G1 (traversal facade) and G2 (falsifier tests) are next,
+not yet spawned.
+
 ## 2026-08-18 (measured) — the graph-consumer STOP condition was real, and is now cleared
 
 **Status:** FINDING + a correction of MY OWN earlier claim. **Confidence:**

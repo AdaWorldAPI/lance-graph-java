@@ -63,6 +63,32 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new RowStore(h, Engine.rowCount(h));
     }
 
+    /**
+     * Open {@code nRows} rows generated deterministically from {@code seed}, with a sparse, gated
+     * subset of {@code edgeClassid}-matching facets carrying a bounded-local-neighbourhood target
+     * row instead of raw noise (docs/abi.md §12) — what a non-vacuous BFS traversal needs; {@link
+     * #open} alone produces uniform-random payloads that saturate any hop within one or two steps.
+     *
+     * <p>Byte-identical classid stream to {@link #open}. An {@code edgeClassid} that never occurs
+     * in the classid stream (e.g. {@code 16}, one past the 4-bit range) reproduces {@link #open}
+     * exactly.
+     *
+     * @param edgeGateMask sparsity gate: a facet is edge-shaped iff {@code a & edgeGateMask == 0}
+     *                     on its underlying draw; {@code 0} is the densest setting
+     * @param edgeRadius   bounds how far a structured target may land from its source row; must be
+     *                     {@code < nRows}
+     * @throws NativeLibraryNotFoundException if the native artifact is not present
+     * @throws AbiMismatchException           if it is present but ABI minor &lt; 3
+     */
+    public static RowStore openWithEdges(long nRows, long seed, int edgeClassid,
+                                         long edgeGateMask, int edgeRadius) {
+        if (nRows < 0) {
+            throw new IllegalArgumentException("nRows must be >= 0, was " + nRows);
+        }
+        long h = Engine.openRowStoreWithEdges(nRows, seed, edgeClassid, edgeGateMask, edgeRadius);
+        return new RowStore(h, Engine.rowCount(h));
+    }
+
     /** How many rows this resource holds. */
     @Override
     public long rowCount() {

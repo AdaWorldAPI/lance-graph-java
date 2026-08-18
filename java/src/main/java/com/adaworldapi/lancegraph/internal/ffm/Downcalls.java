@@ -109,6 +109,13 @@ public final class Downcalls {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
                     ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
 
+    // Edge-bearing row store (docs/abi.md §12, ABI minor 3). One extra constructor over the
+    // minor-2 shape above — no new lane, no new op.
+    private static final MethodHandle ROWSTORE_OPEN_WITH_EDGES = mh("lgj_rowstore_open_with_edges",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
+                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
     private static MethodHandle mh(String symbol, FunctionDescriptor descriptor) {
         MemorySegment addr = Abi.lookup().find(symbol).orElseThrow(() ->
                 new LanceGraphException("the native library exports no symbol '" + symbol
@@ -352,6 +359,26 @@ public final class Downcalls {
             throw wrap("lgj_rowstore_open", t);
         }
         Status.check("lgj_rowstore_open", st);
+        return outHandle.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * Build the edge-bearing SoA row store (docs/abi.md §12). Byte-identical classid stream to
+     * {@link #rowstoreOpen}; a sparse, gated subset of {@code edgeClassid}-matching facets carries
+     * a bounded-local-neighbourhood target row instead of raw noise.
+     */
+    public static long rowstoreOpenWithEdges(long nRows, long seed, int edgeClassid,
+                                             long edgeGateMask, int edgeRadius,
+                                             MemorySegment outHandle) {
+        crossed();
+        int st;
+        try {
+            st = (int) ROWSTORE_OPEN_WITH_EDGES.invokeExact(
+                    nRows, seed, edgeClassid, edgeGateMask, edgeRadius, outHandle);
+        } catch (Throwable t) {
+            throw wrap("lgj_rowstore_open_with_edges", t);
+        }
+        Status.check("lgj_rowstore_open_with_edges", st);
         return outHandle.get(ValueLayout.JAVA_LONG, 0);
     }
 

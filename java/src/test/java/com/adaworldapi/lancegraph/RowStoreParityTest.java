@@ -210,5 +210,105 @@ public final class RowStoreParityTest {
             c.eq("all " + (n1000 * FACETS_PER_ROW) + " classids read through ROW_LAYOUT match the"
                     + " transcribed generator", 0, layoutMismatches);
         }
+
+        // ── the edge-bearing generator (docs/abi.md §12) ──────────────────────────────────────
+        //
+        // Two claims, both genuinely new (not a restatement of the sections above): (1) an
+        // out-of-range edgeClassid reproduces RowStore.open's classid stream exactly, THROUGH the
+        // Java facade rather than only at the Rust generator level; (2) a Java-side hop — the D1a
+        // mechanism `consumer-graph-traversal-v1.md` chose (facet-match crossing + raw-segment
+        // payload decode, zero new ABI op) — reproduces the SAME measured hop counts already
+        // pinned as a Rust regression (rowstore.rs's `measured_hop_counts_are_...` test), proving
+        // the two sides of the membrane see identical edge structure, not merely identical
+        // classids.
+
+        c.section("openWithEdges: an out-of-range edgeClassid matches RowStore.open's classid stream");
+        int nEdgeParity = 500;
+        int[][] plainClassids = generateClassids(nEdgeParity, seed);
+        try (RowStore edged = RowStore.openWithEdges(nEdgeParity, seed, 16, 0x0, 5)) {
+            c.eq("row count is unaffected", nEdgeParity, edged.rowCount());
+            long classidMismatches = 0;
+            for (int classId : new int[] {0, 9, 15}) {
+                long expected = countFacetClassid(plainClassids, 7, classId);
+                try (Mask mask = edged.maskOfFacetClass(new FacetId(7), classId)) {
+                    if (mask.count() != expected) {
+                        classidMismatches++;
+                    }
+                }
+            }
+            c.eq("classid 16 never occurs in the 4-bit stream, so every facet-7 classid count"
+                    + " matches the plain generator exactly", 0, classidMismatches);
+        }
+
+        c.section("openWithEdges: a Java-side hop reproduces the pinned Rust regression");
+        // Exact parameters of rowstore.rs's own `measured_hop_counts_are_three_distinct_non_empty_
+        // non_total_sizes`: n=2000, seed=0xF00D_CAFE, edge_classid=0, gate_mask=0x0, radius=25,
+        // seed set = i*37+5 for i in 0..10.
+        long hopN = 2000;
+        int edgeClassid = 0;
+        try (RowStore hopStore = RowStore.openWithEdges(hopN, 0xF00D_CAFEL, edgeClassid, 0x0L, 25)) {
+            java.lang.foreign.MemorySegment raw =
+                    com.adaworldapi.lancegraph.internal.ffm.Engine.describeLane(hopStore.handle(), 0)
+                            .segment();
+            long rowBytes2 = com.adaworldapi.lancegraph.internal.ffm.Layouts.ROW_LAYOUT.byteSize();
+
+            java.util.function.Function<long[], long[]> hop = from -> {
+                boolean[] seenRows = new boolean[(int) hopN];
+                java.util.List<Long> out = new java.util.ArrayList<>();
+                for (long row : from) {
+                    for (int facet = 0; facet < FACETS_PER_ROW; facet++) {
+                        long classOff = com.adaworldapi.lancegraph.internal.ffm.Layouts.ROW_LAYOUT
+                                .byteOffset(
+                                        java.lang.foreign.MemoryLayout.PathElement.sequenceElement(
+                                                facet),
+                                        java.lang.foreign.MemoryLayout.PathElement.groupElement(
+                                                "classid"));
+                        int classid = raw.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED,
+                                row * rowBytes2 + classOff);
+                        if (classid != edgeClassid) {
+                            continue;
+                        }
+                        long payloadOff = com.adaworldapi.lancegraph.internal.ffm.Layouts.ROW_LAYOUT
+                                .byteOffset(
+                                        java.lang.foreign.MemoryLayout.PathElement.sequenceElement(
+                                                facet),
+                                        java.lang.foreign.MemoryLayout.PathElement.groupElement(
+                                                "payload"));
+                        long base = row * rowBytes2 + payloadOff;
+                        int hi32 = raw.get(java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED,
+                                base + 8);
+                        if (hi32 != 0) {
+                            continue;
+                        }
+                        long target = raw.get(java.lang.foreign.ValueLayout.JAVA_LONG_UNALIGNED,
+                                base);
+                        if (target >= 0 && target < hopN && !seenRows[(int) target]) {
+                            seenRows[(int) target] = true;
+                            out.add(target);
+                        }
+                    }
+                }
+                long[] arr = new long[out.size()];
+                for (int i = 0; i < arr.length; i++) {
+                    arr[i] = out.get(i);
+                }
+                return arr;
+            };
+
+            long[] seedRows = new long[10];
+            for (int i = 0; i < 10; i++) {
+                seedRows[i] = i * 37L + 5;
+            }
+            long[] oneHop = hop.apply(seedRows);
+            long[] twoHop = hop.apply(oneHop);
+
+            c.eq("seed set size", 10, seedRows.length);
+            c.eq("1-hop set size matches the Rust-pinned regression", 19, oneHop.length);
+            c.eq("2-hop set size matches the Rust-pinned regression", 29, twoHop.length);
+            c.that("three different, non-empty, non-total sizes (anti-vacuity)",
+                    seedRows.length != oneHop.length && oneHop.length != twoHop.length
+                            && oneHop.length > 0 && twoHop.length > 0
+                            && oneHop.length < hopN && twoHop.length < hopN);
+        }
     }
 }

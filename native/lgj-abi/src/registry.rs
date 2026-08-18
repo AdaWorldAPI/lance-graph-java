@@ -304,6 +304,32 @@ pub fn open_rowstore(n_rows: u64, seed: u64) -> Result<u64, i32> {
     })
 }
 
+/// Create a row-store resource from the edge-bearing generator (abi.md §12,
+/// ABI minor 3): identical classid stream to [`open_rowstore`], plus a
+/// sparse, gated subset of `edge_classid`-matching facets carrying a
+/// bounded-local-neighbourhood target row instead of raw noise — the
+/// mechanism `consumer-graph-traversal-v1.md` needs a non-vacuous BFS at
+/// all. See [`RowStore::generate_with_edges`] for the exact generator.
+pub fn open_rowstore_with_edges(
+    n_rows: u64,
+    seed: u64,
+    edge_classid: u32,
+    edge_gate_mask: u64,
+    edge_radius: u32,
+) -> Result<u64, i32> {
+    let store =
+        RowStore::generate_with_edges(n_rows, seed, edge_classid, edge_gate_mask, edge_radius)
+            .ok_or(LGJ_ERR_LENGTH_OVERFLOW)?;
+    insert(ResourceEntry {
+        kind: LGJ_RESOURCE_ROWSTORE,
+        epoch: next_epoch(),
+        n_rows,
+        parent: 0,
+        parent_gen: 0,
+        payload: Payload::RowStore(store),
+    })
+}
+
 /// Create a mask over `parent`, all bits `0` or all bits `1`.
 ///
 /// A mask's parent may be a pattern OR a row store — both are read-only
@@ -530,6 +556,53 @@ mod tests {
         assert!(e.rowstore().is_some());
         assert!(e.fixture().is_none());
         close(h).unwrap();
+    }
+
+    /// The registry-level twin of `rowstore.rs`'s own `generate_with_edges`
+    /// tests: proves the ABI-facing constructor (abi.md §12) reaches the same
+    /// generator through the full `open_rowstore_with_edges` → registry →
+    /// `ResourceEntry` path, not just the bare `RowStore` type.
+    #[test]
+    fn rowstore_with_edges_opens_and_describes_itself() {
+        let h = open_rowstore_with_edges(70, 3, 0, 0x0, 10).unwrap();
+        let e = resolve_kind(h, LGJ_RESOURCE_ROWSTORE).unwrap();
+        let info = e.info();
+        assert_eq!(info.kind, LGJ_RESOURCE_ROWSTORE);
+        assert_eq!(info.lane_count, ROWSTORE_LANE_COUNT);
+        assert_eq!(info.n_rows, 70);
+        assert!(e.rowstore().is_some());
+        close(h).unwrap();
+    }
+
+    /// abi.md §12's own claim, re-proven at the registry boundary: an
+    /// `edge_classid` outside the 4-bit classid range reproduces
+    /// `open_rowstore` byte-for-byte through the SAME entry point a Java
+    /// caller uses — not merely at the underlying `RowStore::generate*`
+    /// level, which `rowstore.rs` already covers.
+    #[test]
+    fn out_of_range_edge_classid_matches_plain_open_through_the_registry() {
+        let plain = open_rowstore(200, 0xABCD).unwrap();
+        let edged = open_rowstore_with_edges(200, 0xABCD, 16, 0x0, 5).unwrap();
+        let pe = resolve_kind(plain, LGJ_RESOURCE_ROWSTORE).unwrap();
+        let ee = resolve_kind(edged, LGJ_RESOURCE_ROWSTORE).unwrap();
+        assert_eq!(
+            pe.rowstore().unwrap().as_bytes(),
+            ee.rowstore().unwrap().as_bytes()
+        );
+        close(plain).unwrap();
+        close(edged).unwrap();
+    }
+
+    /// abi.md §12's overflow rule at the registry boundary: `edge_radius >=
+    /// n_rows` is `LGJ_ERR_LENGTH_OVERFLOW`, matching every other
+    /// overflow-shaped rejection in this generator family (`open_rowstore`'s
+    /// own `LGJ_ERR_LENGTH_OVERFLOW` on a too-large `n_rows`).
+    #[test]
+    fn radius_that_cannot_fit_is_rejected_through_the_registry() {
+        assert_eq!(
+            open_rowstore_with_edges(10, 1, 0, 0, 10),
+            Err(LGJ_ERR_LENGTH_OVERFLOW)
+        );
     }
 
     /// A mask parents onto a row store exactly as onto a pattern — same

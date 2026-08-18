@@ -36,7 +36,15 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// `lgj_rowstore_open`, `lgj_op_eq_classid`, `lgj_row_facet_match`, and
 /// strided facet lanes described through the (unchanged) `LgjLaneDesc`.
 /// Purely additive; a minor-1 Java loads and sees none of it.
-pub const LGJ_ABI_MINOR: u32 = 2;
+///
+/// Minor **3** (2026-08-18): `lgj_rowstore_open_with_edges` — the
+/// edge-bearing row-store generator (abi.md §12,
+/// `RowStore::generate_with_edges`), unblocking `consumer-graph-traversal-v1.md`.
+/// Byte-identical `LGJ_RESOURCE_ROWSTORE` resource kind, no new lane shape,
+/// no new mask op; purely an alternative constructor. A minor-2 Java loads
+/// fine and simply cannot call the new symbol (`Abi.requireMinor(3)` gates
+/// it, matching the row store's own minor-2 gate pattern).
+pub const LGJ_ABI_MINOR: u32 = 3;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
