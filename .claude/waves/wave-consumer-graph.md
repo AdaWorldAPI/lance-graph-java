@@ -1,5 +1,12 @@
 # Wave: consumer example — graph traversal (facet edges, crossings ∝ hops)
 
+> **DONE 2026-08-18.** `consumers/graph/` — `Graph`/`Edge` (G1) +
+> `GraphHopTest` (G2), 43/43, disable-verified. See `STATUS_BOARD.md`
+> D-LGJ-W5 (graph row) and `EPIPHANIES.md` for the one real finding
+> caught during landing (the crossing-cost-per-hop assumption). This
+> file's design rulings below are kept as the historical record of how
+> the dispatch was scoped, not restated in the DONE note.
+
 > Executes `consumer-graph-traversal-v1.md`. Gates: W3 merged (DONE) AND
 > the hop-decode capability question resolved (Decision D1 below — ruled
 > D1a) AND the edge-bearing generator STOP condition resolved (DONE,

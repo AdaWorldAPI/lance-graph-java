@@ -4,6 +4,82 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (final for now) — the graph wave's own crossing-cost assumption was wrong, measured and fixed before shipping
+
+**Status:** FINDING, caught during orchestrator review of dispatched
+worker output, before the wave's PR landed. **Confidence:** High —
+measured directly with a standalone 4-hop probe before touching any
+shipped file.
+
+### What G2 assumed, and why it was a reasonable but wrong guess
+
+G2 (the falsifier-test worker) wrote a crossings-proportional-to-hops
+check asserting that a second hop on the same store costs exactly what
+the first hop cost. Reasonable, since `Graph.hop()`'s own javadoc (as G1
+wrote it) claimed "pays exactly one native crossing... for the whole
+hop" unconditionally. Running the suite for the first time surfaced two
+failures: `expected 2 but was 1` (second hop) and `expected 4 but was 3`
+(two hops together).
+
+### The measurement, not a guess
+
+Rather than loosen the assertion to "roughly proportional" — which would
+have shipped a WEAKER test to make a genuinely interesting result
+disappear — wrote a standalone 4-hop probe against the same pinned
+fixture and measured the actual per-hop cost sequence: **2, 1, 1, 1.**
+Traced the mechanism: `Graph.hop()`'s first payload read
+(`RowStore.payloadHi32At`/`payloadLow64At`) on ANY given store triggers
+`RowStore`'s own lazily-resolved raw lane-0 window (`rawLane()`, cached
+as a private field ON THE STORE — see D-LGJ-W7's own entry above) — a
+one-time `lgj_lane_describe` crossing. Every `Graph` derived from the
+same `open(store)` call shares that one `RowStore` instance, so the cost
+is paid exactly once per store, not once per hop and not once per
+`Graph`. Hop 1 = `facetMatches` (1) + `rawLane` init (1) = 2. Hop 2
+onward = `facetMatches` (1) alone = 1, forever, for that store.
+
+### The fix — correct both the doc and the test, not just the test
+
+`Graph.hop()`'s javadoc gained a "Measured, not merely designed"
+paragraph stating the true relationship, with the measured sequence
+cited directly. `GraphHopTest`'s crossing section was rewritten to
+measure THREE consecutive hops (not two) — first-hop cost asserted at
+exactly 2, second AND third hop cost each asserted at exactly 1, and
+second-equals-third asserted explicitly (proving steady-state holds
+past the second hop, not merely that hops 1 and 2 happen to differ by
+coincidence). All three source-row counts across the three hops differ
+(10, 19, 29-ish), so the steady-state-cost claim is checked against
+genuinely different inputs each time, not the same fixture re-measured.
+
+### Why this is worth recording as its own entry
+
+This is the wave's version of the falsifiability rule cutting the other
+way: not "the test was vacuous," but **"the test's ASSUMPTION was wrong,
+and a real measurement — taken before editing anything — turned a
+guessed invariant into a precisely stated, three-times-confirmed one."**
+The corrected result is actually a STRONGER, more informative claim than
+the original "1 crossing per hop, full stop" — it names the one-time
+setup cost explicitly instead of hiding it inside an average, and it
+matches the wave design doc's own stated target (1 per hop) in the
+correct sense: amortized, steady-state, not literal from the very first
+call.
+
+### Gates
+
+`GraphHopTest` 43/43 after the fix (was 41/43 before, with the two crossing
+assertions red on the actual, correct implementation — the bug was in the
+TEST's assumption, not in `Graph`). Core suite 204/204 unaffected; trades
+(12+3) and bricks (62) unaffected. Disable-run (target-decode offset
+corrupted by +4) verified red-then-green: hop correctness's SET-equality
+check caught the corruption even though the row COUNT coincidentally still
+matched — direct vindication of G2's choice to check the set, not just its
+size, per the wave's own falsifier #1 requirement.
+
+### Consequence
+
+All three planned consumer examples from `lgj-vertical-slice-v1`/
+`lgj-soa-substrate-v1` — trades, bricks, graph — are now DONE. Full
+record: `STATUS_BOARD.md` D-LGJ-W5 (graph row).
+
 ## 2026-08-18 (even later still) — the same gap, one layer up: no PUBLIC path to a payload either, and a self-caught vacuous disable-run
 
 **Status:** FINDING + a correction of the entry directly below (which
