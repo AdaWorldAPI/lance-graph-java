@@ -8,6 +8,49 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #14 — lgj-abi: edge-bearing row store ABI addition (merged 2026-08-18, squash `be8fb60`)
+
+- **Added:** `lgj_rowstore_open_with_edges` (`docs/abi.md` §12, ABI minor
+  2→3) — mirrors `lgj_rowstore_open` symbol-for-symbol (same
+  `LGJ_RESOURCE_ROWSTORE` kind, same lane shape, no new mask op, purely an
+  alternative constructor). `registry::open_rowstore_with_edges` →
+  `exports::lgj_rowstore_open_with_edges` → `Downcalls.rowstoreOpenWithEdges`
+  → `Engine.openRowStoreWithEdges` (`Abi.requireMinor(3)`) →
+  `RowStore.openWithEdges`. A Java-side transcription of the D1a hop
+  mechanism (facet-match crossing + raw lane-0 payload decode, zero new ABI
+  op) added to `RowStoreParityTest`.
+- **Locked:** the graph-consumer wave's own D1b rule ("a new ABI symbol
+  must go through the substrate wave process FIRST as its own W-tier PR")
+  applied to itself — a row-store *constructor* needing ABI growth is the
+  same shape of gap as a new hop op, and gets the same treatment: orchestrator
+  work, never a consumer worker's ad hoc addition. Found before any G1/G2
+  worker spawned, not discovered mid-dispatch.
+- **A measured cross-language result, the strongest new evidence:** the
+  Java hop transcription, run at the exact parameters already pinned as a
+  Rust regression (`n=2000, seed=0xF00D_CAFE, edge_classid=0, gate_mask=0x0,
+  radius=25`), reproduces the identical hop counts **to the row** (10-row
+  seed → 19 at 1 hop → 29 at 2 hops) — proving the membrane carries the
+  same edge *structure*, not merely the same classid stream. Two
+  disable-runs, both red-then-green: a classid-not-threaded bug at the
+  registry level (caught by the out-of-range-parity test); the Java hop's
+  classid-match condition forced to always skip (1-hop/2-hop collapsed to
+  0, anti-vacuity assertion caught it).
+- **A real self-inflicted false alarm, recorded so it isn't re-diagnosed:**
+  the stale top-level `target/release/liblgj_abi.so` (minor 2, pre-dating
+  this pass) made every Java suite fail at class-init — `Downcalls` eagerly
+  resolves every method handle including the new one — until rebuilt with
+  `CARGO_TARGET_DIR=$ROOT/target cargo build --release` per the documented
+  convention. Not a substrate defect.
+- **Deferred:** the graph wave's G1 (traversal facade) + G2 (falsifier
+  tests) — substrate is now proven at both the Rust generator level and the
+  Java membrane level; dispatch is the next action, not yet executed.
+- **Docs:** STATUS_BOARD D-LGJ-W6; LATEST_STATE dated entry; EPIPHANIES
+  entry recording the gap and its fix — all landed in the PR's own commit.
+- **Confidence:** High — `cargo test` 93/93, clippy/fmt clean, `nm -D`
+  confirms the exported symbol; Java `AllTests` 194/194; both disable-runs
+  verified. Both bot reviewers (Cursor Bugbot, Codex) hit usage limits, no
+  review obtained.
+
 ## PR #12 — consumer example: Bricks, mask-first authorization (merged 2026-08-17, squash `8f16e8d`)
 
 - **Added:** `consumers/bricks/` — the second consumer proof over the
