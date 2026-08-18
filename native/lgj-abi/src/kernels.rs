@@ -74,6 +74,22 @@ pub fn simd_mask_or_assign(dst: &mut [u64], src: &[u64]) {
     ndarray::simd::mask_or_assign(dst, src);
 }
 
+/// `dst = a & !b`. `dst` must not alias `a` or `b` (same convention as
+/// [`simd_mask_and`]/[`simd_mask_or`] — the aliasing ABI cases in
+/// `exports::lgj_mask_andnot` route to [`simd_mask_andnot_assign`] instead,
+/// with a scratch-buffer copy for the `dst == b` case since ANDNOT, unlike
+/// AND/OR, is not commutative).
+#[inline]
+pub fn simd_mask_andnot(a: &[u64], b: &[u64], dst: &mut [u64]) {
+    ndarray::simd::mask_andnot(a, b, dst);
+}
+
+/// `dst &= !src`.
+#[inline]
+pub fn simd_mask_andnot_assign(dst: &mut [u64], src: &[u64]) {
+    ndarray::simd::mask_andnot_assign(dst, src);
+}
+
 /// Sum of `values[i]` over set mask bits, widened to `i64`.
 #[inline]
 pub fn simd_masked_sum_i32(values: &[i32], mask_words: &[u64]) -> i64 {
@@ -618,5 +634,36 @@ mod tests {
         let mut inplace = a.clone();
         simd_mask_or_assign(&mut inplace, &b);
         assert_eq!(vior, inplace);
+    }
+
+    /// The andnot twin of `non_aliasing_mask_ops_agree_with_assign_forms`
+    /// above, plus the property AND/OR never had to prove: ANDNOT is NOT
+    /// commutative, so `a &! b` and `b &! a` must genuinely differ on a
+    /// fixture where both operands carry real bits — this is what makes
+    /// `exports::lgj_mask_andnot`'s `dst == b` aliasing case (which cannot
+    /// reuse the `dst == a` in-place kernel with the roles merely swapped)
+    /// a real distinction rather than a redundant code path.
+    #[test]
+    fn non_aliasing_andnot_agrees_with_its_assign_form_and_is_not_commutative() {
+        let a = vec![0xF0F0_F0F0_F0F0_F0F0u64, 0x00FF];
+        let b = vec![0xFF00_FF00_FF00_FF00u64, 0x0F0F];
+
+        let mut via_fn = vec![0u64; 2];
+        simd_mask_andnot(&a, &b, &mut via_fn);
+        let mut inplace = a.clone();
+        simd_mask_andnot_assign(&mut inplace, &b);
+        assert_eq!(via_fn, inplace, "3-arg form and assign form must agree");
+
+        let mut reversed = vec![0u64; 2];
+        simd_mask_andnot(&b, &a, &mut reversed);
+        assert_ne!(
+            via_fn, reversed,
+            "a &! b must differ from b &! a on this fixture"
+        );
+
+        // Cross-check against a plain scalar computation, independent of
+        // both ndarray call sites above.
+        let scalar: Vec<u64> = a.iter().zip(b.iter()).map(|(&x, &y)| x & !y).collect();
+        assert_eq!(via_fn, scalar);
     }
 }

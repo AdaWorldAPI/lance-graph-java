@@ -40,6 +40,7 @@
 //! | [`abi`] | `#[repr(C)]` types, status codes, opcodes, the self-describing manifest |
 //! | [`registry`] | generation-checked handles, ownership, lock discipline |
 //! | [`fixture`] | the deterministic generic SoA fixture (three lanes) |
+//! | [`class_view_provider`] | the `lance-graph-contract` `ClassView` LAW's fixture ANSWERS — `FixtureClassView` + the `edge_participation`/`decode_mode` seam `lgj_hop` consults |
 //! | [`kernels`] | bulk kernels via `ndarray::simd` + the independent scalar reference |
 //! | [`exports`] | the `extern "C"` symbols themselves |
 
@@ -47,6 +48,7 @@
 #![warn(missing_docs)]
 
 pub mod abi;
+pub mod class_view_provider;
 pub mod exports;
 pub mod fixture;
 pub mod kernels;

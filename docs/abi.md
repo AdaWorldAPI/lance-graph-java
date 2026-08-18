@@ -62,10 +62,11 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 19 symbols (minor 3; the "14" this line carried
+- It is **small** — currently 21 symbols (minor 4; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
-  minor 2's three additions are argued in §11, minor 3's one addition in §12.
+  minor 2's three additions are argued in §11, minor 3's one addition in
+  §12, minor 4's two additions in §13.
 - It is **bulk-only**. Every call must be capable of doing work proportional to
   `n_rows` (see §6 — the anti-JNI rule).
 - It speaks **resource, lane, view, mask, operation, descriptor, status,
@@ -78,7 +79,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 3    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 4    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -88,6 +89,14 @@ was compiled against.** A `major` mismatch is a hard failure, not a warning.
 The magic doubles as an endianness probe: read as a `u64` little-endian it yields
 a known constant; anything else means the library was built for a different byte
 order and every subsequent read would be garbage.
+
+### Minor version history
+
+- **Minor 2** (2026-08-17) — the SoA row store (§11).
+- **Minor 3** (2026-08-18) — the edge-bearing row store (§12).
+- **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)
+  and `lgj_hop` (one-hop graph traversal, gated by the
+  `lance-graph-contract` `ClassView`/`FieldMask` LAW — §13).
 
 ## 3. Status codes
 
@@ -110,6 +119,7 @@ are no error strings across the membrane and no `errno` dependence.
 | `-11` | `EMPTY_PLAN` | a plan with zero ops was submitted |
 | `-12` | `ALLOCATION_FAILED` | the allocator refused |
 | `-13` | `READ_ONLY` | write attempted against a read-only lane |
+| `-14` | `UNSUPPORTED_DECODE_MODE` | `lgj_hop` called with a `decode_mode` this build does not yet implement (§13, ABI minor ≥ 4) |
 
 `INVALID_HANDLE` is deliberately the response to *use-after-close*, not a crash.
 See §4.
@@ -269,7 +279,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (19 symbols)
+## 7. The function surface (21 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -310,10 +320,14 @@ i32 lgj_mask_create(u64 parent, u32 initial, u64* out_handle)   // initial: 0=em
 i32 lgj_mask_describe(u64 mask, LgjLaneDesc* out)               // MASK_WORD lane, WRITABLE
 i32 lgj_mask_and(u64 a, u64 b, u64 dst)
 i32 lgj_mask_or(u64 a, u64 b, u64 dst)
+i32 lgj_mask_andnot(u64 a, u64 b, u64 dst)                      // ABI minor ≥ 4, see §13
 i32 lgj_mask_count(u64 mask, u64* out_count)
 ```
 
-`dst` may alias `a` or `b`. All three must share the same parent and row count.
+`dst` may alias `a` or `b` for `lgj_mask_and`/`lgj_mask_or`. All three must
+share the same parent and row count. `lgj_mask_andnot` permits the same
+aliasing but is NOT commutative (`a & !b ≠ b & !a`) — its full aliasing and
+tail-clearing rules are §13's, not repeated here.
 
 ### Bulk predicates (unfused — one predicate per crossing)
 
@@ -364,6 +378,19 @@ i32 lgj_plan_eval_scalar(u64 res, const LgjOpDesc* ops, u32 n_ops,
 Identical semantics to `lgj_plan_eval` but forced down the scalar reference path.
 Exists **only** so SIMD-vs-scalar parity is falsifiable *through the membrane*,
 which is where the Java tests live. Not for production use.
+
+### Graph traversal (ABI minor ≥ 4)
+
+```
+i32 lgj_hop(u64 store, u32 edge_classid, u64 facet_mask, u32 decode_mode,
+            u64 src_mask, u64 dst_mask)
+```
+
+Overwrites `dst_mask` with the one-hop reachable set from `src_mask` over
+`store`'s `edge_classid`-matching facets, gated by the `lance-graph-contract`
+`ClassView`/`FieldMask` LAW. §13 is the full normative statement (effective
+participation, decode modes, the snapshot-then-write aliasing discipline,
+bounds-before-cast).
 
 ## 8. SIMD provenance
 
@@ -532,6 +559,17 @@ this generator family).
 
 ### A hop, at the Java layer (no new op — composition of existing symbols)
 
+> **⊘ SUPERSEDED (2026-08-18, D-LGJ-W8).** The Java-side composition
+> described below is exactly the row-population-hydration shape the
+> mask-native navigation correction (`.claude/plans/mask-native-navigation-correction-v1.md`)
+> demotes: per-row `payload_lo64` decode + a Java-side scatter loop is a
+> materialised-population execution path, not a mask-native one. The
+> shipped path — required, not merely preferred (spec §3.8: consumers
+> cannot reach the segment surface at all; `ApiSurfaceTest` walls off
+> `internal.ffm`) — is the native **§13** `lgj_hop`, ABI minor ≥ 4. This
+> subsection is kept, not deleted, as the record of the D1a composition it
+> replaces.
+
 A hop is `lgj_row_facet_match(edge_classid)` (§11, unchanged) to find which
 of a row's facets carry the edge classid, followed by a **Java-side** decode
 of each matched facet's `payload_lo64` as the target row and a scatter into
@@ -546,3 +584,118 @@ The generator's per-facet loop is scalar (SplitMix64 is inherently
 sequential per draw); the sparsity gate and target-row arithmetic are cheap
 integer ops on that same sequential stream — no new SIMD kernel, matching
 `RowStore::generate`'s own scalar generation loop.
+
+## 13. Mask complement + one-hop graph traversal (ABI minor ≥ 4)
+
+Two additions, both consuming the `class_view_provider::edge_participation`
+seam (`.claude/plans/mask-native-navigation-correction-v1.md`, D-LGJ-W8,
+§3.3): `lgj_mask_andnot` closes a real gap in the mask algebra — no
+and-not/complement op existed anywhere in the mask/registry system before
+this minor — and `lgj_hop` is the FIRST symbol in this ABI whose semantics
+are governed by the `lance-graph-contract` crate rather than by this
+crate's fixture alone: a facet only participates in a hop if BOTH the
+caller's `facet_mask` and the class's `ClassView`-resolved
+`edge_participation` agree it should.
+
+Both are **bulk** (§6): `lgj_mask_andnot` does work ∝ `n_rows / 64` words;
+`lgj_hop` does work ∝ `n_rows · popcount(effective participation)` — at
+most `n_rows · 32` facet-classid compares, plus one scalar decode+scatter
+per matched `(row, facet)` pair.
+
+### Mask complement
+
+```
+i32 lgj_mask_andnot(u64 a, u64 b, u64 dst)
+```
+
+`dst = a & !b`, word-wise. Same parent/row-count compatibility rule as
+`lgj_mask_and`/`lgj_mask_or` (§7): all three masks must share the same
+parent and row count, or `MASK_LENGTH_MISMATCH`.
+
+`dst` may alias `a`, `b`, or both — **unlike AND/OR, ANDNOT is not
+commutative**, so aliasing `dst == b` is NOT the same case as `dst == a`
+with the roles swapped: the kernel snapshots `b`'s value into a scratch
+buffer before it is overwritten whenever `dst` aliases `b`, so the result
+is always `a & !b` as evaluated BEFORE the call, regardless of which
+argument `dst` aliases.
+
+**Tail rule (normative).** Bits at row index `>= n_rows` in the final word
+are always zero on return, re-established as a *distinct, defensive* step
+after the complement — never merely inherited from well-formed inputs. A
+corrupted operand's tail bits (bits set past `n_rows` by an out-of-band
+write) are silently REPAIRED, not merely preserved: `!b`'s tail naturally
+sets bits wherever `b`'s own tail is zero (the well-formed case), so a
+version of this kernel without the explicit clear would leak a corrupted
+`a`'s stray tail bits straight into `dst`.
+
+Kernel: `ndarray::simd::{mask_andnot, mask_andnot_assign}` (§8 SIMD
+provenance, unchanged rule) — never `ndarray::simd_int_ops` directly.
+
+### One-hop graph traversal
+
+```
+i32 lgj_hop(u64 store, u32 edge_classid, u64 facet_mask, u32 decode_mode,
+            u64 src_mask, u64 dst_mask)
+```
+
+`store` must be a `LGJ_RESOURCE_ROWSTORE` (§11); `src_mask` and `dst_mask`
+must be row-count-compatible with it — the same row-count-only reading
+`lgj_op_eq_classid` already uses (a mask from an equally sized but
+distinct resource is accepted; `MASK_LENGTH_MISMATCH` otherwise).
+
+**Semantics.** `dst_mask` is OVERWRITTEN with the one-hop reachable set:
+for every row `r` set in `src_mask`, for every facet `f` in the *effective
+participation* where `classid(r, f) == edge_classid`, if the selected
+decode mode yields a valid target `t < n_rows`, bit `t` is set in the
+result.
+
+**Effective participation** is `facet_mask ∩
+edge_participation(edge_classid)` — the caller's requested facets narrowed
+by what the class's `ClassView` provider
+(`class_view_provider::edge_participation`, D-LGJ-W8 §3.3) says this
+class's edges actually occupy. `facet_mask` is the wire form of the
+contract's `FieldMask`: a `u64` whose bits `>= 32` are ignored (this store
+has 32 facets).
+
+**Decode modes.** `decode_mode = 0` is the §12 fixture convention:
+`payload_hi32 == 0` marks a structured edge, `payload_lo64` is the LE
+target row. Modes `1..=3` are RESERVED — mirroring `EdgeCodecFlavor as u32
++ 1` (`canonical_node.rs`) — and return the new status
+`LGJ_ERR_UNSUPPORTED_DECODE_MODE = -14` until real class data lands. This
+check runs FIRST, before `store`/`src_mask`/`dst_mask` are even resolved,
+so `dst_mask` is provably untouched (`out_*` write-only-on-OK, §7) on a
+rejected call regardless of whether the other arguments would themselves
+have been valid.
+
+**Aliasing.** `src_mask` is snapshotted (its words copied into an owned
+buffer) under a READ lock that is fully RELEASED before `dst_mask`'s
+WRITE lock is taken. This is a DIFFERENT discipline from
+`lgj_mask_and`/`lgj_mask_or`/`lgj_mask_andnot`'s dedup-before-lock scheme
+(registry.rs `lock_masks_ordered`, needed there because those calls hold
+two or three mask locks simultaneously): `lgj_hop` never holds more than
+one mask lock at a time, so `dst_mask == src_mask` aliasing carries zero
+deadlock risk by construction, not by case analysis.
+
+**Bounds-before-cast (normative).** The decoded target `t` is compared
+against `n_rows` as a `u64` BEFORE any `t as usize` cast — the ordering is
+part of the contract, not an implementation detail, so an out-of-range
+`u64` target can never reach an indexing operation.
+
+**Kernel composition.** The classid-match sub-step for each participating
+facet routes through the EXISTING sanctioned primitive
+(`kernels::simd_rowstore_classid_mask`, `ndarray::simd::eq_u32_strided_to_mask`
+— the same kernel `lgj_op_eq_classid` uses, §11) into a scratch word
+buffer that is REUSED across every participating facet, never reallocated
+per facet. Only the resulting set-bit walk + payload decode + scatter is
+scalar: there is no `ndarray::simd` primitive for gather-decode-scatter,
+and duplicating the classid compare in scalar Rust would be exactly the
+polyfill bypass §8 forbids.
+
+### Bulk-rule conformance (§6, applied)
+
+Neither symbol is lifecycle, and neither is a fixed-cost call: a caller
+that doubles `n_rows` observes roughly double the work in both — for
+`lgj_mask_andnot`, twice the mask words; for `lgj_hop`, twice the rows
+scanned per participating facet. Both therefore satisfy §6's anti-JNI rule
+by the same test every existing symbol satisfies it by: work proportional
+to `n_rows`, never one crossing per element.

@@ -44,7 +44,15 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// no new mask op; purely an alternative constructor. A minor-2 Java loads
 /// fine and simply cannot call the new symbol (`Abi.requireMinor(3)` gates
 /// it, matching the row store's own minor-2 gate pattern).
-pub const LGJ_ABI_MINOR: u32 = 3;
+///
+/// Minor **4** (2026-08-18, D-LGJ-W8): `lgj_mask_andnot` (mask complement,
+/// `dst = a & !b`, the mask algebra's missing and-not/complement op) and
+/// `lgj_hop` (one-hop graph traversal over a row store — the FIRST symbol
+/// gated by the `lance-graph-contract` `ClassView`/`FieldMask` LAW via the
+/// fixture's `crate::class_view_provider::edge_participation` seam;
+/// `docs/abi.md` §13). Purely additive: a minor-3 Java loads fine and
+/// simply cannot call either new symbol.
+pub const LGJ_ABI_MINOR: u32 = 4;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -87,11 +95,18 @@ pub const LGJ_ERR_EMPTY_PLAN: i32 = -11;
 pub const LGJ_ERR_ALLOCATION_FAILED: i32 = -12;
 /// A write was attempted against a read-only lane.
 pub const LGJ_ERR_READ_ONLY: i32 = -13;
+/// `lgj_hop` was called with a `decode_mode` this build does not yet
+/// implement. Modes `1..=3` are RESERVED (mirroring `EdgeCodecFlavor as
+/// u32 + 1`, `canonical_node.rs`) until real class data lands — checked
+/// FIRST, before `store`/`src_mask`/`dst_mask` are even resolved, so
+/// `dst_mask` is provably untouched (§7's write-only-on-OK rule) on a
+/// rejected call. D-LGJ-W8, ABI minor 4.
+pub const LGJ_ERR_UNSUPPORTED_DECODE_MODE: i32 = -14;
 
 /// A panic was caught at the membrane and converted to a status (§9).
 ///
 /// Not in `abi.md`'s table, and deliberately *outside* the allocated
-/// `-1..=-13` block so it can never be confused with a specified condition.
+/// `-1..=-14` block so it can never be confused with a specified condition.
 /// A caller seeing this has found a bug in this crate; it is reported rather
 /// than allowed to unwind into JVM frames, which would be UB.
 pub const LGJ_ERR_PANIC: i32 = -99;
