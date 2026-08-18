@@ -4,6 +4,95 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (even later still) — the same gap, one layer up: no PUBLIC path to a payload either, and a self-caught vacuous disable-run
+
+**Status:** FINDING + a correction of the entry directly below (which
+declared the substrate complete at the ABI level, but not at the public
+core-facade level) + a process note about catching my OWN vacuous
+falsifier rather than an existing one. **Confidence:** High — measured
+(full test suite before/after, two disable-runs, one of them initially
+wrong and caught by re-reading rather than trusting a green result).
+
+### What the ABI-minor-3 entry's own "genuinely dispatchable" undersold
+
+Immediately after landing `lgj_rowstore_open_with_edges`, worked through
+concretely — not just in principle — how `consumers/graph`'s `Graph.hop()`
+would decode a matched facet's target row. It could not:
+`RowStore.facetMatches` returns a per-row **bitset** of which facets
+matched a classid; it never carries the matched facet's payload bytes.
+The only capability that ever read raw row bytes at all was
+`internal.ffm.Engine.describeLane`, and `ApiSurfaceTest` forbids
+`internal.*`/`MemorySegment` from appearing in any consumer-package public
+signature, by design, mechanically enforced. Decision D1a's own text —
+*"read matched facets' payloads via the raw lane 0 segment (zero-copy, no
+crossing)"* — assumed a capability that existed only inside the core
+package's own internals, never surfaced to a consumer. Same shape of gap
+as the ABI-symbol one, one layer higher: **"the mechanism exists
+internally" was mistaken for "a consumer can reach it" twice in the same
+wave.**
+
+### The fix — zero new ABI surface, reuse what already exists
+
+`RowStore.classidAt(long row, FacetId facet)` / `payloadLow64At(...)` /
+`payloadHi32At(...)`: three new public, primitive-returning methods. No
+new `extern "C"` symbol, no ABI minor bump — they reuse `lgj_lane_describe`
+(already minor 1, already classified "lifecycle" per abi.md §6), resolved
+once per store and cached; every subsequent call is an in-process segment
+read with zero further crossings, matching `exports.rs`'s own stated
+doctrine verbatim: *"if Java wants one row it reads the MemorySegment
+in-process, with no crossing at all."*
+
+Added to `RowStoreParityTest`: the SAME pinned hop numbers (19 at 1 hop,
+29 at 2 hops) reproduced a SECOND time — this time through the genuinely
+public path — proving not just that the mechanism works, but that a real
+`consumers/graph` package can actually reach it. `AllTests` 204/204
+(+10 over the prior entry's 194).
+
+### The self-caught vacuous disable-run — worth recording precisely
+
+First draft guarded the closed-store check in `rawLane()` (the method that
+actually touches the native pointer) AND, redundantly, in `rowOffset()`
+(pure arithmetic, touches nothing). Disabled `rawLane()`'s check to prove
+it load-bearing — and the full disable-run test suite came back **30/30
+green**, under code that was genuinely broken. The natural move at that
+point is to trust the green result and move on. Instead: asked WHY it
+didn't fail, and found the answer in Java's own evaluation order —
+`a.method(args)` evaluates the receiver `a` before the argument list, so
+`rawLane().get(..., rowOffset(row, facet))` always runs `rawLane()` first;
+disabling only `rawLane()`'s guard left `rowOffset()`'s redundant copy to
+catch the closed-store case anyway, masking the disable entirely.
+
+De-duplicated to the single correct location (the guard belongs on the
+method that touches the pointer, not on pure arithmetic downstream of it)
+and re-ran the SAME disable-run against the corrected code: this time it
+went red exactly as expected (`expected ClosedResourceException but
+nothing was thrown` on both affected checks), then green on restore.
+
+**The generalizable rule, sharper than the falsifiability rule's usual
+form:** a disable-run that stays green is not automatically a passing
+grade for the CODE — it may be a failing grade for the TEST's isolation.
+Redundant guards are the one shape of bug a disable-run can silently
+paper over, because disabling one leaves the other standing. The fix
+generalizes past this file: when a disable-run doesn't fire, the next
+question is never "good, unaffected" — it is "did I disable the thing
+that actually runs, or a copy of it."
+
+### Gates
+
+`javac -Xlint:all` clean (same 7 pre-existing `[restricted]` warnings, zero
+new). `AllTests` **204/204**. `ApiSurfaceTest` unchanged at 3/3 — zero FFM
+type introduced into any public signature. Both disable-runs (bounds
+guard via `IndexOutOfBoundsException`, closed-store guard via the
+corrected single location) verified red-then-green.
+
+### Consequence
+
+The graph-consumer wave is now dispatchable on genuinely solid ground,
+proven at three independent, individually-tested levels: the Rust
+generator (below), the ABI membrane (below), and the public core facade a
+`consumers/graph` package can actually compile against (this entry). G1
+(traversal facade) and G2 (falsifier tests) are next, not yet spawned.
+
 ## 2026-08-18 (later still) — "the generator exists" ≠ "Java can reach it": the membrane gap the prior entry's own resolution note missed
 
 **Status:** FINDING + a correction of the entry directly below this one.

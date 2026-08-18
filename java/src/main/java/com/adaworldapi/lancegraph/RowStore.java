@@ -137,6 +137,81 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new FacetMatchView(this, out, rowCount);
     }
 
+    private static final long ROW_BYTES = 512;
+    private static final long FACET_BYTES = 16;
+
+    /**
+     * The raw lane-0 window (docs/abi.md §11), resolved once via {@code lgj_lane_describe} (ABI
+     * minor &ge; 1 — already required by every {@code RowStore}) and cached: this is a
+     * <strong>lifecycle</strong> crossing, per abi.md §6, not a bulk one, and every read through
+     * {@link #classidAt}/{@link #payloadLow64At}/{@link #payloadHi32At} afterward is an
+     * in-process segment read with no further crossing at all — exports.rs's own doctrine, applied:
+     * "if Java wants one row it reads the MemorySegment in-process, with no crossing at all."
+     */
+    private MemorySegment rawLane;
+
+    private MemorySegment rawLane() {
+        requireOpen("row read");
+        if (rawLane == null) {
+            rawLane = Engine.describeLane(handle, 0).segment();
+        }
+        return rawLane;
+    }
+
+    private long rowOffset(long row, FacetId facet) {
+        // No requireOpen() here -- rawLane() (evaluated first, as the receiver, in every one of
+        // this method's three callers) already owns that check. Pure arithmetic, touches nothing,
+        // needs no guard of its own; duplicating it here would be a second lock on a door only one
+        // key opens.
+        java.util.Objects.requireNonNull(facet, "facet");
+        if (row < 0 || row >= rowCount) {
+            throw new IndexOutOfBoundsException(
+                    "row " + row + " is out of range [0, " + rowCount + ")");
+        }
+        return row * ROW_BYTES + facet.index() * FACET_BYTES;
+    }
+
+    /**
+     * The classid at {@code (row, facet)} — a zero-copy, in-process read (see {@link #rawLane()}'s
+     * doc for why this never crosses the membrane after the first call on this store).
+     *
+     * <p>This is the per-row escape hatch the bulk predicates exist alongside, not a replacement
+     * for them: use {@link #maskOfFacetClass}/{@link #facetMatches} for a bulk selection over every
+     * row, this for reading one row a caller already knows it wants — e.g. decoding a graph hop's
+     * target row after {@link #facetMatches} has already named which facet matched.
+     *
+     * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
+     */
+    public int classidAt(long row, FacetId facet) {
+        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet));
+    }
+
+    /**
+     * The low 64 payload bits at {@code (row, facet)}, little-endian — the row-store's
+     * structured-edge target-row convention (docs/abi.md §12, {@link #openWithEdges}) when this
+     * facet is a structured edge for this row. Meaningless, but always safe to read, when it is
+     * not: combine with {@link #classidAt} and {@link #payloadHi32At} to decide that — the
+     * generator's own convention is {@code classidAt(row, facet) == edgeClassid &&
+     * payloadHi32At(row, facet) == 0}.
+     *
+     * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
+     */
+    public long payloadLow64At(long row, FacetId facet) {
+        return rawLane().get(ValueLayout.JAVA_LONG_UNALIGNED, rowOffset(row, facet) + 4);
+    }
+
+    /**
+     * The high 32 payload bits at {@code (row, facet)} — {@code 0} exactly when {@link
+     * #openWithEdges}'s generator wrote a structured edge target here (docs/abi.md §12);
+     * overwhelmingly non-zero, by construction, for ordinary noise payload — including every
+     * facet of a store opened with plain {@link #open}.
+     *
+     * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
+     */
+    public int payloadHi32At(long row, FacetId facet) {
+        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet) + 12);
+    }
+
     /**
      * The generation-checked registry handle. Package-private — mirrors {@link
      * NativePattern#handle()} exactly, including its consumer: {@code bench}'s {@code

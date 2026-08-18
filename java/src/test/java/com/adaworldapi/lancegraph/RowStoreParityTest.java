@@ -309,6 +309,54 @@ public final class RowStoreParityTest {
                     seedRows.length != oneHop.length && oneHop.length != twoHop.length
                             && oneHop.length > 0 && twoHop.length > 0
                             && oneHop.length < hopN && twoHop.length < hopN);
+
+            // ── the SAME hop, through the genuinely PUBLIC accessors ──────────────────────────
+            //
+            // The section above deliberately used internal.ffm.Engine/Layouts directly — this
+            // core-package test is allowed to, but a real consumer package (consumers/graph) is
+            // NOT: ApiSurfaceTest forbids MemorySegment/internal.* from ever appearing in a
+            // public signature. RowStore.classidAt/payloadLow64At/payloadHi32At are the new
+            // PUBLIC path a Graph.hop() actually has to use. Proving they reproduce the exact
+            // same hop counts is what makes the graph-consumer wave genuinely dispatchable —
+            // not just "the mechanism exists internally", but "a consumer can actually reach it".
+            java.util.function.Function<long[], long[]> publicHop = from -> {
+                boolean[] seenRows = new boolean[(int) hopN];
+                java.util.List<Long> out = new java.util.ArrayList<>();
+                for (long row : from) {
+                    for (int f = 0; f < FACETS_PER_ROW; f++) {
+                        FacetId facet = new FacetId(f);
+                        if (hopStore.classidAt(row, facet) != edgeClassid) {
+                            continue;
+                        }
+                        if (hopStore.payloadHi32At(row, facet) != 0) {
+                            continue;
+                        }
+                        long target = hopStore.payloadLow64At(row, facet);
+                        if (target >= 0 && target < hopN && !seenRows[(int) target]) {
+                            seenRows[(int) target] = true;
+                            out.add(target);
+                        }
+                    }
+                }
+                long[] arr = new long[out.size()];
+                for (int i = 0; i < arr.length; i++) {
+                    arr[i] = out.get(i);
+                }
+                return arr;
+            };
+
+            long[] publicOneHop = publicHop.apply(seedRows);
+            long[] publicTwoHop = publicHop.apply(publicOneHop);
+            c.eq("public-accessor 1-hop matches the internal-read 1-hop",
+                    oneHop.length, publicOneHop.length);
+            c.eq("public-accessor 2-hop matches the internal-read 2-hop",
+                    twoHop.length, publicTwoHop.length);
+
+            c.section("classidAt/payloadLow64At/payloadHi32At: bounds and lifecycle guards");
+            c.throwsUp("row -1 is rejected", IndexOutOfBoundsException.class,
+                    () -> hopStore.classidAt(-1, new FacetId(0)));
+            c.throwsUp("row == rowCount is rejected", IndexOutOfBoundsException.class,
+                    () -> hopStore.classidAt(hopN, new FacetId(0)));
         }
     }
 }

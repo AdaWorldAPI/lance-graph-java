@@ -1,3 +1,35 @@
+## 2026-08-18 (even later still) — a SECOND gap, one layer up: the graph wave also had no public path to a payload
+
+Immediately after PR #14/#15 merged, worked through concretely how G1's
+`Graph.hop()` would actually decode a matched facet's target row. Answer:
+it couldn't. `facetMatches` gives a per-row 32-bit BITSET of which facets
+matched — never the payload bytes. The only thing that ever read raw row
+bytes was `internal.ffm.Engine.describeLane`, off-limits to a consumer
+package (`ApiSurfaceTest` forbids `internal.*`/`MemorySegment` in any
+public signature by construction). D1a's own text ("read matched facets'
+payloads via the raw lane 0 segment") assumed a capability that existed
+internally but had never been surfaced publicly — a second version of the
+exact gap PR #14 closed, one layer higher.
+
+Fixed with zero new ABI surface: `RowStore.classidAt`/`payloadLow64At`/
+`payloadHi32At` reuse `lgj_lane_describe` (already ABI minor 1, already a
+"lifecycle" crossing per abi.md §6) — resolved once, cached, every
+subsequent read is in-process. `AllTests` 204/204 (+10 over PR #14's 194).
+
+**A redundancy I introduced and caught myself, worth recording as a
+process note:** the first draft guarded the closed-store check in TWO
+places; disabling one was silently masked by the other, and the
+disable-run came back green under genuinely broken code — a false
+negative I could have accepted and moved on. Traced it to Java's
+receiver-before-argument evaluation order, de-duplicated to the one
+correct location, and only THEN did the same disable-run go properly red.
+Full record: `STATUS_BOARD.md` D-LGJ-W7, `EPIPHANIES.md`.
+
+The graph-consumer wave is now dispatchable for real, proven at three
+independent levels rather than one: the Rust generator, the ABI membrane,
+and the public core facade a consumer package can actually compile
+against. G1/G2 next.
+
 ## 2026-08-18 (later still) — the graph wave's ABI gap, found and closed before dispatch: `lgj_rowstore_open_with_edges` (minor 3)
 
 Picked up the graph-consumer wave on "everything on track?" — it was marked

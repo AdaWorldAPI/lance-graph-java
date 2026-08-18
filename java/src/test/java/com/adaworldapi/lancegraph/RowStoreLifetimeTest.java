@@ -44,6 +44,25 @@ public final class RowStoreLifetimeTest {
                 () -> closed.maskOfFacetClass(new FacetId(7), 9));
         c.throwsUp("facetMatches() after close", ClosedResourceException.class,
                 () -> closed.facetMatches(9));
+        c.throwsUp("classidAt() after close, raw lane never resolved", ClosedResourceException.class,
+                () -> closed.classidAt(0, new FacetId(7)));
+        c.throwsUp("payloadLow64At() after close, raw lane never resolved",
+                ClosedResourceException.class, () -> closed.payloadLow64At(0, new FacetId(7)));
+        c.throwsUp("payloadHi32At() after close, raw lane never resolved",
+                ClosedResourceException.class, () -> closed.payloadHi32At(0, new FacetId(7)));
+
+        // The more dangerous ordering: resolve the raw lane WHILE open (caching a live segment),
+        // THEN close, THEN read. If requireOpen() were checked only on first resolution -- not on
+        // every call -- this would read a segment whose native backing may already be freed.
+        c.section("raw lane cached before close, then read after -- the guard must still fire");
+        RowStore cached = RowStore.open(64, SEED);
+        int before2 = cached.classidAt(0, new FacetId(0));
+        c.that("a real classid was read while open", before2 >= 0 && before2 <= 15);
+        cached.close();
+        c.throwsUp("classidAt() after close, raw lane WAS already resolved",
+                ClosedResourceException.class, () -> cached.classidAt(0, new FacetId(0)));
+        c.throwsUp("payloadLow64At() after close, raw lane WAS already resolved",
+                ClosedResourceException.class, () -> cached.payloadLow64At(0, new FacetId(0)));
 
         c.section("double close");
         c.throwsUp("close() a second time", ClosedResourceException.class, closed::close);
