@@ -8,6 +8,36 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #18 — consumers/graph: traversal facade + falsifiers (merged 2026-08-18, squash `5d3e694`)
+
+- **Added:** `consumers/graph/` — the third and final planned consumer
+  example. `Graph`/`Edge` (2 Sonnet workers, G1): immutable chaining over
+  a plain `long[]` row-index frontier (no native `Mask` has a public
+  constructor from Java-computed rows — checked, ruled a documented
+  simplification, not a fourth substrate detour). `GraphHopTest` (G2):
+  hop correctness via two independently-written pure-Java BFS
+  transcriptions, crossings-∝-hops, anti-vacuity, zero-serialization,
+  `Edge`'s reflection guard.
+- **Locked:** dispatch happened only after the substrate was proven
+  complete at all three levels (#14/#15 ABI, #16/#17 public facade) —
+  the wave was checked three separate times before a real, load-bearing
+  gap stopped surfacing.
+- **A measured finding, caught and fixed before shipping:** G2's first
+  draft assumed every hop costs an identical crossing count. Measured
+  with a standalone 4-hop probe: hop 1 on a fresh store costs 2
+  (`facetMatches` + a one-time `RowStore.rawLane()` resolution), hops
+  2/3/4 cost exactly 1, steady-state — the setup cost is per-`RowStore`,
+  not per-hop. Corrected `Graph.hop()`'s javadoc and the test's
+  assertions to state this precisely across three consecutive hops with
+  three different source-row counts.
+- **Docs:** STATUS_BOARD D-LGJ-W5 (graph row, marking all three planned
+  consumer examples DONE); LATEST_STATE dated entry; EPIPHANIES entry;
+  wave file marked DONE — all landed in the PR's own commit.
+- **Confidence:** High — `GraphHopTest` 43/43, core suite 204/204
+  unaffected, trades (12+3) and bricks (62) unaffected, disable-run
+  (target-decode offset corrupted by +4) verified red-then-green via the
+  set-equality check. Codex hit usage limits, no review obtained.
+
 ## PR #16 — RowStore: public per-row payload accessors (merged 2026-08-18, squash `8e4f9aa`)
 
 - **Added:** `RowStore.classidAt`/`payloadLow64At`/`payloadHi32At` — three
