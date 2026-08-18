@@ -1,3 +1,37 @@
+## 2026-08-18 (final for now) — graph consumer wave landed: 2 workers, 43/43, one real crossing-cost finding caught before shipping
+
+Dispatched G1 (`Graph`/`Edge`, the traversal facade) and G2 (`GraphHopTest`,
+the falsifiers) in parallel per `wave-consumer-graph.md`, only after the
+substrate was proven complete at all three levels in the two entries below
+(generator, ABI membrane, public core facade). Both landed clean: `Edge` is
+a proper schema-not-entity (reflection-proof), `Graph` is immutable
+chaining over a plain `long[]` row-index frontier (a native `Mask` has no
+public constructor from Java-computed rows — checked, ruled as a
+documented simplification rather than a fourth substrate detour), one
+`facetMatches` crossing per hop with everything else Java-heap.
+
+Compiled and ran centrally: `GraphHopTest` 43/43, core suite 204/204
+unaffected, trades/bricks unaffected. Mandated disable-run (corrupt the
+target-decode offset by +4) went red exactly as required — the SET
+equality check caught it even though the row COUNT coincidentally still
+matched, which is exactly why G2 was told to check the set, not just its
+size.
+
+**One real finding, caught before it shipped wrong:** G2's crossings test
+assumed every hop costs an identical number of native crossings. Measured
+directly (a 4-hop probe before touching the shipped test): hop 1 on a
+fresh store costs 2 — the `facetMatches` crossing plus a one-time
+`RowStore.rawLane()` resolution that the first payload read anywhere on
+that store triggers — while hop 2, 3, 4 each cost exactly 1, steady-state.
+Corrected both `Graph.hop()`'s javadoc and the test's assertions to state
+this precisely (first-hop=2, steady-state=1, confirmed across 3
+consecutive hops with 3 different source-row counts) rather than leave
+the wrong "identical from hop 1" assumption in either place. Full record:
+`STATUS_BOARD.md` D-LGJ-W5 (graph row), `EPIPHANIES.md`.
+
+All three planned consumer examples (trades, bricks, graph) from
+`lgj-vertical-slice-v1`/`lgj-soa-substrate-v1` are now DONE.
+
 ## 2026-08-18 (even later still) — a SECOND gap, one layer up: the graph wave also had no public path to a payload
 
 Immediately after PR #14/#15 merged, worked through concretely how G1's
