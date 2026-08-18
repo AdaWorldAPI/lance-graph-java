@@ -1,3 +1,36 @@
+## 2026-08-18 — lance-graph-java #23 (MERGED, squash 3f927c7) — W8b: mask-native Java facade + Graph migration
+
+- **Added (java/):** `WideFieldMask` record (validated `ofFacets`,
+  zero-extending `ofMatchBits`), `RowStore.hop` ×2 + `importRows` (the ONE
+  named import), `Mask.minus`/`materializeRows` (the ONE named
+  materialiser), `Status` −14, `Downcalls` 20 handles/21 symbols +
+  `requireMinor(4)`, `Engine.LaneWindow.setU64` (first write accessor).
+  New `MaskNativeOpsTest` (41 checks) in AllTests.
+- **Added (consumers/graph):** native `Mask` frontier (zero
+  `long[]`/Collection fields), `from(Mask)`, `minus(long...)` REMOVED,
+  `rows()`→`materializeRows()`, real `close()`; GraphHopTest rewritten —
+  reflective 3-way allowlist over Graph+Edge, vacuous literal-true assert
+  deleted, G9 flagship (seed=133→hop→240), G3 allocation floor flat.
+- **Locked (measured-then-pinned, ABI 0.4, JDK 26.0.2):** crossings hop=2
+  (create+hop), importRows=2 (create+describe; word writes in-process,
+  3-vs-29-row identical), count=1, minus=2, materialize-first=1. Two
+  predictions corrected by measurement; 3 stale "one native crossing"
+  javadocs fixed at source. Gate total **388 checks** across 5 suites;
+  allowlist disable-run red-then-green (injected `long[] rows()` fired
+  exactly G1/G8); the STALE root-level `.so` copy caught + refreshed
+  before any suite (the eager-clinit trap, live).
+- **Deferred:** FALSIFIERS rung (spec §12 F-* beyond GraphHopTest) →
+  POLICY rung. Real ClassView provider slot; Wide-tier promotion —
+  named seams, unchanged.
+- **Docs:** wave-consumer-graph.md + consumer-graph-traversal-v1.md
+  supersession notes (spec §3.7); STATUS_BOARD W8 row + LATEST_STATE in
+  the same commit.
+- **Confidence:** high — every gate ran centrally against the fresh
+  minor-4 `.so`; both workers' judgment calls reviewed (test placement
+  per item G; `setU64` scoped to importRows; `resourceHandleOf`
+  closed-world dispatch documented; `WideFieldMask.value` public per
+  FacetId precedent).
+
 # PR Arc Inventory — per-PR Added / Locked / Deferred / Docs / Confidence
 # (reverse chronological, APPEND-ONLY; only the Confidence line is
 # updatable in place — corrections append as new dated lines; reversals
