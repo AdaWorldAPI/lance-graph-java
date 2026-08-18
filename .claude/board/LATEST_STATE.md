@@ -1,3 +1,33 @@
+## 2026-08-18 — D-LGJ-W8 A3 FREEZE: the mask-native correction is ruled, specced, council-ratified; root CLAUDE.md created (PR-0)
+
+The operator's CORRECTION WAVE + RULING CLARIFICATION + A1 ARCHITECTURE
+RULING landed and went through the full supervision ladder: A0 six-lens
+audit (drift CONFIRMED — `Graph`'s `long[]`/`TreeSet` currency is
+precedent-drift; `View.where` exonerated; trades/bricks clean), A1
+combined spec (mask correction + the 64K parallel-SoA compute
+architecture, grounded in a 44-finding savant pass over the spec and a
+37-finding audit of the lance-graph spine), operator A2 verdict, three
+brutal reviewers (1 P0 — model identifiers in the to-be-committed spec
+— resolved by de-naming to roles; 6 P1 applied, including the §9
+axis-split at the arrival-order leak and the G2/G11 gate repairs),
+v3 RATIFIED. This commit freezes: spec v3 + root `CLAUDE.md` (the
+mask-native policy guard — first root CLAUDE.md this repo has) +
+`E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1` storno + the
+D-LGJ-W8 STATUS_BOARD row.
+
+**Correction of record for the entry below:** Graph #18 remains a VALID
+correctness fixture and becomes the preserved scalar oracle; its
+`long[]`/`TreeSet` implementation is scaffolding pending D-LGJ-W8's
+migration (Mask frontier, contract-governed ClassView/WideFieldMask,
+`lgj_hop`/`lgj_mask_andnot` at ABI minor 4). Trades/Bricks remain valid
+— their execution is already lazy/fused/mask-oriented. Implementation
+order: ndarray PR-N first (mask_andnot + simd.rs re-export), then
+PR-W8a (contract dep + provider + 2 ABI symbols), then PR-W8b (Java
+facade + Graph migration), each with same-commit board artifacts per
+the spec's §3.10 gate columns. The GridLake/compute surface is
+specified, NOT implemented, and hard-gated on arrival-order-independent
+landing identity.
+
 ## 2026-08-18 (final for now) — graph consumer wave landed: 2 workers, 43/43, one real crossing-cost finding caught before shipping
 
 Dispatched G1 (`Graph`/`Edge`, the traversal facade) and G2 (`GraphHopTest`,
