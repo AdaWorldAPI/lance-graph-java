@@ -1,3 +1,26 @@
+## 2026-08-18 — D-LGJ-W8 SUBSTRATE landed: ABI minor 4 (lgj_mask_andnot + lgj_hop), contract dep live, 21 symbols
+
+PR-N (ndarray #280) then PR-W8a, per the spec's merge order. The lgj-abi
+crate now depends on `lance-graph-contract` (path, default-features
+off — the RULING's one-closure contract inheritance, engine never), with
+`FixtureClassView` as the late-bound law provider and `class_id_for` as
+the pinned u32→u16 boundary (ISSUES.md ISS-LGJ-CLASSID-WIDTH-PIN).
+`lgj_mask_andnot` implements the dedup-before-lock aliasing discipline
+with a 5-branch tree (ANDNOT is non-commutative: dst==b needs a scratch
+copy of a — a real structural divergence from mask_binop, found during
+implementation, doc'd in place); `lgj_hop` is the composition kernel
+(existing eq_u32_strided_to_mask for classid-match, scalar decode+
+scatter, u64 bounds-check BEFORE cast, snapshot-then-write so dst==src
+aliasing is deadlock-free by construction). Gates: 110/110; clippy -D
+warnings + fmt; release .so exports 21/21; disable-runs G6(a)-(e) all
+red-then-green — (e) proved the deadlock is REAL (60s timeout kill with
+the ptr_eq dedup bypassed), the council's S3-4 catch now mechanically
+demonstrated. abi.md: §13 added, §12's Java-layer hop composition
+marked ⊘ SUPERSEDED (append-only regrade). W8b (Java facade + Graph
+migration) dispatched in parallel. Separately: the LOTUS SEAL / FRACTAL
+COMMIT FRONTIER research charter opened for lance-graph (operator,
+2026-08-18) — research runs there, not here.
+
 ## 2026-08-18 — D-LGJ-W8 A3 FREEZE: the mask-native correction is ruled, specced, council-ratified; root CLAUDE.md created (PR-0)
 
 The operator's CORRECTION WAVE + RULING CLARIFICATION + A1 ARCHITECTURE

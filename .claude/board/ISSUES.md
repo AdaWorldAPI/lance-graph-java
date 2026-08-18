@@ -1,5 +1,18 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-CLASSID-WIDTH-PIN (2026-08-18) — OPEN, upstream-owned
+
+The lgj wire carries u32 classids (canon 8-hex; `lgj_op_eq_classid`,
+`lgj_hop`); the contract's `class_view::ClassId` is u16 while
+`rbac::ClassId` is u32 — two widths coexist UPSTREAM in
+lance-graph-contract itself. PR-W8a pins the boundary locally:
+`class_view_provider::class_id_for` does the explicit u32→u16
+bounds-checked conversion (None past `u16::MAX`), with a falsifiable
+test pinning the behavior. The capacity tension is an upstream mint
+question (named in MedCare-rs commitment #10 and spec NG8) — surfaced
+here, deliberately NOT resolved here. Closes when upstream unifies the
+width or rules the split permanent.
+
 ## ISS-LGJ-FANOUT-UNREVIEWED (2026-08-17) — PARTIALLY RESOLVED
 
 **Resolution for the core (Rust ABI + Java facade), same day:** all three

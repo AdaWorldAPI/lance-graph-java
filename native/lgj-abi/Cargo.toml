@@ -18,7 +18,9 @@ name = "lgj_abi"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The ONLY dependency, and the ONLY source of SIMD in this crate (abi.md §8).
+# The ONLY source of SIMD in this crate (abi.md §8) — that invariant is
+# unchanged. ndarray is no longer the crate's only DEPENDENCY, though:
+# D-LGJ-W8 adds lance-graph-contract below.
 #
 # default-features = false + "std":
 #   ndarray's own defaults are ["std", "hpc-extras"]; hpc-extras pulls the
@@ -26,6 +28,20 @@ crate-type = ["cdylib", "rlib"]
 #   is what gates `ndarray::simd`, `ndarray::simd_int_ops`, `ndarray::hpc`
 #   and `ndarray::bitwise` — i.e. every module this crate consumes.
 ndarray = { path = "../../../ndarray", default-features = false, features = ["std"] }
+
+# The `ClassView`/`FieldMask` LAW `lgj_hop` consults — never the full
+# lance-graph engine (root CLAUDE.md: the contract/engine split is
+# deliberate blast-radius containment, not semantic optionality). This
+# crate's `src/` may import ONLY `lance_graph_contract::{class_view,
+# canonical_node, ontology}` (the G11 contract-import fence) — the
+# cognitive modules (kanban, mul, cognition, soa_view, scheduler, …)
+# compile UNCONDITIONALLY regardless of feature flags, so the fence, not
+# `default-features`, is the only barrier keeping that prohibition real.
+#
+# default-features = false: lgj-abi mints no GUIDs; the guid-v2-tail /
+# guid-v3-tail features are irrelevant to the class_view/ontology surface
+# this crate consumes, and the crate compiles fine without them.
+lance-graph-contract = { path = "../../../lance-graph/crates/lance-graph-contract", default-features = false }
 
 [profile.release]
 opt-level = 3

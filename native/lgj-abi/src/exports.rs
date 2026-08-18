@@ -525,6 +525,162 @@ pub extern "C" fn lgj_mask_or(a: u64, b: u64, dst: u64) -> i32 {
     guard(|| mask_binop(a, b, dst, LGJ_COMBINE_OR))
 }
 
+/// The body of `lgj_mask_andnot` — kept separate from [`mask_binop`] rather
+/// than folded into it, because ANDNOT is **not commutative**: `mask_binop`
+/// exploits AND/OR's commutativity to treat `dst == a` and `dst == b` as
+/// the same in-place case with the operand roles swapped, and that
+/// shortcut is simply wrong for `a & !b`. See `docs/abi.md` §13.
+fn mask_andnot_impl(a: u64, b: u64, dst: u64) -> i32 {
+    let (ea, pa) = match registry::resolve_mask_with_parent(a) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let (eb, _pb) = match registry::resolve_mask_with_parent(b) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let (ed, _pd) = match registry::resolve_mask_with_parent(dst) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+
+    // Same "share the same parent and row count" reading as `mask_binop`
+    // (abi.md §7 / §13).
+    if ea.n_rows != eb.n_rows || ea.n_rows != ed.n_rows {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    if ea.parent != eb.parent || ea.parent != ed.parent {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    let n_rows = pa.n_rows;
+
+    let d_is_a = std::sync::Arc::ptr_eq(&ed, &ea);
+    let d_is_b = std::sync::Arc::ptr_eq(&ed, &eb);
+    let a_is_b = std::sync::Arc::ptr_eq(&ea, &eb);
+
+    // `a & !a` is EMPTY, not `a` — ANDNOT has no self-identity the way AND
+    // and OR do, so both "dst aliases the whole computation" branches below
+    // (all three the same handle, or `a`/`b` the same handle with `dst`
+    // separate) reduce to "write zero" rather than "write a copy of a".
+    let result = if d_is_a && d_is_b {
+        // dst == a == b (⇒ a_is_b too, by transitivity of Arc::ptr_eq):
+        // dst = a & !a = EMPTY.
+        match registry::lock_masks_ordered(&[&ed]).map(|mut g| g[0].take().unwrap()) {
+            Ok(mut gd) => {
+                for w in gd.words.iter_mut() {
+                    *w = 0;
+                }
+                clear_tail_bits(&mut gd.words, n_rows);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    } else if d_is_a {
+        // dst == a, b distinct (d_is_b is false here, so b is a genuinely
+        // separate resource): in-place dst &= !b — the assign-form kernel
+        // reads and writes the same buffer safely because `b` is a
+        // DIFFERENT lock.
+        match registry::lock_masks_ordered(&[&ed, &eb]) {
+            Ok(mut guards) => {
+                let (gd, rest) = guards.split_at_mut(1);
+                let gd = gd[0].as_mut().unwrap();
+                let gb = rest[0].as_ref().unwrap();
+                kernels::simd_mask_andnot_assign(&mut gd.words, &gb.words);
+                clear_tail_bits(&mut gd.words, n_rows);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    } else if d_is_b {
+        // dst == b, a distinct (a_is_b must be false here: if it were true
+        // then a_is_b && d_is_b would give d_is_a by transitivity,
+        // contradicting the `d_is_a` branch above having not matched).
+        // dst = a & !dst_old, and dst_old IS b's current value — it must be
+        // read BEFORE being overwritten. Unlike the `d_is_a` case, there is
+        // no assign-form kernel for this: `mask_andnot_assign(x, y)`
+        // computes `x &= !y`, and here the role that needs "read old value,
+        // then overwrite" is the SECOND (notted) operand, not the first.
+        // A scratch copy of `a` sidesteps the aliasing rather than fighting
+        // the borrow checker over one buffer read two ways at once.
+        match registry::lock_masks_ordered(&[&ed, &ea]) {
+            Ok(mut guards) => {
+                let (gd, rest) = guards.split_at_mut(1);
+                let gd = gd[0].as_mut().unwrap();
+                let ga = rest[0].as_ref().unwrap();
+                let mut scratch = ga.words.clone();
+                kernels::simd_mask_andnot_assign(&mut scratch, &gd.words);
+                gd.words.copy_from_slice(&scratch);
+                clear_tail_bits(&mut gd.words, n_rows);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    } else if a_is_b {
+        // a and b are the same mask, dst separate: dst = a & !a = EMPTY,
+        // for EVERY possible value of a — `x & !x` is 0 bit-by-bit
+        // regardless of what `x` actually is, so `ea`'s value is never
+        // read. It is still locked here (mirroring `mask_binop`'s own
+        // `a_is_b` shape, which DOES need to read it) purely for
+        // structural consistency with the rest of this match, not because
+        // this branch depends on its contents.
+        match registry::lock_masks_ordered(&[&ed, &ea]) {
+            Ok(mut guards) => {
+                let (gd, _rest) = guards.split_at_mut(1);
+                let gd = gd[0].as_mut().unwrap();
+                for w in gd.words.iter_mut() {
+                    *w = 0;
+                }
+                clear_tail_bits(&mut gd.words, n_rows);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        // Three distinct masks: dst = a & !b, direct 3-buffer kernel.
+        match registry::lock_masks_ordered(&[&ed, &ea, &eb]) {
+            Ok(mut guards) => {
+                let (gd, rest) = guards.split_at_mut(1);
+                let gd = gd[0].as_mut().unwrap();
+                let ga = rest[0].as_ref().unwrap();
+                let gb = rest[1].as_ref().unwrap();
+                kernels::simd_mask_andnot(&ga.words, &gb.words, &mut gd.words);
+                clear_tail_bits(&mut gd.words, n_rows);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    };
+    status(result)
+}
+
+/// `dst = a & !b`, word-wise. Same parent/row-count compatibility rule as
+/// [`lgj_mask_and`]/[`lgj_mask_or`]: all three masks must share the same
+/// parent and row count, or `MASK_LENGTH_MISMATCH`.
+///
+/// `dst` may alias `a`, `b`, or both — **unlike AND/OR, ANDNOT is not
+/// commutative**, so `dst == b` is genuinely NOT the same case as
+/// `dst == a` with the roles swapped (see [`mask_andnot_impl`]'s doc). The
+/// kernel snapshots `b`'s value into a scratch buffer before it is
+/// overwritten whenever `dst` aliases `b`, so the result is always `a & !b`
+/// as evaluated BEFORE the call, regardless of which argument `dst`
+/// aliases.
+///
+/// **Tail rule:** bits at row index `>= n_rows` in the final word are
+/// always zero on return — re-established as an explicit, defensive step
+/// AFTER the complement (never merely inherited from well-formed operands):
+/// `!b`'s own tail bits are 1 wherever `b`'s tail was 0, so a version of
+/// this kernel without the explicit clear would leak a corrupted `a`
+/// operand's stray tail bits straight into `dst`, or fabricate tail bits
+/// out of a well-formed `b`'s zero tail.
+///
+/// Kernel: `ndarray::simd::{mask_andnot, mask_andnot_assign}` (abi.md §8
+/// SIMD provenance, unchanged) — never `ndarray::simd_int_ops` directly.
+/// ABI minor ≥ 4 (`docs/abi.md` §13).
+#[no_mangle]
+pub extern "C" fn lgj_mask_andnot(a: u64, b: u64, dst: u64) -> i32 {
+    guard(|| mask_andnot_impl(a, b, dst))
+}
+
 /// Population count of a mask — how many rows are selected.
 /// # Safety
 ///
@@ -987,6 +1143,198 @@ pub unsafe extern "C" fn lgj_reduce_sum_i32(
     })
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Graph traversal (ABI minor ≥ 4) — the first symbol gated by the
+// lance-graph-contract ClassView/FieldMask LAW (docs/abi.md §13).
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Resolve `(rowstore, src_mask, dst_mask)` for `lgj_hop`, checking that
+/// both masks are row-count-compatible with the store — the same
+/// row-count-only reading `resolve_pattern_and_mask` already uses (a mask
+/// from a different but equally sized resource is accepted; abi.md names
+/// only the row-count condition).
+#[allow(clippy::type_complexity)]
+fn resolve_rowstore_and_hop_masks(
+    store: u64,
+    src_mask: u64,
+    dst_mask: u64,
+) -> Result<
+    (
+        std::sync::Arc<ResourceEntry>,
+        std::sync::Arc<ResourceEntry>,
+        std::sync::Arc<ResourceEntry>,
+    ),
+    i32,
+> {
+    let store_entry = registry::resolve_kind(store, LGJ_RESOURCE_ROWSTORE)?;
+    let (src, _src_parent) = registry::resolve_mask_with_parent(src_mask)?;
+    let (dst, _dst_parent) = registry::resolve_mask_with_parent(dst_mask)?;
+    if src.n_rows != store_entry.n_rows || dst.n_rows != store_entry.n_rows {
+        return Err(LGJ_ERR_MASK_LENGTH_MISMATCH);
+    }
+    Ok((store_entry, src, dst))
+}
+
+/// One crossing: **overwrite** `dst_mask` with the one-hop reachable set
+/// from `src_mask` over `store`'s `edge_classid`-matching facets.
+///
+/// `dst_mask` is OVERWRITTEN — for every row `r` set in `src_mask`, for
+/// every facet `f` in the EFFECTIVE PARTICIPATION where
+/// `classid(r, f) == edge_classid`, if the decode mode yields a valid
+/// target `t < n_rows`, bit `t` is set in the result.
+///
+/// **Effective participation** is `facet_mask ∩
+/// class_view_provider::edge_participation(edge_classid)` — the caller's
+/// requested facets narrowed by what the `ClassView` provider says this
+/// class's edges actually occupy (the contract `FieldMask` currency,
+/// spec §3.1/§3.3). `facet_mask` is the wire form of that `FieldMask`: a
+/// `u64` whose bits `>= 32` are ignored (this store has 32 facets).
+///
+/// **Decode modes.** `decode_mode = 0` is the abi.md §12 fixture
+/// convention (`payload_hi32 == 0` marks a structured edge, `payload_lo64`
+/// is the LE target row). Modes `1..=3` are RESERVED
+/// ([`LGJ_ERR_UNSUPPORTED_DECODE_MODE`]) until real class data lands —
+/// checked FIRST, before `store`/`src_mask`/`dst_mask` are resolved at
+/// all, so `dst_mask` is provably untouched on a rejected call.
+///
+/// **Aliasing.** `src_mask` is snapshotted (its words copied into an
+/// owned buffer) under a READ lock that is fully RELEASED before
+/// `dst_mask`'s WRITE lock is taken. Unlike
+/// [`lgj_mask_and`]/[`lgj_mask_or`]/[`lgj_mask_andnot`]'s
+/// dedup-before-lock discipline (needed there because those calls hold
+/// TWO OR THREE mask locks at once), `lgj_hop` never holds more than one
+/// mask lock at a time — so `dst_mask == src_mask` aliasing carries zero
+/// deadlock risk by construction, not by case analysis.
+///
+/// **Bounds-before-cast.** The decoded target is compared against
+/// `n_rows` as a `u64` BEFORE any `as usize` cast, so an out-of-range
+/// `u64` target can never reach an indexing operation.
+///
+/// **Kernel composition.** The classid-match sub-step for each
+/// participating facet routes through the EXISTING sanctioned primitive
+/// ([`kernels::simd_rowstore_classid_mask`], the same kernel
+/// [`lgj_op_eq_classid`] uses) into a scratch word buffer that is REUSED
+/// across every participating facet, never reallocated per facet. Only
+/// the resulting set-bit walk + payload decode + scatter is scalar —
+/// there is no `ndarray::simd` primitive for gather-decode-scatter.
+///
+/// `docs/abi.md` §13 is the full normative statement.
+#[no_mangle]
+pub extern "C" fn lgj_hop(
+    store: u64,
+    edge_classid: u32,
+    facet_mask: u64,
+    decode_mode: u32,
+    src_mask: u64,
+    dst_mask: u64,
+) -> i32 {
+    guard(|| {
+        if decode_mode != 0 {
+            return LGJ_ERR_UNSUPPORTED_DECODE_MODE;
+        }
+        let (store_entry, src, dst) =
+            match resolve_rowstore_and_hop_masks(store, src_mask, dst_mask) {
+                Ok(t) => t,
+                Err(e) => return e,
+            };
+        let rowstore = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let n_rows = store_entry.n_rows;
+        let n = match usize::try_from(n_rows) {
+            Ok(n) => n,
+            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+        };
+        let n_words = mask_words_for(n_rows) as usize;
+
+        // Effective participation (spec §3.1/§3.4): the caller's facet_mask
+        // narrowed by the ClassView provider's answer for this edge class.
+        // `edge_participation` already restricts itself to bits 0..32; the
+        // `& 0xFFFF_FFFF` here is the wire-level "bits >= 32 ignored" rule
+        // applied to the CALLER's facet_mask too, so a caller-supplied
+        // stray high bit can never participate regardless of the provider.
+        let participation = crate::class_view_provider::edge_participation(edge_classid);
+        let effective = facet_mask & participation.0 & 0xFFFF_FFFF;
+
+        // Snapshot src's words under a read lock that is dropped at the end
+        // of this statement — see the doc comment above on why this makes
+        // dst == src aliasing safe by construction.
+        let src_snapshot: Vec<u64> = match src.read_mask() {
+            Some(g) => g.words.to_vec(),
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        if src_snapshot.len() != n_words {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+
+        let mut out = vec![0u64; n_words];
+        // One scratch buffer for the classid-match sub-step, reused across
+        // every participating facet — never allocated per facet.
+        let mut classid_scratch = vec![0u64; n_words];
+        let bytes = rowstore.as_bytes();
+
+        for facet in 0..crate::rowstore::ROW_FACETS {
+            if (effective >> facet) & 1 == 0 {
+                continue;
+            }
+            kernels::simd_rowstore_classid_mask(
+                bytes,
+                facet as usize * crate::rowstore::FACET_BYTES as usize,
+                n,
+                edge_classid,
+                &mut classid_scratch,
+            );
+            // Walk the set bits of (src ∩ classid-mask) — decode + scatter
+            // has no ndarray primitive (spec §3.4 / council S2-2), so this
+            // half stays scalar; the compare above already ran through the
+            // sanctioned SIMD kernel.
+            for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()).enumerate() {
+                let mut bits = sw & cw;
+                while bits != 0 {
+                    let bit = bits.trailing_zeros();
+                    bits &= bits - 1;
+                    let row = (w as u64) * ROWS_PER_WORD + bit as u64;
+                    // Defensive: a conformant mask's tail is always zero, so
+                    // this is unreachable for a well-formed src_mask — but
+                    // guards against a deliberately corrupted snapshot
+                    // rather than letting the byte-offset math below run
+                    // past the buffer.
+                    if row >= n_rows {
+                        continue;
+                    }
+                    let base = (row * crate::rowstore::ROW_BYTES
+                        + facet as u64 * crate::rowstore::FACET_BYTES)
+                        as usize;
+                    let payload_hi32 =
+                        u32::from_le_bytes(bytes[base + 12..base + 16].try_into().unwrap());
+                    if payload_hi32 != 0 {
+                        continue; // not a structured edge (gate failed at generation)
+                    }
+                    // Bounds check on u64, BEFORE any `as usize` cast
+                    // (council S3-6, normative ordering).
+                    let target = u64::from_le_bytes(bytes[base + 4..base + 12].try_into().unwrap());
+                    if target < n_rows {
+                        let t = target as usize;
+                        out[t / 64] |= 1u64 << (t % 64);
+                    }
+                }
+            }
+        }
+        clear_tail_bits(&mut out, n_rows);
+
+        let mut g = match dst.write_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        if g.words.len() != out.len() {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        g.words.copy_from_slice(&out);
+        LGJ_OK
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1035,6 +1383,25 @@ mod tests {
         pub fn reduce_sum_i32(r: u64, lane: u32, m: u64, out: *mut i64) -> i32 {
             unsafe { lgj_reduce_sum_i32(r, lane, m, out) }
         }
+        pub fn rowstore_open_with_edges(
+            n_rows: u64,
+            seed: u64,
+            edge_classid: u32,
+            edge_gate_mask: u64,
+            edge_radius: u32,
+            out: *mut u64,
+        ) -> i32 {
+            unsafe {
+                lgj_rowstore_open_with_edges(
+                    n_rows,
+                    seed,
+                    edge_classid,
+                    edge_gate_mask,
+                    edge_radius,
+                    out,
+                )
+            }
+        }
     }
 
     /// Open a pattern, returning its handle.
@@ -1075,6 +1442,55 @@ mod tests {
             operand,
             combine,
             _reserved: 0,
+        }
+    }
+
+    /// Open an edge-bearing row store, returning its handle.
+    fn rowstore_with_edges(
+        n_rows: u64,
+        seed: u64,
+        edge_classid: u32,
+        edge_gate_mask: u64,
+        edge_radius: u32,
+    ) -> u64 {
+        let mut h = 0u64;
+        assert_eq!(
+            call::rowstore_open_with_edges(
+                n_rows,
+                seed,
+                edge_classid,
+                edge_gate_mask,
+                edge_radius,
+                &mut h,
+            ),
+            LGJ_OK
+        );
+        h
+    }
+
+    /// Overwrite a mask's own words directly through the registry — reaching
+    /// PAST every write path this crate normally uses, the same shape
+    /// `registry.rs`'s own `mask_initial_states_are_exact` test uses to prove
+    /// a guarantee rather than merely assume it. Used here to (a) plant
+    /// specific bit patterns for aliasing/parity tests and (b) deliberately
+    /// corrupt a mask's tail for the tail-repair falsifier.
+    fn set_words(h: u64, vals: &[u64]) {
+        let e = registry::resolve(h).unwrap();
+        let mut g = e.write_mask().unwrap();
+        assert_eq!(g.words.len(), vals.len());
+        g.words.copy_from_slice(vals);
+    }
+
+    /// Set exactly the given row indices in a mask, via the same
+    /// registry-level write access as [`set_words`].
+    fn set_rows(h: u64, rows: &[u64]) {
+        let e = registry::resolve(h).unwrap();
+        let mut g = e.write_mask().unwrap();
+        for w in g.words.iter_mut() {
+            *w = 0;
+        }
+        for &r in rows {
+            g.words[(r / 64) as usize] |= 1u64 << (r % 64);
         }
     }
 
@@ -1752,6 +2168,314 @@ mod tests {
         lgj_close(p);
     }
 
+    // ── mask andnot (ABI minor ≥ 4) ────────────────────────────────────────
+
+    #[test]
+    fn andnot_matches_a_scalar_reference_and_reports_the_right_count() {
+        let p = open(128, 3);
+        let av = [0xF0F0_F0F0_F0F0_F0F0u64, 0x0F0F_0F0F_0F0F_0F0Fu64];
+        let bv = [0xFF00_FF00_FF00_FF00u64, 0x00FF_00FF_00FF_00FFu64];
+        let expected: Vec<u64> = av.iter().zip(bv.iter()).map(|(&x, &y)| x & !y).collect();
+        let expected_count: u64 = expected.iter().map(|w| w.count_ones() as u64).sum();
+
+        let a = mask(p, LGJ_MASK_INIT_EMPTY);
+        let b = mask(p, LGJ_MASK_INIT_EMPTY);
+        // Start dst non-empty: a passing test then proves an overwrite
+        // happened, not that dst merely started right.
+        let dst = mask(p, LGJ_MASK_INIT_ALL);
+        set_words(a, &av);
+        set_words(b, &bv);
+
+        assert_eq!(lgj_mask_andnot(a, b, dst), LGJ_OK);
+        assert_eq!(read_words(dst), expected);
+        assert_eq!(count(dst), expected_count);
+        assert!(
+            expected_count > 0 && expected_count < 128,
+            "must be a non-vacuous selection"
+        );
+
+        lgj_close(dst);
+        lgj_close(b);
+        lgj_close(a);
+        lgj_close(p);
+    }
+
+    #[test]
+    fn andnot_tail_bits_are_cleared_even_when_an_operand_is_corrupted() {
+        let p = open(70, 1);
+        let a = mask(p, LGJ_MASK_INIT_ALL);
+        let b = mask(p, LGJ_MASK_INIT_EMPTY);
+        let dst = mask(p, LGJ_MASK_INIT_EMPTY);
+
+        // Sanity: a genuine ALL mask already has a clean tail.
+        assert_eq!(lgj_mask_andnot(a, b, dst), LGJ_OK);
+        let words = read_words(dst);
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[1] & !0x3Fu64, 0, "no bit >= row 70 may be set");
+        assert_eq!(
+            words[1], 0x3F,
+            "rows 64..70 of ALL survive andnot with an EMPTY b"
+        );
+
+        // Corrupt `a`'s own tail directly, bypassing every write path this
+        // crate normally uses (the same registry-level reach
+        // `registry.rs`'s own `mask_initial_states_are_exact` uses to PROVE
+        // a guarantee rather than assume it). Since `b` is EMPTY, `!b` is
+        // all ones, so `dst = a & !b = a` bit-for-bit UNLESS the defensive
+        // clear runs — this is exactly what makes the disable-run (removing
+        // the clear) land on THIS test rather than passing by coincidence.
+        {
+            let ea = registry::resolve(a).unwrap();
+            let mut g = ea.write_mask().unwrap();
+            g.words[1] |= !0x3Fu64;
+        }
+
+        assert_eq!(lgj_mask_andnot(a, b, dst), LGJ_OK);
+        let words = read_words(dst);
+        assert_eq!(
+            words[1] & !0x3Fu64,
+            0,
+            "the defensive tail clear must REPAIR a corrupted operand's \
+             tail, not merely preserve an already-clean one"
+        );
+
+        lgj_close(dst);
+        lgj_close(b);
+        lgj_close(a);
+        lgj_close(p);
+    }
+
+    #[test]
+    fn andnot_aliasing_every_combination_completes_and_matches_the_unaliased_result() {
+        let p = open(128, 7);
+        let av = [0xF0F0_F0F0_F0F0_F0F0u64, 0x0F0F_0F0F_0F0F_0F0Fu64];
+        let bv = [0xFF00_FF00_FF00_FF00u64, 0x00FF_00FF_00FF_00FFu64];
+        let expected: Vec<u64> = av.iter().zip(bv.iter()).map(|(&x, &y)| x & !y).collect();
+
+        // Unaliased baseline.
+        let a = mask(p, LGJ_MASK_INIT_EMPTY);
+        let b = mask(p, LGJ_MASK_INIT_EMPTY);
+        let dst = mask(p, LGJ_MASK_INIT_EMPTY);
+        set_words(a, &av);
+        set_words(b, &bv);
+        assert_eq!(lgj_mask_andnot(a, b, dst), LGJ_OK);
+        assert_eq!(read_words(dst), expected, "unaliased baseline");
+        lgj_close(dst);
+        lgj_close(b);
+        lgj_close(a);
+
+        // dst == a: the in-place assign-form branch.
+        let a2 = mask(p, LGJ_MASK_INIT_EMPTY);
+        let b2 = mask(p, LGJ_MASK_INIT_EMPTY);
+        set_words(a2, &av);
+        set_words(b2, &bv);
+        assert_eq!(
+            lgj_mask_andnot(a2, b2, a2),
+            LGJ_OK,
+            "dst == a must complete"
+        );
+        assert_eq!(
+            read_words(a2),
+            expected,
+            "dst == a result must match the unaliased baseline"
+        );
+        lgj_close(b2);
+        lgj_close(a2);
+
+        // dst == b: the case with NO assign-form shortcut (ANDNOT is not
+        // commutative — see `mask_andnot_impl`'s doc).
+        let a3 = mask(p, LGJ_MASK_INIT_EMPTY);
+        let b3 = mask(p, LGJ_MASK_INIT_EMPTY);
+        set_words(a3, &av);
+        set_words(b3, &bv);
+        assert_eq!(
+            lgj_mask_andnot(a3, b3, b3),
+            LGJ_OK,
+            "dst == b must complete"
+        );
+        assert_eq!(
+            read_words(b3),
+            expected,
+            "dst == b result must match the unaliased baseline"
+        );
+        lgj_close(b3);
+        lgj_close(a3);
+
+        // a == b, dst separate: a &! a = EMPTY.
+        let ab = mask(p, LGJ_MASK_INIT_EMPTY);
+        set_words(ab, &av);
+        let dst2 = mask(p, LGJ_MASK_INIT_ALL);
+        assert_eq!(
+            lgj_mask_andnot(ab, ab, dst2),
+            LGJ_OK,
+            "a == b, dst separate, must complete"
+        );
+        assert!(
+            read_words(dst2).iter().all(|&w| w == 0),
+            "a &! a must be EMPTY"
+        );
+        lgj_close(dst2);
+        lgj_close(ab);
+
+        // dst == a == b: a &! a = EMPTY, fully in place.
+        let all_three = mask(p, LGJ_MASK_INIT_EMPTY);
+        set_words(all_three, &av);
+        assert_eq!(
+            lgj_mask_andnot(all_three, all_three, all_three),
+            LGJ_OK,
+            "dst == a == b must complete"
+        );
+        assert!(
+            read_words(all_three).iter().all(|&w| w == 0),
+            "a &! a must be EMPTY under full aliasing too"
+        );
+        lgj_close(all_three);
+
+        lgj_close(p);
+    }
+
+    // ── hop (ABI minor ≥ 4) ─────────────────────────────────────────────────
+
+    #[test]
+    fn hop_matches_the_pinned_rowstore_regression_10_19_29() {
+        let n = 2000u64;
+        let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let seed_rows: Vec<u64> = (0..10u64).map(|i| i * 37 + 5).collect();
+
+        let src = mask(store, LGJ_MASK_INIT_EMPTY);
+        let dst1 = mask(store, LGJ_MASK_INIT_EMPTY);
+        let dst2 = mask(store, LGJ_MASK_INIT_EMPTY);
+        set_rows(src, &seed_rows);
+
+        assert_eq!(lgj_hop(store, 0, 0xFFFF_FFFF, 0, src, dst1), LGJ_OK);
+        assert_eq!(count(dst1), 19);
+
+        assert_eq!(lgj_hop(store, 0, 0xFFFF_FFFF, 0, dst1, dst2), LGJ_OK);
+        assert_eq!(count(dst2), 29);
+
+        // Anti-vacuity: three distinct, non-empty, non-total sizes — the
+        // generator's own falsifier
+        // (`rowstore::measured_hop_counts_are_three_distinct_non_empty_non_total_sizes`),
+        // re-proven here through the ABI surface rather than the internal API.
+        assert_ne!(seed_rows.len() as u64, count(dst1));
+        assert_ne!(count(dst1), count(dst2));
+        assert!(count(dst1) > 0 && count(dst2) > 0);
+        assert!(count(dst1) < n && count(dst2) < n);
+
+        lgj_close(dst2);
+        lgj_close(dst1);
+        lgj_close(src);
+        lgj_close(store);
+    }
+
+    #[test]
+    fn hop_with_empty_facet_mask_yields_an_empty_dst() {
+        let n = 2000u64;
+        let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let seed_rows: Vec<u64> = (0..10u64).map(|i| i * 37 + 5).collect();
+        let src = mask(store, LGJ_MASK_INIT_EMPTY);
+        // Start dst non-empty (ALL) so an empty result proves an overwrite
+        // happened, not that dst merely started empty.
+        let dst = mask(store, LGJ_MASK_INIT_ALL);
+        set_rows(src, &seed_rows);
+
+        assert_eq!(lgj_hop(store, 0, 0, 0, src, dst), LGJ_OK);
+        assert_eq!(count(dst), 0);
+
+        lgj_close(dst);
+        lgj_close(src);
+        lgj_close(store);
+    }
+
+    #[test]
+    fn hop_rejects_reserved_decode_modes_and_leaves_dst_untouched() {
+        let n = 2000u64;
+        let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let src = mask(store, LGJ_MASK_INIT_EMPTY);
+        let dst = mask(store, LGJ_MASK_INIT_EMPTY);
+        set_rows(src, &[5, 42, 79]);
+        // Stamp a known, non-trivial pattern into dst directly, so
+        // "untouched" is a real assertion rather than a coincidence of the
+        // EMPTY default.
+        set_rows(dst, &[1, 2, 3]);
+        let before = read_words(dst);
+
+        for mode in [1u32, 2, 3, 7] {
+            assert_eq!(
+                lgj_hop(store, 0, 0xFFFF_FFFF, mode, src, dst),
+                LGJ_ERR_UNSUPPORTED_DECODE_MODE,
+                "mode {mode} must be rejected"
+            );
+            assert_eq!(
+                read_words(dst),
+                before,
+                "dst must be untouched after a rejected mode {mode}"
+            );
+        }
+
+        lgj_close(dst);
+        lgj_close(src);
+        lgj_close(store);
+    }
+
+    #[test]
+    fn hop_aliasing_dst_equals_src_completes_and_matches_the_unaliased_result() {
+        let n = 2000u64;
+        let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let seed_rows: Vec<u64> = (0..10u64).map(|i| i * 37 + 5).collect();
+
+        let src = mask(store, LGJ_MASK_INIT_EMPTY);
+        let dst = mask(store, LGJ_MASK_INIT_EMPTY);
+        set_rows(src, &seed_rows);
+        assert_eq!(lgj_hop(store, 0, 0xFFFF_FFFF, 0, src, dst), LGJ_OK);
+        let expected = read_words(dst);
+        lgj_close(dst);
+        lgj_close(src);
+
+        let both = mask(store, LGJ_MASK_INIT_EMPTY);
+        set_rows(both, &seed_rows);
+        assert_eq!(
+            lgj_hop(store, 0, 0xFFFF_FFFF, 0, both, both),
+            LGJ_OK,
+            "dst == src must complete, not deadlock"
+        );
+        assert_eq!(
+            read_words(both),
+            expected,
+            "aliased result must match the unaliased baseline"
+        );
+
+        lgj_close(both);
+        lgj_close(store);
+    }
+
+    #[test]
+    fn hop_with_out_of_range_edge_classid_still_completes_via_the_fixture_answer() {
+        // `class_view_provider::edge_participation_is_unaffected_by_the_classid_width_boundary`
+        // is where the boundary DECISION is pinned (the fixture's answer
+        // does not depend on classid identity, in range or not). This
+        // proves the consequence at the `lgj_hop` level: a classid past
+        // `u16::MAX` does not error, panic, or otherwise misbehave — it
+        // simply never matches any row's real classid (the generator only
+        // ever emits 0..16), so the empty result here is for an entirely
+        // different, unrelated reason than the boundary rule itself.
+        let n = 200u64;
+        let big_classid: u32 = u16::MAX as u32 + 1;
+        let store = rowstore_with_edges(n, 0xABCD, 0, 0x0, 10);
+        let src = mask(store, LGJ_MASK_INIT_ALL);
+        let dst = mask(store, LGJ_MASK_INIT_EMPTY);
+
+        assert_eq!(
+            lgj_hop(store, big_classid, 0xFFFF_FFFF, 0, src, dst),
+            LGJ_OK
+        );
+        assert_eq!(count(dst), 0);
+
+        lgj_close(dst);
+        lgj_close(src);
+        lgj_close(store);
+    }
+
     // ── degenerate sizes ───────────────────────────────────────────────────
 
     #[test]
@@ -1830,6 +2554,7 @@ mod tests {
             LGJ_ERR_EMPTY_PLAN,
             LGJ_ERR_ALLOCATION_FAILED,
             LGJ_ERR_READ_ONLY,
+            LGJ_ERR_UNSUPPORTED_DECODE_MODE,
             LGJ_ERR_PANIC,
         ];
         let mut sorted = all.to_vec();
