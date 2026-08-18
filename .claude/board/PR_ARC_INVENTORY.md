@@ -8,6 +8,34 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #16 — RowStore: public per-row payload accessors (merged 2026-08-18, squash `8e4f9aa`)
+
+- **Added:** `RowStore.classidAt`/`payloadLow64At`/`payloadHi32At` — three
+  new public, primitive-returning methods reusing `lgj_lane_describe`
+  (already ABI minor 1, no new ABI surface), resolved once per store and
+  cached; every read after is in-process.
+- **Locked:** the third and final gap in the graph-consumer wave's
+  substrate chain — `facetMatches` gives WHICH facets matched, never their
+  payload; the only raw-byte reader (`internal.ffm.Engine.describeLane`)
+  is off-limits to a consumer package by `ApiSurfaceTest`'s own design.
+  Decision D1a's text assumed a capability that existed only internally.
+- **A measured self-correction, recorded rather than smoothed over:** the
+  first draft carried the closed-store guard in two places; disabling one
+  was masked by the other via Java's receiver-before-argument evaluation
+  order, producing a **false-negative disable-run (30/30 green under
+  broken code)**. Traced rather than accepted, de-duplicated to the one
+  correct location, re-verified genuinely red-then-green.
+- **Deferred:** G1 (traversal facade) + G2 (falsifier tests) — the
+  substrate is now proven at all three levels (Rust generator, ABI
+  membrane, public core facade); dispatch is next.
+- **Docs:** STATUS_BOARD D-LGJ-W7; LATEST_STATE dated entry; EPIPHANIES
+  entry recording both the gap and the self-caught vacuous falsifier — all
+  landed in the PR's own commit.
+- **Confidence:** High — `AllTests` 204/204 (+10), `ApiSurfaceTest`
+  unchanged at 3/3 (zero FFM type in any public signature), both
+  disable-runs verified (one only after the redundant-guard correction
+  above). Both bot reviewers at usage limits, no review obtained.
+
 ## PR #14 — lgj-abi: edge-bearing row store ABI addition (merged 2026-08-18, squash `be8fb60`)
 
 - **Added:** `lgj_rowstore_open_with_edges` (`docs/abi.md` §12, ABI minor
