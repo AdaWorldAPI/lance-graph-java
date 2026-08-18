@@ -7,9 +7,17 @@
 > 1. W3 merged (Java facade — the consumer workflow exists).
 > 2. At least ONE W5 consumer example shipped (the
 >    consumer-never-grows-the-membrane rule has a proven round-trip).
-> 3. Ghidra G1+G2 merged (a real program image format exists — P-M1 must
->    consume the REAL format, not a probe-local sketch that would become
->    a second format).
+> 3. **[RECONCILED 2026-08-18 — was "Ghidra G1+G2 merged"]** `ruff_r2il`
+>    PR2 (route→V3 projection + codebook wiring, `AdaWorldAPI/ruff`) AND
+>    PR3 (the classid mint for the R2IL container concept in
+>    `lance-graph-contract::ogar_codebook`, O5) merged — a real,
+>    already-typed program image exists on THAT path. `wave-ghidra-g1-g2.md`
+>    is superseded and will never satisfy this gate; do not dispatch it to
+>    try. PR1 (ore/furnace/slag intake + the addressed residual ledger) is
+>    already merged; PR2 is explicitly gated on PR1's corpus numbers and is
+>    the in-flight "drill-down proposer" work — check
+>    `AdaWorldAPI/ruff/.claude/plans/r2il-behavioral-ir-v1.md`'s Wave plan
+>    section before re-deriving this gate's status.
 > 4. An explicit operator go (this direction is exploratory by ruling).
 
 ## What P-M1 is (and is deliberately not)

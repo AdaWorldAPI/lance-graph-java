@@ -1,3 +1,31 @@
+## 2026-08-18 (later) — Ghidra G1/G2 waves reconciled: superseded by ruff_r2il, not built
+
+Checked what "the other session writing the autoadapting drill-down proposer"
+(ruff/r2sleigh) actually unblocks here, against the merged PR rather than the
+summary. `AdaWorldAPI/ruff` PR #94 shipped `crates/ruff_r2il` — a typed
+intake arm (ore/furnace/slag) reading r2sleigh's R2IL/SSA directly, with an
+addressed residual ledger deliberately left non-empty for a follow-on pass.
+That follow-on IS the drill-down proposer: PR2 in the R2IL plan's own wave
+ladder, reading `ResidualLedger::by_address` and proposing finer convention
+rows, converging pass over pass. **Not landed yet** — gated on PR1's corpus
+numbers. PR3 (the classid mint in `lance-graph-contract::ogar_codebook`,
+item O5) is gated on PR2. So there is nothing new to CONSUME here today.
+
+What there IS: `wave-ghidra-g1-g2.md` (a bespoke `analyzeHeadless` lift
+script + a hand-rolled LE image format) is now superseded, not merely
+lower-priority — the R2IL plan's own stop condition already answers the
+question those waves existed to answer ("direct r2il/r2ssa consumption
+solves the upstream seam — YES, 43s"). Marked superseded in place;
+`wave-ogar-machine-pm1.md`'s gate #3 repointed from "Ghidra G1+G2 merged" to
+"ruff_r2il PR2+PR3 merged" so the real dependency is visible instead of a
+dead one. Full record + a separately-found, pre-existing `ogar_codebook`
+mirror-drift gap (flagged, not fixed): `EPIPHANIES.md`
+`E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1`.
+
+No code changed; C-band ruling (`E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1`,
+merged as OGAR PR #276) is unaffected — its `0xC4` fence is now literally
+true in code rather than anticipated.
+
 ## 2026-08-18 — C-band ruling recorded: the domain byte carries ALTITUDE
 
 Operator ruling (*"Java is an entire different layer that's why I chose

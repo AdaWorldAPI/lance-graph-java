@@ -4,6 +4,73 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 (later) — E-LGJ-GHIDRA-G1-G2-SUPERSEDED-BY-R2IL-1
+
+**Status:** FINDING (reconciliation, per `ghidra-integration-v1.md`'s own
+HANDOFF BOUNDARY note: *"the receiving session should reconcile the handoff
+against this plan's G-waves — they may supersede G1's lift-path decision
+entirely — rather than running both designs in parallel."*). **Confidence:**
+High — read against the merged PR, not inferred from the operator's summary.
+
+### What landed elsewhere, verified directly
+
+`AdaWorldAPI/ruff` PR #94 (merged, `10fab88`'s ancestor) shipped
+`crates/ruff_r2il`: a typed intake arm reading r2sleigh's R2IL/SSA directly
+(`../../../r2sleigh/crates/{r2il,r2ssa}`, in-process, ~43s) into
+`ore → furnace → slag`. `dropped == 0` by construction
+(`harvested = classified + residual`); slag is a **named, addressed**
+residual ledger (`ResidualLedger::by_address`), not a catch-all — and B3's
+own falsifier makes `residual == 0` a **KILL**, meaning the ladder was
+deliberately left unfinished for a follow-on pass. That follow-on —
+reading `by_address` and proposing finer `ConventionRow`s at each address,
+re-running, converging pass over pass — is the "drill-down proposer" the
+operator flagged as in progress in another session. It is PR2 in the R2IL
+plan's own wave ladder (`.claude/plans/r2il-behavioral-ir-v1.md`), gated on
+PR1's corpus numbers; PR3 (the classid mint for the R2IL container concept
+in `lance-graph-contract::ogar_codebook`, item O5) is gated on PR2 proving
+the route set. **Neither PR2 nor PR3 has landed as of this entry.**
+
+### The reconciliation
+
+`ghidra-integration-v1.md`'s G1 (an `analyzeHeadless` post-script dumping a
+bespoke P-code text form) and G2 (a hand-rolled versioned LE image format +
+Rust loader) are **superseded**, not merely lower-priority. The R2IL plan's
+own stop condition already answers the question G1/G2 existed to answer:
+*"§22.1: direct r2il/r2ssa consumption solves the upstream seam — YES
+(43s)."* Dispatching `wave-ghidra-g1-g2.md` now would build a second,
+throwaway lift path and a second, competing image format next to one that
+is already merged, typed, and further along. `wave-ghidra-g1-g2.md` marked
+superseded in place (kept for G0's real archaeology — the 74-opcode count,
+the `PcodeEmulator` oracle precedent — which is still true and reusable,
+just not via a Ghidra-side script). `wave-ogar-machine-pm1.md`'s gate #3
+repointed from "Ghidra G1+G2 merged" to "ruff_r2il PR2+PR3 merged," so the
+next session checking that gate finds the real dependency instead of a
+dead one.
+
+### Consequence for the C-band ruling
+
+None to the reservation itself — `E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1`'s
+`0xC4 BinaryLifting` fence ("Ghidra and r2sleigh are two consumers of the
+same SLEIGH specs over ONE vocabulary") is now literally true in code, not
+just anticipated: `ruff_r2il` path-deps r2sleigh's SLEIGH-driven crates
+directly. PR3's classid mint, when it lands, is the first real tenant of
+that slot.
+
+### A separate, independently-found gap — flagged, not fixed here
+
+`lance-graph-contract::ogar_codebook` documents itself as a **wire-compatible
+mirror** of OGAR `ogar-vocab::ConceptDomain` under an explicit drift guard
+("if OGAR's CODEBOOK ever moves an id, BOTH sides must update together").
+Read directly against OGAR post-PR-#276: the mirror is missing `Ontology`
+(`0x03`, present in OGAR before this session) and `Blocks` (`0x17`, added
+2026-08-04) — **pre-existing drift, not caused by this session's C-band PR**
+— and will also lack `JavaRuntime`/`Analytics`/`BinaryLifting` (`0xC0`/
+`0xC1`/`0xC4`) once PR3 needs to route on them. Out of scope to fix
+speculatively from here (lance-graph-contract is on this branch but not
+under active work this session, and the mirror's own convention is to catch
+up via its parity tests, not via an unprompted sync); recorded so PR3 does
+not silently trip on it.
+
 ## 2026-08-18 — E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1
 
 **Status:** RULING (operator, 2026-08-18: *"Java is an entire different layer
