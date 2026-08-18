@@ -1,3 +1,24 @@
+## 2026-08-18 — C-band ruling recorded: the domain byte carries ALTITUDE
+
+Operator ruling (*"Java is an entire different layer that's why I chose
+another higher level"*): the classid domain byte is **stratified by layer**,
+not a flat namespace. The C-band is the stratum ABOVE the Rust substrate —
+**C0** Java/Panama/Valhalla (the membrane, and the FLOOR of that layer),
+**C1** ogar-bricks + Databricks (the analyst estate), **C4** Ghidra (a tenant
+of C0's layer — Ghidra is itself a JVM application per this repo's G0
+archaeology — and explosive, for the blast radius of turning any binary into
+addressable rows).
+
+Full entry, including the three of my own proposals it corrects and the
+root-cause (I clustered by SHAPE — everything becomes `(function : value)`
+calls in a 512-byte node — where the real axis is ALTITUDE):
+`EPIPHANIES.md` `E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1`.
+
+**Consequence for this repo, and it is the only one:** W6's schema/classid
+field on `LgjResourceInfo`/`LgjLaneDesc` carries a **C0** concept. Nothing on
+the current wave list is blocked by the allocation — the reservation is
+OGAR-side and operator-gated (reserving costs nothing; minting is 5+3-gated).
+
 ## 2026-08-17 (dispatch 4) — W5b bricks shipped: authorization IS a mask, measured
 
 `wave-consumer-bricks.md` executed (2 Sonnet workers K1/K2, disjoint main/test

@@ -4,6 +4,98 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-18 — E-LGJ-THE-DOMAIN-BYTE-CARRIES-ALTITUDE-1
+
+**Status:** RULING (operator, 2026-08-18: *"Java is an entire different layer
+that's why I chose another higher level"*). **Confidence:** High for the
+ruling; the reservation itself is OGAR-side and NOT yet made.
+
+### The ruling
+
+The classid's domain byte (`0xDDCC`'s `DD`, canon hi u16) is **stratified by
+altitude**, not a flat namespace where placement is mnemonic or next-free.
+Numerically higher = architecturally higher layer. The **C-band is the layer
+above the Rust substrate**, and within it:
+
+| slot | owner | why there |
+|---|---|---|
+| **C0** | **Java · Panama · Valhalla** | the supraconductor membrane over the SoA substrate — the FLOOR of that layer, the door everything else in it arrives through |
+| **C1** | **ogar-bricks + Databricks** | the analyst estate |
+| **C4** | **Ghidra** | bolted onto C0 (Ghidra *is* a JVM application — this repo's own G0 archaeology: fork at 12.2 DEV, minimum Java 25, Gradle ≥ 9.1), and explosive — C4 the plastic explosive, for the blast radius of turning any binary into addressable rows |
+
+C4 is a **tenant** of the layer C0 floors, not a peer of C0. That internal
+ordering is part of the ruling, not decoration.
+
+### Why the axis is structurally sound (not just mnemonic)
+
+The domain byte is the first two nibbles of the classid, so its **top nibble
+is a 16-way altitude selector**: one mask separates "substrate ontology" from
+"host layer" with zero lookup and zero value decode — the canon's *the key
+prerenders nodes with zero value decode*, applied to layering. A first-nibble
+split is the most expensive split available in the 16-ary cascade; spending it
+on **altitude** is what makes it worth spending.
+
+### What this corrects (storno — three of my own proposals, all wrong)
+
+I mapped by **subject matter** ("P-code is an opcode vocabulary, Blocks is an
+opcode vocabulary, therefore adjacent") when the actual axis is **altitude**.
+Withdrawn, in order:
+
+1. **"Seat P-code at `0x1718` as a loco consumer slot."** Wrong tier. `0x17`
+   is ogar-loco = **lance-graph's own internal orchestration** (elixir-on-rails
+   shaped, rs-graph-llm as the graph executor, Rig marking the replayability
+   boundary between external LLM and internal low-code). It is a tier with a
+   job, not a container for any palette whose ops fit in a byte. The `0x1717`+
+   consumer slots are frontends *of that orchestration*.
+2. **"Put P-code at `0x18`, next to Blocks."** Same error, one slot over.
+3. **"A separate substrate/layout-contract domain"** as my third pick. Not a
+   separate thing — it is **C0's content**. See the consequence below.
+
+Root cause, worth keeping because it recurred three times in one session: I
+flattened distinct motifs into one family because they share a **shape**
+(everything becomes `(function : value)` calls in a 512-byte node). Loco's ABI
+being *reusable* does not make `0x17` a parking lot. **Shape-similarity is not
+domain-identity** — the dilution failure this workspace names by name.
+
+### What survives, and is the useful half
+
+**Reuse loco's node shape; own your own domain.** Loco says it itself — the
+classid naming *a function body* "belongs here, at the substrate, and a
+frontend references it rather than minting its own" (`ogar-loco` module doc,
+`LocoConcept::FunctionBody` = `0x1701`). So a C4 P-code body can BE a loco
+`FunctionBody` while every P-code concept lives in C4; likewise a C1 pipeline.
+**Borrowing the container is not joining the domain.**
+
+Also surviving, unchanged: the **two registers** point. An *op vocabulary*
+(palette bytes) and an *artifact ontology* (concept ids) are different
+registers. Ghidra: P-code ops vs function/section/symbol. Databricks: pipeline
+verbs vs catalog/table/column/type — and the latter already has a real seam
+here, `lance-graph-catalog/src/unity_catalog.rs`, with Delta as a table reader.
+
+### The one consequence for code in THIS repo
+
+**W6's schema/classid field on `LgjResourceInfo`/`LgjLaneDesc` carries a C0
+concept.** A row store stamping which layout contract its bytes obey is the
+membrane naming itself from inside its own layer — not a substrate concept
+borrowed downward. Nothing else on the current wave list depends on the
+allocation, so W5c/W6 are unblocked either way.
+
+### Open, and NOT ours to close
+
+The reservation is an **OGAR-side, operator-gated** act (`ogar-vocab`'s
+`ConceptDomain` + the §2 allocation table; minting is gated on the 5+3 pass,
+while *reserving* explicitly "costs nothing"). Two mechanical notes for
+whoever makes it:
+
+- **C2/C3 fall between C1 and C4.** Blocks set the precedent that a deliberate
+  gap gets a **pinned test asserting it stays `Unassigned`** (`ogar-vocab`
+  `lib.rs:5624-5644`, guarding the `0x10`–`0x16` gap) so a later pass cannot
+  "tidy" a domain downward into it. The C-band wants the same three lines.
+- **`0xC0` is a digit-swap of `0x0C` Automation** (`0xC001_0000` vs
+  `0x0C01_0000`). Raised once, not decisive, recorded so it is not
+  re-discovered as if new.
+
+
 ## 2026-08-17 — E-LGJ-WAVE-DISPATCH-VALIDATED-1
 
 **Status:** FINDING (first real dispatch of the wave system). **Confidence:**
