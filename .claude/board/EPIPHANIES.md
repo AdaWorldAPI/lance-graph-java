@@ -4,6 +4,64 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-THE-GATE-NOW-HOLDS-AT-EVERY-MINOR-1
+
+**Status:** SHIPPED — the minors-2-4 half of the eager-init defect, closed.
+**Confidence:** High — reproduced at every historical minor against REAL
+libraries before the fix, verified after, and disable-verified per minor.
+
+Closes the gap `E-LGJ-A-FEATURE-GATE-DEFEATED-BY-EAGER-CLASS-INIT-1` left open
+and explicitly tracked ("minors 2-4 share the defect and are NOT fixed here").
+
+### The defect was worse at the older minors than at minor 5
+
+Built four real libraries from this repo's own history — `bd92c58` (minor 1),
+`beac5de` (2), `92a0e55` (3), `e8f0ce6` (4) — and ran the CURRENT Java against
+each. `SmokeTest`, which uses nothing newer than minor 1, died every time on the
+first symbol from a LATER minor:
+
+| library | died on | which is |
+|---|---|---|
+| minor 1 | `lgj_rowstore_open` | a minor-**2** symbol |
+| minor 2 | `lgj_rowstore_open_with_edges` | minor 3 |
+| minor 3 | `lgj_mask_andnot` | minor 4 |
+| minor 4 | `lgj_reduce_facet_sum` | minor 5 (already fixed) |
+
+**Against the minor-1 library, minor-1 operations could not run.** The additive-
+minor promise was not merely unenforced in that direction — it was inverted.
+
+### The fix, and the line that is deliberately NOT moved
+
+One lazy holder per minor (`Minor2`/`Minor3`/`Minor4`, joining `Minor5`),
+initialised on first ACCESS. **The 14 minor-1 base handles stay eager on
+purpose:** a library missing any of them is not an older library, it is a wrong
+one, and that failure should be immediate and total. Laziness is the right answer
+for "this library predates the feature", not a general policy.
+
+### The falsifier now checks both directions, per minor
+
+`OldAbiCompatTest` was minor-5-only and one-directional. It now gates each minor
+in whichever direction the loaded library calls for: **available ⇒ the feature
+must actually work; absent ⇒ `AbiMismatchException` naming that minor.** Both
+halves are needed — a gate that rejected everything would satisfy a
+rejection-only test, which is exactly the vacuity trap this session has now hit
+often enough to check for by reflex.
+
+Measured after the fix: minor 1 → 4 checks, minors 2/3/4 → 6 checks each, all
+green, with each minor reporting the right verdict for that library.
+
+Disable-verified per minor rather than in aggregate: reverting ONLY minor 2 to
+eager, leaving 3/4/5 lazy, reproduces the `<clinit>` crash against the minor-1
+library. A single minor regressing is caught.
+
+### What this leaves
+
+The compat suite needs artifacts this repo does not ship, so it stays out of
+`AllTests` and skips loudly without `-Dlgj.oldlibrary` — a suite that silently
+passes when its subject is absent is worse than one that is absent. The four
+libraries are reproducible from the commits named above; the recipe is in the
+test's own javadoc and in `abi.md` §2.
+
 ## 2026-08-25 — E-LGJ-A-FEATURE-GATE-DEFEATED-BY-EAGER-CLASS-INIT-1
 
 **Status:** SIX REVIEW FINDINGS, ALL CONFIRMED AND FIXED (PR #26, pre-merge).
