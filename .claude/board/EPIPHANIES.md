@@ -4,6 +4,79 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-LAYOUT-AUTHORITY-IS-TRANSFERABLE-BUT-ONLY-ABOVE-8-BYTES-1
+
+**Status:** MEASURED (R4, R5, `valhalla-lab/reproducers/`, JDK 27 EA).
+**Confidence:** High for the measurements; the division-of-authority rule
+below is the reading of them and is open to a counter-measurement.
+
+**Board-discipline note, first:** the R4/R5 code landed in `6828f4a` WITHOUT
+this entry, which breaks this repo's own same-commit rule. Recorded here
+rather than quietly back-dated.
+
+### What was asked
+
+Can the three V3 carvings (`6x(u8:u8)` / `4x(u8:u8:u8)` / `3x(u8:u8:u8:u8)`)
+dodge the R2 8-byte array-flattening cliff? And can a `classid`-dependent
+layout be expressed at all?
+
+### What was measured
+
+1. **The cliff is on TOTAL PAYLOAD.** Every real width is non-flat in all
+   three array kinds — `Reg12AsRails/Triplets/Quads`, `Facet16As*` — and the
+   monolithic control `Reg12Flat` behaves identically. The carving changes
+   nothing.
+2. **Nesting costs flatness even UNDER the budget** (`Nest7` false vs `Flat7`
+   true), because a record component is nullable by default and stored in its
+   nullable flat layout (`Pair` 2->4, `Quad` 4->8). Confirmed by mechanism,
+   not inferred: `@NullRestricted` flips all three predicted failures
+   false->true. Removing the inflation still does not rescue 12/16 B.
+3. **`isFlatArray()` alone is not a sufficient test.** `Four8AsTwo8`, a
+   32-byte record, reports flat at VM **element size 8** — its
+   `@NullRestricted Two8` components are themselves non-flattenable and are
+   stored as REFERENCES. A flat array of pointers is the opposite of the
+   property being sought. `Nest8Single` is the inverse hazard: 8 B payload,
+   element size 16. R4-observed.txt now pins element sizes beside every
+   boolean. Answering the operator's `32x(2x8 byte)` question from the
+   boolean alone would have shipped a false positive.
+4. **Neither mechanism can express a runtime-selected layout.** A Panama
+   `VarHandle` binds its path at construction; a value class is a static type.
+   The carving choice is a Java-side switch in every possible design.
+5. **Cost of giving Java a row type, 65,536 rows:** project (no element type)
+   800 B total / 0.01 B/row, identical every run. Hydrate (16-byte `Facet`)
+   32-104 B/row, varying by run because escape analysis is best-effort. The
+   3x spread across identical runs is the finding, not noise.
+
+### The reading — authority is transferable, and Valhalla is not crippled by it
+
+Java's layout authority engages ONLY on types Java instantiates. The projecting
+path never gives it one, so the authority never engages: that is why its cost is
+both zero and *stable*, while the hydrating path's cost is decided by the
+compiler per run.
+
+So the division is measurable rather than aesthetic:
+
+- **payload > 8 B** — Rust/the contract holds layout authority. Java sees a
+  descriptor, a handle, or a mask. This is the row, the facet, the register,
+  the 512-byte canonical stride.
+- **payload <= 8 B, unnested** — measured flat, so Java may hold it: `Pair`
+  2 B, `Triplet` 3 B, `Quad` 4 B, `Lane8` 8 B are all `true`. Handles,
+  versions, coordinate pairs, a single rail value.
+
+Valhalla keeps a real, measured domain; it simply was never the right tool for
+the ROW. **The move that would cripple both is the opposite one** — trying to
+make a value class express the 12/16/512-byte payload, which R4 shows cannot
+work and which costs the stability measured in R5.
+
+### Consequences
+
+- The carving is sound **as SoA and only as SoA**: N parallel rail arrays,
+  each element under the budget, never one `Facet[]`.
+- Do NOT change the substrate layout to chase Java flatness. Past 8 bytes the
+  width is irrelevant to Java's decision, which is exactly what leaves the
+  substrate free to choose its stride for cache/Morton reasons.
+- Never report `isFlatArray()` without the VM element size beside it.
+
 ## 2026-08-18 — E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1 (STORNO, operator-ruled, council-ratified)
 
 **Status:** RULED — operator CORRECTION WAVE + RULING CLARIFICATION +

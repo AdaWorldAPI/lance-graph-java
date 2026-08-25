@@ -1,0 +1,44 @@
+JDK: openjdk 27-jep401ea3 2026-09-15
+
+=== 3 runs, same binary ===
+ops                : 1,000,000,000 group projections
+allocated          : 960 B total  ->  0.000000960 B/op
+wall               : 3.48 s  ->  287.1 M ops/s  (3.48 ns/op)
+checksums non-zero : true true
+--
+ops                : 1,000,000,000 group projections
+allocated          : 960 B total  ->  0.000000960 B/op
+wall               : 2.11 s  ->  474.1 M ops/s  (2.11 ns/op)
+checksums non-zero : true true
+--
+ops                : 1,000,000,000 group projections
+allocated          : 960 B total  ->  0.000000960 B/op
+wall               : 1.76 s  ->  567.0 M ops/s  (1.76 ns/op)
+checksums non-zero : true true
+--
+
+READING
+  960 B, byte-identical across all three runs, for 1,000,000,000 operations. The decisive
+  comparison is against R5: 65,536 ops allocated 800 B. Operations grew 15,000x; allocation
+  grew 160 B. The bytes are FIXED SCAFFOLDING (measurement plumbing, enum values), not a
+  per-operation cost -- a genuine per-op survivor of even 1 B/op would have shown up as a
+  gigabyte.
+
+  Contrast with R5's hydrating path at the same op shape: 32-104 B/row. At a billion rows
+  that is 32-104 GB of allocation churn, decided per run by escape analysis.
+
+WHAT IS BANKED AND WHAT IS NOT
+  BANKED : 10^9 operations -> exactly 960 B allocated, all three runs. The allocation
+           claim is exact because its numerator is constant.
+  NOT BANKED: a throughput number. The three runs above span 1.76-3.48 s (287-567 M
+           ops/s) -- a 2x spread, far too wide to pin. An earlier informal set of runs
+           spanned 2.28-2.71 s; a previous version of THIS file quoted that earlier range
+           in its prose while its own pinned runs said otherwise. That self-contradiction
+           was caught in review (operator, 2026-08-25) and is corrected here rather than
+           papered over: the prose now describes only the runs printed above it.
+
+SCALE CHARACTERISATION (corrected in the same review)
+  A previous version called the per-op time "memory-latency scale". Wrong regime: the
+  working set is ~1 MiB (65,536 x 16 B), fully cache-resident after warm-up. This is
+  hot-cache load-and-shift scale. The point survives in corrected form: the loop contains
+  no FFI and no object, so nothing but loads, shifts and the carving switch is being timed.

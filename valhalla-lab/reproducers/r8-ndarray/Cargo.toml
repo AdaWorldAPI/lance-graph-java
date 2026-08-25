@@ -1,0 +1,15 @@
+[package]
+name = "r8-ndarray"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "R8 arm E: the mask-native sweep, all SIMD from ndarray::simd (abi.md §8 invariant)."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ndarray = { path = "../../../../ndarray", default-features = false, features = ["std"] }
+
+[profile.release]
+debug = 0

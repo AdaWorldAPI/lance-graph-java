@@ -23,3 +23,9 @@ Cargo.lock.bak
 # OS / editor noise
 .DS_Store
 *.swp
+
+# R8 build artifacts — the reproducer sources and pinned observations are committed;
+# the .so / binary / cargo target are rebuilt by the commands in R8's header.
+valhalla-lab/reproducers/*.so
+valhalla-lab/reproducers/r8_standalone
+valhalla-lab/reproducers/r8-ndarray/target/

@@ -1,0 +1,23 @@
+== (1) what each mechanism can express ==
+Panama VarHandle bound to a fixed path : classid of row 0 = 0
+  a VarHandle cannot re-derive its path from a runtime classid;
+  the carving choice is a Java-side switch in every design.
+Valhalla value class is a static type   : cannot be selected by a runtime int either.
+
+== (2) allocated bytes per row, 65536 rows ==
+project (classid-dispatched, no element type) :        800 B total,   0.01 B/row
+hydrate (16-byte Facet value object)          :  6,816,544 B total, 104.01 B/row
+checksums (must be non-zero, else the loops were optimised away): true true true
+
+=== run-to-run stability, 4 runs of the same binary, same machine ===
+project : 800 B total / 0.01 B/row  -- identical every run
+hydrate : 32.01, 37.24, 104.01, 101.76 B/row
+
+The hydrate spread is not noise to be averaged away, it is the result. Escape
+analysis is a best-effort JIT optimisation: when it fires, a hydrated Facet
+costs ~32 B/row; when it does not, ~104 B/row. Nothing in the source chooses
+between those. A design may therefore not rely on hydration being cheap --
+the cost is decided by the compiler, per run, and ranges over 3x.
+
+project has no such spread because there is no element type for the JVM to
+have an opinion about: the bytes are read straight out of the MemorySegment.
