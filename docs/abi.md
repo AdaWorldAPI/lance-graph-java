@@ -279,7 +279,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (21 symbols)
+## 7. The function surface (22 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -363,6 +363,8 @@ This single call is what makes the Java fluent chain cost one crossing.
 
 ```
 i32 lgj_reduce_sum_i32(u64 res, u32 lane_id, u64 mask, i64* out_sum)
+i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
+                         u64 mask, i64* out_sum)      // ABI minor >= 5, see §14
 ```
 
 Sums the `I32` lane over set mask bits into a widened `i64` (no overflow for
@@ -699,3 +701,88 @@ that doubles `n_rows` observes roughly double the work in both — for
 scanned per participating facet. Both therefore satisfy §6's anti-JNI rule
 by the same test every existing symbol satisfies it by: work proportional
 to `n_rows`, never one crossing per element.
+
+## 14. The mask-native sweep (ABI minor ≥ 5)
+
+One symbol, and it is the **execution half of a mask path whose build half has
+existed since minor 2**. That framing matters more than the addition: before
+this minor the membrane could already turn a classid column into a mask
+(`lgj_op_eq_classid` → `ndarray::simd::eq_u32_strided_to_mask`, §11) and could
+already compose masks (`and`/`or`/`andnot`/`count`, §7/§13) — what it could not
+do was *consume* a mask against the 12-byte facet register. That gap is why a
+consumer wanting the shape had to leave the membrane.
+
+```
+i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
+                         u64 mask, i64* out_sum)
+```
+
+Sums every group of `facet`'s 12-byte register, under `carving`, over the rows
+`mask` selects, widened to `i64`. Work is proportional to the mask's
+**popcount**, so an empty mask is O(words) and §6's bulk-or-lifecycle rule
+holds by construction.
+
+### The carving is a caller-supplied, validated parameter — not a ClassView consult
+
+`carving` selects one of `le-contract.md` §3's three readings of the *same* 12
+bytes:
+
+| wire | reading | groups × bytes |
+|---|---|---|
+| `0` | rails | `6 × (u8:u8)`, LE `u16` |
+| `1` | SPO triplets | `4 × (u8:u8:u8)`, LE `u24` zero-extended |
+| `2` | odoo quads | `3 × (u8:u8:u8:u8)`, LE `u32` zero-extended |
+
+Anything else is `LGJ_ERR_UNSUPPORTED_CARVING` (`-15`), checked **first**,
+before the store or mask are resolved, so `out_sum` is provably untouched on a
+rejected call. An unknown reading must never alias a known one.
+
+This follows `lgj_hop`'s `decode_mode` precedent (§13, spec §3.4) rather than
+`edge_participation`'s ClassView consult, and the reason is the point of the
+symbol: **the reading is what the caller already resolved from the ClassView
+before crossing.** Re-resolving it per row inside the sweep would put the
+question back in the hot loop — exactly what this symbol exists to take out of
+it. A per-row ClassView consult here would be the mask-native law's own defect,
+one layer down.
+
+### Mask parentage
+
+The mask must belong to **this** store, not merely match its row count — an
+equal-length mask over a different resource is a different population wearing
+the right size. Rejected with `LGJ_ERR_MASK_LENGTH_MISMATCH`, matching the mask
+algebra's own parent check (`lgj_mask_and`) rather than minting a second
+spelling for the same rejection.
+
+### SIMD provenance (§8), stated honestly
+
+**This kernel is scalar, deliberately, and the vector form is a NAMED GAP.**
+`ndarray::simd` has no primitive for "gather a sub-word group out of a
+512-byte-strided register under a runtime grouping and widen-accumulate":
+`masked_sum_i32` is contiguous `i32`, and `eq_u32_strided_to_mask` reads one
+aligned `u32` per row, not six unaligned `u16`s. Writing raw intrinsics here
+would create precisely the second SIMD surface §8 exists to prevent, so the
+scalar form is the in-bounds implementation and the vector form belongs in
+`ndarray::simd` under the W1a consumer contract — added **there** and consumed
+here, never re-implemented at this layer.
+
+Sub-word loads are byte-wise rather than `u16`/`u32` reads because a group's
+offset is `facet*16 + 4 + g*group_bytes`, which is not guaranteed aligned for
+the 3-byte reading, and an unaligned wide read is UB in Rust even where the
+hardware tolerates it.
+
+### Why this shape, measured
+
+`valhalla-lab/reproducers/R8_EntropyBoundary.java` (merged PR #24) measured the
+alternatives on identical bytes with checksum-identical results. Under a
+*random* classid distribution, a generic sweep that re-derives the carving per
+row collapses, while both a materialised index-list partition and a mask-driven
+sweep recover ~4.8×. The mask is the lawful of the two — an index list is a
+materialised population, which the root `CLAUDE.md` forbids as internal
+currency — and it is also the cheaper: building it via
+`eq_u32_strided_to_mask` was an order of magnitude cheaper than a scalar
+partition scan, moving break-even from ~120 passes to ~10. Obeying the law is
+the fast path, not a tax on it.
+
+The control leg is equally load-bearing: under a *predictable* classid pattern
+the same measurement shows specialization buying nothing. This symbol is worth
+calling when there is entropy to remove, and not otherwise.

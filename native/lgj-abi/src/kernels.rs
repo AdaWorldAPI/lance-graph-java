@@ -406,6 +406,123 @@ pub fn masked_sum_i32(path: Path, values: &[i32], mask_words: &[u64]) -> i64 {
     }
 }
 
+/// The three readings of the V3 content-blind 12-byte facet register
+/// (`le-contract.md` §3): `6*(u8:u8)` rails, `4*(u8:u8:u8)` SPO triplets,
+/// `3*(u8:u8:u8:u8)` odoo quads. `6*2 = 4*3 = 3*4 = 12` — the SAME bytes,
+/// three groupings, and which one applies is a property of the class, never
+/// of the bytes.
+///
+/// The wire form is a caller-supplied, validated `u32` rather than a
+/// ClassView consult, following `lgj_hop`'s `decode_mode` precedent
+/// (spec §3.4): a reserved value is REJECTED, never silently defaulted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Carving {
+    /// 6 groups of 2 bytes, little-endian `u16` each.
+    Rails6x2,
+    /// 4 groups of 3 bytes, little-endian `u24` each (zero-extended).
+    Triplets4x3,
+    /// 3 groups of 4 bytes, little-endian `u32` each (zero-extended).
+    Quads3x4,
+}
+
+impl Carving {
+    /// Wire `u32` -> carving. `None` for every other value, so an unknown
+    /// reading is a rejected call rather than an aliased one.
+    pub fn from_wire(v: u32) -> Option<Self> {
+        match v {
+            0 => Some(Carving::Rails6x2),
+            1 => Some(Carving::Triplets4x3),
+            2 => Some(Carving::Quads3x4),
+            _ => None,
+        }
+    }
+
+    /// Groups per register under this reading.
+    pub fn groups(self) -> usize {
+        match self {
+            Carving::Rails6x2 => 6,
+            Carving::Triplets4x3 => 4,
+            Carving::Quads3x4 => 3,
+        }
+    }
+
+    /// Bytes per group. `groups() * group_bytes() == 12`, asserted in tests.
+    pub fn group_bytes(self) -> usize {
+        match self {
+            Carving::Rails6x2 => 2,
+            Carving::Triplets4x3 => 3,
+            Carving::Quads3x4 => 4,
+        }
+    }
+}
+
+/// Sum every group of one facet's 12-byte register, over the rows selected by
+/// `mask_words`, widened to `i64`.
+///
+/// This is the mask-driven monomorphic sweep measured as R8 arm E' — the
+/// lawful counterpart to a materialised index list. Work is proportional to
+/// the mask's POPCOUNT, not to `n_rows`, so an empty mask is O(words) and the
+/// anti-JNI rule (§6: bulk or lifecycle) is satisfied by construction.
+///
+/// # SIMD provenance, stated honestly (§8)
+///
+/// This kernel is SCALAR, and deliberately so. `ndarray::simd` has no
+/// primitive for "gather a sub-word group out of a 512-byte-strided register
+/// under a runtime grouping and widen-accumulate"; `masked_sum_i32` is
+/// contiguous `i32`, and the strided classid compare
+/// (`eq_u32_strided_to_mask`) reads ONE aligned `u32` per row, not six
+/// unaligned `u16`s. Writing raw intrinsics here would create exactly the
+/// second SIMD surface §8 exists to prevent, so the scalar form is the
+/// in-bounds implementation and the vector form is a NAMED GAP: a candidate
+/// `ndarray::simd` addition under the W1a consumer contract, to be added
+/// THERE and consumed here — never re-implemented at this layer.
+///
+/// Sub-word loads are byte-wise rather than `u16`/`u32` reads because a
+/// group's offset is `facet*16 + 4 + g*group_bytes`, which is not guaranteed
+/// aligned for the 3-byte reading — and an unaligned wide read is UB in Rust
+/// even where the hardware tolerates it.
+pub fn masked_facet_sum(
+    bytes: &[u8],
+    facet_off: usize,
+    row_stride: usize,
+    n_rows: usize,
+    carving: Carving,
+    mask_words: &[u64],
+) -> i64 {
+    let groups = carving.groups();
+    let gb = carving.group_bytes();
+    let mut acc: i64 = 0;
+    for (w, &word) in mask_words.iter().enumerate() {
+        let base_row = w * 64;
+        if base_row >= n_rows {
+            break;
+        }
+        let mut bits = word;
+        // Clamp the final partial word so a dirty tail cannot index past the
+        // row count — the same guard `masked_sum_i32` applies, for the same
+        // reason (mask tails are cleared on write, but a kernel that only
+        // works on well-formed input is a latent bug, not a contract).
+        let valid = n_rows - base_row;
+        if valid < 64 {
+            bits &= (1u64 << valid) - 1;
+        }
+        while bits != 0 {
+            let row = base_row + bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let reg = row * row_stride + facet_off + 4; // +4: past the classid
+            for g in 0..groups {
+                let o = reg + g * gb;
+                let mut v: u32 = 0;
+                for k in 0..gb {
+                    v |= (bytes[o + k] as u32) << (8 * k);
+                }
+                acc = acc.wrapping_add(v as i64);
+            }
+        }
+    }
+    acc
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,5 +782,169 @@ mod tests {
         // both ndarray call sites above.
         let scalar: Vec<u64> = a.iter().zip(b.iter()).map(|(&x, &y)| x & !y).collect();
         assert_eq!(via_fn, scalar);
+    }
+
+    // ── masked_facet_sum (ABI minor 5, docs/abi.md §14) ──
+
+    /// The three readings must partition the SAME 12 bytes: 6*2 = 4*3 = 3*4.
+    /// A carving whose groups*group_bytes != 12 would silently read past its
+    /// register into the NEXT facet's classid, which is a corruption that
+    /// still returns a plausible number.
+    #[test]
+    fn every_carving_covers_exactly_the_twelve_byte_register() {
+        for c in [Carving::Rails6x2, Carving::Triplets4x3, Carving::Quads3x4] {
+            assert_eq!(
+                c.groups() * c.group_bytes(),
+                12,
+                "{c:?} does not cover 12 B"
+            );
+        }
+    }
+
+    /// A reserved wire value must be REJECTED, never aliased onto a valid
+    /// reading. `from_wire` is the only place that decision is made.
+    #[test]
+    fn unknown_carving_wire_values_are_rejected_not_defaulted() {
+        assert_eq!(Carving::from_wire(0), Some(Carving::Rails6x2));
+        assert_eq!(Carving::from_wire(1), Some(Carving::Triplets4x3));
+        assert_eq!(Carving::from_wire(2), Some(Carving::Quads3x4));
+        for v in [3u32, 4, 16, u32::MAX] {
+            assert_eq!(Carving::from_wire(v), None, "wire {v} must not decode");
+        }
+    }
+
+    /// Build one 2-row store-shaped buffer whose registers hold known bytes,
+    /// so every carving's expected sum is computable BY HAND rather than by
+    /// re-running the implementation.
+    fn two_row_fixture() -> Vec<u8> {
+        let stride = 512usize;
+        let mut b = vec![0u8; 2 * stride];
+        // facet 0's register of row 0: bytes 1..=12 ; row 1: bytes 101..=112
+        for k in 0..12 {
+            b[4 + k] = (k + 1) as u8;
+            b[stride + 4 + k] = (101 + k) as u8;
+        }
+        // A poison byte in facet 1's classid of row 0. A carving that
+        // over-reads its 12-byte register walks straight into it.
+        b[16] = 0xFF;
+        b[17] = 0xFF;
+        b[18] = 0xFF;
+        b[19] = 0xFF;
+        b
+    }
+
+    /// Each reading of row 0's register {1..12}, computed by hand:
+    ///   rails    u16 LE: 0x0201 + 0x0403 + 0x0605 + 0x0807 + 0x0A09 + 0x0C0B
+    ///   triplets u24 LE: 0x030201 + 0x060504 + 0x090807 + 0x0C0B0A
+    ///   quads    u32 LE: 0x04030201 + 0x08070605 + 0x0C0B0A09
+    #[test]
+    fn each_carving_reads_the_same_bytes_differently_and_none_over_reads() {
+        let b = two_row_fixture();
+        let only_row0 = vec![0b01u64];
+
+        let rails = 0x0201 + 0x0403 + 0x0605 + 0x0807 + 0x0A09 + 0x0C0Bi64;
+        let trips = 0x030201 + 0x060504 + 0x090807 + 0x0C0B0Ai64;
+        let quads = 0x04030201 + 0x08070605 + 0x0C0B0A09i64;
+
+        assert_eq!(
+            masked_facet_sum(&b, 0, 512, 2, Carving::Rails6x2, &only_row0),
+            rails
+        );
+        assert_eq!(
+            masked_facet_sum(&b, 0, 512, 2, Carving::Triplets4x3, &only_row0),
+            trips
+        );
+        assert_eq!(
+            masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &only_row0),
+            quads
+        );
+
+        // The three readings must genuinely DIFFER on this fixture, or the
+        // three assertions above would all pass for an implementation that
+        // ignored `carving` entirely.
+        assert!(rails != trips && trips != quads && rails != quads);
+
+        // None of them may have touched facet 1's 0xFFFFFFFF poison: any sum
+        // that did would exceed the largest legal quads reading by a wide
+        // margin (the poison alone is 4 294 967 295).
+        for c in [Carving::Rails6x2, Carving::Triplets4x3, Carving::Quads3x4] {
+            assert!(
+                masked_facet_sum(&b, 0, 512, 2, c, &only_row0) < 0xFFFF_FFFF,
+                "{c:?} read past its 12-byte register into the next facet"
+            );
+        }
+    }
+
+    /// The mask must SELECT: an empty mask sums nothing, each single-row mask
+    /// gives that row's own value, and both-set equals their sum. Without the
+    /// distinct per-row content this would pass for a kernel that ignored the
+    /// mask and always summed every row.
+    #[test]
+    fn the_mask_selects_rows_rather_than_being_decoration() {
+        let b = two_row_fixture();
+        let f = |m: u64| masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[m]);
+        let (r0, r1) = (f(0b01), f(0b10));
+        assert_eq!(f(0b00), 0, "an empty mask must sum nothing");
+        assert_ne!(r0, r1, "the two rows must carry different content");
+        assert_eq!(f(0b11), r0 + r1, "both-set must equal the sum of the parts");
+    }
+
+    /// A dirty tail past `n_rows` must not be read. The kernel clamps the
+    /// final partial word for the same reason `masked_sum_i32` does: a kernel
+    /// that is only correct on well-formed input is a latent bug, not a
+    /// contract. Bit 2 here addresses a row that does not exist; the buffer is
+    /// only 2 rows long, so an unclamped kernel would index out of bounds and
+    /// panic rather than merely return a wrong number.
+    #[test]
+    fn a_dirty_tail_bit_past_n_rows_is_ignored() {
+        let b = two_row_fixture();
+        let clean = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b011]);
+        let dirty = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b111]);
+        assert_eq!(clean, dirty, "a bit past n_rows must contribute nothing");
+    }
+
+    /// Work must scale with POPCOUNT, not n_rows — the §6 bulk rule's real
+    /// content. An empty mask over a large store must not touch the bytes at
+    /// all, which is observable here because the buffer is deliberately too
+    /// SHORT for the row count claimed: any kernel that walked ROWS rather
+    /// than set bits would index out of bounds and panic.
+    ///
+    /// Verified by disable-run: replacing the per-word `bits` with
+    /// `u64::MAX` (i.e. summing every row instead of the selected ones) makes
+    /// this test panic. It does NOT, however, exercise the `base_row >=
+    /// n_rows` early break — with all-zero words the inner loop never runs
+    /// either way. That guard has its own test below; this comment records
+    /// the distinction because the first version of this test claimed to
+    /// cover both and the disable-run proved it did not.
+    #[test]
+    fn an_empty_mask_never_touches_the_buffer() {
+        let b = vec![0u8; 512]; // one row of storage...
+        let words = vec![0u64; 16]; // ...but a mask sized for 1024 rows
+        assert_eq!(
+            masked_facet_sum(&b, 0, 512, 1024, Carving::Rails6x2, &words),
+            0
+        );
+    }
+
+    /// The `base_row >= n_rows` early break is what stops `n_rows - base_row`
+    /// from UNDERFLOWING for a word that begins entirely past the row count.
+    /// A caller can hand over a mask buffer longer than `n_rows` requires
+    /// (`lgj_mask_create` rounds up to whole words, and nothing forbids a
+    /// larger arena segment), so this is a reachable input, not a contrived
+    /// one.
+    ///
+    /// `n_rows = 64` puts word 0 fully in range and word 2 fully out
+    /// (`base_row = 128`). Without the break that computes `64 - 128` on
+    /// `usize`, which panics in debug and wraps to a colossal `valid` in
+    /// release — the shift below it would then be UB-adjacent nonsense.
+    /// The set bit in word 2 is what makes the case reachable at all.
+    #[test]
+    fn a_word_beginning_past_n_rows_does_not_underflow_the_clamp() {
+        let b = vec![0u8; 512]; // exactly one row of storage
+        let words = vec![0u64, 0, 0b1]; // word 2 starts at row 128 > n_rows
+        assert_eq!(
+            masked_facet_sum(&b, 0, 512, 64, Carving::Quads3x4, &words),
+            0
+        );
     }
 }

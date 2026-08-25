@@ -95,6 +95,13 @@ public final class Downcalls {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
                     ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
 
+    // The mask-native sweep (docs/abi.md §14, ABI minor 5). The execution half of a mask path
+    // whose build half (OP_EQ_CLASSID, below) has existed since minor 2.
+    private static final MethodHandle REDUCE_FACET_SUM = mh("lgj_reduce_facet_sum",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                    ValueLayout.ADDRESS));
+
     // Row store (docs/abi.md §11, ABI minor 2). Argument widths follow §11 argument-for-argument,
     // same u32/i32-are-both-JAVA_INT rule as above.
     private static final MethodHandle ROWSTORE_OPEN = mh("lgj_rowstore_open",
@@ -352,6 +359,25 @@ public final class Downcalls {
             throw wrap("lgj_reduce_sum_i32", t);
         }
         Status.check("lgj_reduce_sum_i32", st);
+        return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
+     *
+     * <p>Work is proportional to the mask's popcount, not the row count — this is a bulk op in
+     * the §6 sense, and an empty mask costs O(mask words).
+     */
+    public static long reduceFacetSum(long res, int facet, int carving, long mask,
+            MemorySegment outSum) {
+        crossed();
+        int st;
+        try {
+            st = (int) REDUCE_FACET_SUM.invokeExact(res, facet, carving, mask, outSum);
+        } catch (Throwable t) {
+            throw wrap("lgj_reduce_facet_sum", t);
+        }
+        Status.check("lgj_reduce_facet_sum", st);
         return outSum.get(ValueLayout.JAVA_LONG, 0);
     }
 

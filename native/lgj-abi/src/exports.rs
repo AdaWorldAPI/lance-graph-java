@@ -862,6 +862,97 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
     })
 }
 
+/// Sum one facet's 12-byte register, under a caller-supplied CARVING, over
+/// the rows a mask selects — the mask-native sweep (ABI minor >= 5,
+/// `docs/abi.md` §14).
+///
+/// This is the execution half of the mask path whose BUILD half
+/// ([`lgj_op_eq_classid`]) has existed since minor 2. Together they are the
+/// shape measured as R8 arm E': classid -> mask (one bulk call, via
+/// `ndarray::simd::eq_u32_strided_to_mask`) -> homogeneous sweep, with the
+/// population never leaving mask form. It is the lawful counterpart to
+/// materialising per-carving row-index lists, which the mask-native law
+/// forbids as internal currency (root `CLAUDE.md`).
+///
+/// `carving` is a caller-supplied, VALIDATED wire value — `0` rails
+/// (`6*(u8:u8)`), `1` triplets (`4*(u8:u8:u8)`), `2` quads
+/// (`3*(u8:u8:u8:u8)`). Anything else is `LGJ_ERR_INVALID_ARGUMENT`, never a
+/// silent default. This follows [`lgj_hop`]'s `decode_mode` precedent
+/// (spec §3.4) rather than `edge_participation`'s ClassView consult: the
+/// register's reading is what the CALLER resolved from the ClassView before
+/// the crossing — resolving it again per row inside the sweep would put the
+/// question back in the hot loop, which is precisely what this symbol exists
+/// to take out of it.
+///
+/// Work is proportional to the mask's popcount, so an empty mask costs
+/// O(words) and §6's bulk-or-lifecycle rule holds by construction.
+///
+/// # Safety
+///
+/// A null `out_sum` is *handled*, not UB: `NULL_ARGUMENT`. Otherwise
+/// `out_sum` must point at one writable, 8-byte-aligned `i64`; it is written
+/// only on `LGJ_OK`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_reduce_facet_sum(
+    res: u64,
+    facet: u32,
+    carving: u32,
+    mask: u64,
+    out_sum: *mut i64,
+) -> i32 {
+    guard(|| {
+        if out_sum.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let carving = match kernels::Carving::from_wire(carving) {
+            Some(c) => c,
+            None => return LGJ_ERR_UNSUPPORTED_CARVING,
+        };
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        if facet >= crate::rowstore::ROW_FACETS {
+            return LGJ_ERR_INVALID_LANE;
+        }
+        let (maskr, parent) = match registry::resolve_mask_with_parent(mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        // A mask over a different resource is a different population wearing
+        // the right size. The mask algebra already rejects that pairing with
+        // MASK_LENGTH_MISMATCH (see `lgj_mask_and`'s parent check) rather
+        // than minting a parent-specific code, so this matches it instead of
+        // inventing a second spelling for the same rejection.
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        if maskr.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let sum = kernels::masked_facet_sum(
+            store.as_bytes(),
+            facet as usize * crate::rowstore::FACET_BYTES as usize,
+            crate::rowstore::ROW_BYTES as usize,
+            store_entry.n_rows as usize,
+            carving,
+            &g.words,
+        );
+        drop(g);
+        // SAFETY: non-null, checked above; written only on success.
+        unsafe { *out_sum = sum };
+        LGJ_OK
+    })
+}
+
 /// One crossing: for every row, which of its 32 facets carry `needle` as
 /// classid — one `u32` bitset per row, written into the **caller's** buffer
 /// (a Java-arena segment of `n_rows` ints; zero-copy out, nothing

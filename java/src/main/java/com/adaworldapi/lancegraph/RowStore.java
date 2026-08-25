@@ -125,6 +125,33 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * Sum one facet's 12-byte register, read as {@code carving}, over the rows {@code selection}
+     * selects — the mask-native sweep (abi.md §14, ABI minor 5).
+     *
+     * <p>This is the execution half of the mask path whose build half is
+     * {@link #maskOfFacetClass}. Together they are the whole shape: classid becomes a mask once,
+     * then the sweep runs over a population that no longer carries the classid question. The
+     * population never leaves mask form — there is no row-id list, no index array, no per-row Java
+     * object anywhere on this path.
+     *
+     * <p>One native crossing, and its work is proportional to the mask's <em>popcount</em> rather
+     * than to the row count, so a narrow selection over a large store is cheap and an empty one
+     * costs only the mask scan.
+     *
+     * @param facet     which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param carving   which reading of the 12-byte register applies, resolved by the caller from
+     *                  the class's {@code ClassView} before the crossing
+     * @param selection the rows to sum over; must belong to this store
+     */
+    public long facetSum(FacetId facet, Carving carving, Mask selection) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        java.util.Objects.requireNonNull(carving, "carving");
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("facetSum()");
+        return Engine.facetSum(handle, facet.index(), carving.wire(), selection.handle());
+    }
+
+    /**
      * For every row, which of its 32 facets carry {@code classId} as their classid — one native
      * crossing ({@code lgj_row_facet_match}, abi.md §11).
      *

@@ -40,6 +40,17 @@ public enum Status {
     UNSUPPORTED_DECODE_MODE(-14, "lgj_hop was called with a decode_mode this build does not yet"
             + " implement"),
     /**
+     * {@code lgj_reduce_facet_sum} was given a {@code carving} outside {@code 0..=2}. The three
+     * legal readings of the same 12-byte register are {@code 0} rails, {@code 1} triplets,
+     * {@code 2} quads (docs/abi.md §14). Checked before the store or mask are resolved, so
+     * {@code out_sum} is provably untouched on this status.
+     *
+     * <p>Deliberately distinct from {@link #UNSUPPORTED_DECODE_MODE}: that names the edge-decode
+     * axis, and an unknown register reading must never alias a known one.
+     */
+    UNSUPPORTED_CARVING(-15, "lgj_reduce_facet_sum was called with a carving outside 0..=2"
+            + " (0=rails 6x2, 1=triplets 4x3, 2=quads 3x4)"),
+    /**
      * Not tabulated in docs/abi.md §3 (reported as a doc gap) but required by §9: a panic is caught
      * at the boundary and becomes a negative status rather than unwinding into JVM frames, which
      * would be undefined behaviour. This is that status.
