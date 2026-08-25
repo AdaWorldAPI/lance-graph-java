@@ -14,6 +14,7 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R2](#r2) | Array flattening stops at an 8-byte payload | **HotSpot / Valhalla** |
 | [R3](#r3) | The densest layout has no supported spelling, and generics discard it | **Valhalla (language + libraries)** |
 | [R4](#r4) | Sub-group carving does not dodge R2's cliff — and nesting *inflates* the payload | **HotSpot / Valhalla** |
+| [R8](#r8) | Five arms: bulk FFI is free, per-op FFI is 31x, and the LAWFUL mask shape wins | **measured, JDK 27 EA + rustc 1.97.1 @ v4** |
 | [R7](#r7) | 10^9 projected operations allocate 960 B TOTAL — zero-copy at the endgame scale | **measured, JDK 27 EA** |
 | [R6](#r6) | The cliff is JEP 401 by design (atomicity), not a version gap or a flag | **HotSpot / JEP 401 spec** |
 | [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
@@ -222,11 +223,15 @@ would have shipped a false positive.
 **Question.** The classid's ClassView chooses which carving applies. Can either
 mechanism express a layout selected by a runtime value?
 
-**Answer: neither can, so a dispatch helper is structurally required.** A Panama
-`VarHandle` is bound to one path at construction and cannot re-derive it from a runtime
-`int`; a Valhalla value class is a static type and cannot be selected by one either. The
-carving choice is a Java-side `switch` in every possible design — the question is only
-what it switches *over*.
+**Answer (tightened on operator review, 2026-08-25 — the first wording, "neither Panama
+nor Valhalla can select a layout by runtime classid", was broader than the measured
+fact):** runtime classid requires **descriptor/accessor dispatch**. Panama absolutely can
+*construct or choose* a `MemoryLayout` at runtime after seeing a classid; what it cannot
+do is make one already-bound `VarHandle` reinterpret its path per row. A Valhalla value
+class is a static type and cannot be selected by a runtime `int` at all. So layout
+selection cannot live *inside* one statically bound value type or one already-bound
+`VarHandle` — the carving choice is a Java-side dispatch in every possible design, and
+the question is only what it dispatches over (the ClassView schema preset).
 
 **Measured, 65,536 rows** (`R5-observed.txt`):
 
@@ -310,7 +315,7 @@ the 12-byte register straight out of the `MemorySegment`. No element type ever e
 |---|---|
 | operations | 1,000,000,000 group projections |
 | allocated | **960 B total** — byte-identical across runs → 0.00000096 B/op |
-| wall | 2.3–2.7 s → 369–439 M ops/s single-threaded, 2.3–2.7 ns/op |
+| wall | NOT pinned — the three pinned runs span 1.76–3.48 s (287–567 M ops/s), a 2× spread |
 
 The decisive comparison is against R5's own numbers: 65,536 ops allocated 800 B.
 Operations grew **15,000×**; allocation grew 160 B. The bytes are fixed scaffolding
@@ -318,9 +323,90 @@ Operations grew **15,000×**; allocation grew 160 B. The bytes are fixed scaffol
 shape costs 32–104 B/row — at a billion rows, 32–104 **GB** of churn, decided per run by
 escape analysis.
 
-2.3 ns/op is memory-latency scale, not FFI scale, because there is no FFI in the loop and
-no object either: the segment is the substrate, and the operation compiles to a
-bounds-checked load plus shifts. This is what "Java holds a zero-copy pointer" actually
+The per-op time is hot-cache load-and-shift scale (the working set is ~1 MiB,
+cache-resident after warm-up — an earlier wording said "memory-latency scale", corrected on
+operator review 2026-08-25, same pass that caught the observed-file's prose quoting a
+different run set than its own pinned runs). What is load-bearing survives the correction:
+there is no FFI in the loop and no object either — the segment is the substrate, and the
+operation compiles to a bounds-checked load plus shifts. This is what "Java holds a zero-copy pointer" actually
 looks like — the pointer is the `MemorySegment` + offset arithmetic, authority over the
 bytes stays with the substrate, and Java's own layout machinery never engages because it
 is never handed a type to lay out.
+
+## R8 — the entropy boundary: five arms, one checksum (`R8_EntropyBoundary.java`)
+
+R7 proved Java projection allocates nothing, and deliberately proved **nothing** about
+Java-vs-Rust speed — its loop contains no FFI and no Rust. R8 measures that, symmetrically:
+same 1 MiB of bytes (filled by the *same* native `r8_fill` for every arm), same classid
+distribution, same 10⁹-op accounting, same checksum. **Checksum equality across arms is the
+proof that every arm did the same work on the same bytes**, and it holds — including
+against a standalone Rust process with no JVM at all.
+
+| arm | what it is |
+|---|---|
+| A | Java `MemorySegment` + carving switch (R7's loop) |
+| B | one bulk FFI call → generic Rust sweep (Rust re-derives the carving per row) |
+| C | one FFI crossing **per projection** — the anti-JNI shape |
+| D | Java resolves the preset → monomorphic Rust kernels per carving subpopulation |
+| E | the **lawful** shape: per-carving bitmasks built by `ndarray::simd`, swept by mask bits |
+
+All Rust arms are built `-Ctarget-cpu=x86-64-v4` (the host has `avx512f/bw/dq/vl/vbmi/ifma`;
+ndarray's own `.cargo/config.toml` pins v3, and this crate sits outside it, so v4 is set
+explicitly — that is what makes `simd.rs` dispatch to the `simd_avx512` arm). Built with
+`CARGO_PROFILE_RELEASE_DEBUG=0`.
+
+### Part 1 — period-4 classid (`r & 3`): the control
+
+| arm | M ops/s |
+|---|---|
+| B bulk FFI → generic Rust | 2417–2479 — **indistinguishable from the standalone Rust process** (2292–2823) |
+| D monomorphic kernels | 2314–2337 — **D > B is falsified here** |
+| A Java in-process | 266–281 (~9× behind Rust for the same loop) |
+| C FFI per projection | 74–81 → ~12.9 ns/op, **~31× slower than B** |
+
+Two results worth keeping: **one bulk FFI crossing costs nothing measurable**, and
+specialization buys nothing when the pattern is already branch-predictable — the predictor
+has specialized for you. C is the anti-JNI rule with a number on it.
+
+### Part 2 — random classid: where dispatch actually costs
+
+| arm | M ops/s | vs B' |
+|---|---|---|
+| A' Java | 189–345 | — |
+| B' generic Rust, per-row match | 834–841 | 1× (a 2.9× collapse from part 1) |
+| D' Java partitions into index lists → monomorphic kernels | 3959–4014 | **4.8×** |
+| E' bitmasks via `ndarray::simd` → mask-bit sweep | 3892–3908 | **4.65×** |
+
+The split architecture wins ~4.7× — the selector layer creates the information **once**,
+before the sweep, where the generic loop re-derives it per row and eats the mispredict
+every time.
+
+### The lawful shape is not the compromise
+
+E' exists because D' cheats: an index list is a *materialized population*, which this
+workspace's mask-native law forbids as internal currency. E' was expected to pay for
+obeying the law. It does not — it costs 2–3% in the sweep and wins decisively on the step
+that differentiates them:
+
+| building the population | cost |
+|---|---|
+| Java scalar scan over the classid column → index lists | 41.01 ms |
+| `ndarray::simd::eq_u32_strided_to_mask`, one bulk call → masks | **2.49 ms** (16.5× faster) |
+
+And that changes the amortization terms, which are the whole game:
+
+- B' 0.3131 ms/pass, E' 0.0671 ms/pass → saving 0.2460 ms/pass
+- break-even for the 2.49 ms mask build: **~10 passes**
+- break-even for the 41.01 ms Java scan: ~167 passes
+
+**The lawful currency is 16× cheaper to create and pays for itself 16× sooner. Obeying the
+law is the fast path, not a tax on it.**
+
+### What this does and does not show
+
+Not "Java is faster than Rust" — the winning kernels *are* Rust, and so is the mask builder.
+A Rust-alone program that built masks first would match E'. The win is specialization
+**placement**, not language. What is architectural: the knowledge lives in the
+classid/ClassView layer, the population stays a mask, the sweep is one bulk call over it.
+And part 1 is the control that keeps part 2 honest — when dispatch is predictable,
+partitioning buys nothing.

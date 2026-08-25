@@ -35,9 +35,11 @@ public class R5_ClassidHasNoStaticSpelling {
     }
 
     // ── (1) What Panama can express ────────────────────────────────────────────────────────
-    // A MemoryLayout/VarHandle is built once and bound to ONE path. It cannot re-derive its
-    // own path from a runtime int. Three carvings therefore need three handles chosen by a
-    // Java-side switch -- the dispatch lives in Java either way, never in the layout.
+    // Precision matters here (wording tightened on operator review, 2026-08-25): Panama CAN
+    // construct or choose a MemoryLayout at runtime after seeing a classid. What it cannot do
+    // is make one ALREADY-BOUND VarHandle reinterpret its path per row. So layout selection
+    // cannot live inside one bound handle or one static value type -- it lives in
+    // descriptor/accessor dispatch, and the dispatch is Java-side in every possible design.
     static final MemoryLayout FACET = MemoryLayout.structLayout(
             ValueLayout.JAVA_INT.withName("classid"),
             MemoryLayout.sequenceLayout(12, ValueLayout.JAVA_BYTE).withName("register"));
@@ -109,8 +111,8 @@ public class R5_ClassidHasNoStaticSpelling {
             System.out.println("== (1) what each mechanism can express ==");
             System.out.println("Panama VarHandle bound to a fixed path : classid of row 0 = "
                     + (int) CLASSID.get(seg, 0L));
-            System.out.println("  a VarHandle cannot re-derive its path from a runtime classid;");
-            System.out.println("  the carving choice is a Java-side switch in every design.");
+            System.out.println("  an already-bound VarHandle cannot re-derive its path per row;");
+            System.out.println("  runtime classid therefore requires descriptor/accessor dispatch.");
             System.out.println("Valhalla value class is a static type   : "
                     + "cannot be selected by a runtime int either.");
 
