@@ -488,3 +488,50 @@ layout was already data at every boundary except the store's constructor.**
 **Honest scope:** a whole-row consumer inverts the preference — AoS is contiguous for "all
 32 facets of one row", SoA scattered. The schema is a per-workload choice, which is exactly
 why it belongs in data rather than in code.
+
+## R12 — Ghidra's P-code vocabulary against the cliff
+
+**Question.** The `r2il-machine-semantic-contract-v1` plan's W5 puts a
+lance-graph-java facade under Ghidra: `PcodeOp` / `Instruction` / `Varnode`
+as lazy views over handles + masks. Before designing it, one measurement
+decides its whole shape — are Ghidra's own P-code types flattenable?
+
+**Method.** Field shapes TRANSCRIBED from Ghidra at cited paths, not
+invented (`Varnode.java:51-54`, `PcodeOp.java:102-105`), then run through
+R2/R4's harness on the JEP 401 EA build with `-XX:+PrintFlatArrayLayout`
+so the VM reports its own element sizes rather than the program asserting
+them.
+
+**Measured.**
+
+| shape | nonAtomic | atomic | VM element size |
+|---|---|---|---|
+| `VarnodePayload(int,int,long)` — 16 B | false | false | — |
+| `PcodeOpPayload(int,long)` — 12 B | false | false | — |
+| `VarnodeNarrow` — 8 B packed content | **true** | **true** | 8 (`NULL_FREE_ATOMIC_FLAT`) |
+| `VarnodeRef(long)` | **true** | **true** | 8 (`NULL_FREE_NON_ATOMIC_FLAT`) |
+| `PcodeOpRef(long)` | **true** | **true** | 8 |
+| `InstructionRef(long)` | **true** | **true** | 8 |
+
+The two `*Payload` rows are the **optimistic lower bound** for Ghidra's
+real types — every reference deleted. The real `Varnode` additionally holds
+an `Address`; the real `PcodeOp` holds a `SequenceNumber`, a `Varnode[]`
+and a `Varnode`, so **a 2-input `PcodeOp` is five heap objects**.
+
+**Verdict: the facade must ADDRESS the vocabulary, not CARRY it** — which
+needs nothing new. It is the same result `LaneId` / `Ordinal` / `MaskId`
+already rely on, and the same reason `RowRange` (16 B) does not flatten.
+
+**The finding the plan did not anticipate.** `VarnodeNarrow` — `spaceId:u8`,
+`size:u8`, 48-bit offset — **also flattens**. So 8 bytes is enough to carry
+a varnode's real CONTENT, not merely a pointer to it. That is a live design
+option for W5 (a content-bearing descriptor, no lane round-trip to read a
+varnode's space or size) and it is bounded by exactly one condition: a
+48-bit offset. Whether that suffices is a W0/W1 question about the address
+space, not a Valhalla one — recorded here so the option is not lost, NOT
+proposed as the design.
+
+Note the layout kinds differ: the single-`long` refs are `NON_ATOMIC_FLAT`,
+the multi-field `VarnodeNarrow` is `ATOMIC_FLAT`. Both flatten at element
+size 8; only the tearing guarantee differs.
+
