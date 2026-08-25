@@ -62,7 +62,8 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 24 symbols (minor 7; the "14" this line carried
+- It is **small** — currently 24 symbols (unchanged at minor 8, which adds
+  manifest FIELDS and no symbol; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
   minor 2's three additions are argued in §11, minor 3's one addition in
@@ -79,7 +80,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 7    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 8    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -97,6 +98,18 @@ loads") has a second direction the promise itself does not cover: a **newer Java
 against an older `.so`**. That case is governed by `Abi.requireMinor(N)`, whose
 contract is to fail before the feature's downcall is attempted, naming the
 minor.
+
+The **load gate itself** requires only the manifest's BASE PREFIX — everything
+through `build_profile`, 104 bytes, the field set minor 1 defined
+(`Layouts.MANIFEST_BASE_BYTES`). Requiring the full layout this Java build knows
+about would make every future manifest field a hard incompatibility with every
+older artifact, in flat contradiction of the promise above. It was written that
+way until minor 8 grew the struct and the contradiction became reachable;
+measured, restoring the full-layout gate makes all four historical libraries
+fail to load outright. Fields past the base prefix are read only when the
+library's own `size_of_manifest` covers them AND its minor is high enough — both
+conditions, because a manifest that claims a minor it is too short to carry is a
+broken artifact and reading it would produce plausible garbage.
 
 **That guard was defeated by eager class initialization until 2026-08-25.**
 Every downcall handle was resolved in `Downcalls.<clinit>`, so a single absent
@@ -132,6 +145,11 @@ required — a gate that rejected everything would satisfy a rejection-only test
 - **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)
   and `lgj_hop` (one-hop graph traversal, gated by the
   `lance-graph-contract` `ClassView`/`FieldMask` LAW — §13).
+- **Minor 8** (2026-08-25) — the manifest carries the register groupings as
+  DATA (§17): `carving_count` + `carvings`. **No new symbol** and no new
+  status; it is the first growth of the manifest STRUCT, which is why it is
+  also the change that made Java's load gate require only the base 104-byte
+  prefix rather than the full layout.
 - **Minor 7** (2026-08-25) — `lgj_row_layout_probe` (§16): the whole-row
   alignment answer, all 32 facets in one crossing. No new status.
 - **Minor 6** (2026-08-25) — `lgj_reduce_facet_sum_resolved` (§15): the same
@@ -299,6 +317,10 @@ pub struct LgjAbiManifest {
     pub simd_backend:           u32,   // LgjSimdBackend
     pub simd_backend_name:      [u8; 32],  // NUL-terminated, human-readable
     pub build_profile:          [u8; 16],  // "release" | "debug"
+    // ── minor 8; everything above is the 104-byte BASE PREFIX the load gate
+    //    requires, and all a pre-minor-8 artifact carries (§17) ──
+    pub carving_count:          u32,
+    pub carvings:               [u16; 8],  // (groups << 8) | group_bytes, wire order
 }
 ```
 
@@ -796,6 +818,13 @@ bytes:
 | `1` | SPO triplets | `4 × (u8:u8:u8)`, LE `u24` zero-extended |
 | `2` | odoo quads | `3 × (u8:u8:u8:u8)`, LE `u32` zero-extended |
 
+**Since minor 8 this table is DESCRIPTIVE, not normative** — see §17. The
+encoding is derived from the contract's `CascadeShape::ROTATIONS` (group count,
+descending) and SERVED in the manifest; a reader that needs the authoritative
+answer reads `carvings`, and this row set is what that derivation currently
+produces. Before minor 8 it was one of three hand-written copies, which is the
+problem §17 exists to remove.
+
 Anything else is `LGJ_ERR_UNSUPPORTED_CARVING` (`-15`), checked **first**,
 before the store or mask are resolved, so `out_sum` is provably untouched on a
 rejected call. An unknown reading must never alias a known one.
@@ -1067,3 +1096,81 @@ which the address space does not permit.
 And the table captures **layout only**. Meaning, RBAC, ontology category and
 render template are separate resolutions off the same address; none belong in it
 and none can be inferred from it.
+
+---
+
+## 17. The register groupings, served as data (ABI minor ≥ 8)
+
+The manifest grew two fields. No symbol, no status, no call:
+
+```
+u32  carving_count      // populated entries in `carvings`
+u16  carvings[8]        // entry w = wire value w, packed (groups << 8) | group_bytes
+```
+
+Entries past `carving_count` are zero, so a reader that trusts the count and one
+that scans for a terminator agree. The struct is 128 bytes (108 + 16 = 124,
+rounded to its 8-byte alignment).
+
+### Why this exists
+
+The wire encoding of §14's `carving` parameter was hand-written in **three**
+places — a Rust `match`, a Java `enum`, and §14's own table — with nothing that
+would fail if they disagreed. Three copies of one fact is not a documentation
+problem; it is a correctness problem with no falsifier, and the specific failure
+it invites is silent: a grouping added or reordered upstream re-maps one copy and
+not the others, and a sweep then reads the same 12 bytes under the wrong reading
+and returns a plausible number.
+
+So the fact now has one source and two derivations:
+
+1. **The contract owns the SET.** `lance_graph_contract::facet::CascadeShape::ROTATIONS`.
+2. **This ABI derives the ENCODING from it** — group count, descending
+   (`kernels::CARVING_ORDER`, a `const`). A variant REORDER upstream cannot
+   re-map the wire, because position is computed from `groups()` rather than
+   from declaration order. A variant ADDED upstream appears automatically, in
+   its group-count place, with no edit.
+3. **The manifest SERVES the result**, and Java reads it rather than restating
+   it.
+
+`CARVING_ORDER` is deliberately a `const` and not a `LazyLock`: the manifest is
+const-initialised, and a runtime-initialised order could not be reached from it.
+
+### Why the manifest rather than a new symbol
+
+The manifest already exists so Java can discover the ABI's SHAPE instead of
+declaring it — sizes, alignments, pointer width, byte order. A wire encoding is
+exactly such a shape. Serving it here costs no symbol, no crossing at call time,
+and no lifetime question (a fixed `u16[8]` rather than a pointer), and it arrives
+on the same read Java already performs at load.
+
+### What is still declared on the Java side, and why that is correct
+
+`Carving`'s ARITY stays declared: `RAILS_6X2` named anything other than `6 × 2`
+would be a lie in its own name. What is no longer declared is its wire value —
+that is looked up in the served table by arity. Meaning is declared; encoding is
+served.
+
+### The falsifiers
+
+- Rust, `the_manifest_serves_exactly_the_derived_carving_order` — the served
+  bytes against the derived order, including that each entry decodes back to its
+  own shape, so a table that is internally consistent but wrongly ORDERED fails.
+- Rust, `the_derived_order_is_strictly_descending_by_group_count` — a future
+  variant that TIED on group count would make the sort order-dependent again,
+  which is the property the derivation exists to remove.
+- Java, `CarvingTableTest` — membership **both** ways. A grouping served that
+  Java cannot name (an addition upstream) and a grouping Java names that is not
+  served (a removal, or a locally invented constant). Neither direction is
+  redundant: without them, either mismatch would surface only when a particular
+  row happened to resolve to it — on someone's data, not in the build.
+
+Verified red-then-green: swapping the packed axes fails the Rust serve test;
+reversing the sort direction fails the order test and two others; changing one
+Java constant's arity fails both membership directions.
+
+A library predating minor 8 serves no table. Java falls back to the encoding
+those artifacts actually used, in one clearly-named compatibility shim
+(`CarvingTable.PRE_MINOR_8`) rather than back in the enum — so exactly one place
+in the build carries a literal encoding, and its name says it is history rather
+than the current answer.
