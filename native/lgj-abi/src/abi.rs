@@ -58,7 +58,7 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 ///
 /// `docs/abi.md` §13). Purely additive: a minor-3 Java loads fine and
 /// simply cannot call either new symbol.
-pub const LGJ_ABI_MINOR: u32 = 5;
+pub const LGJ_ABI_MINOR: u32 = 6;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -131,10 +131,21 @@ pub const LGJ_ERR_UNSUPPORTED_CARVING: i32 = -15;
 /// wrapped value — `out_sum` is NOT written. ABI minor 5.
 pub const LGJ_ERR_SUM_OVERFLOW: i32 = -16;
 
+/// `lgj_reduce_facet_sum_resolved`'s population does not resolve to a single
+/// register grouping.
+///
+/// Three causes, one fact: the population spans classes whose `ClassView`s carve
+/// the register differently; a row's classid has no `ClassView` answer; or the
+/// population is EMPTY (zero rows carry zero classes, and reporting the
+/// zero-fallback would be inventing an answer). In every case there is no one
+/// reading that is correct for these rows, so neither output is written.
+/// ABI minor 6.
+pub const LGJ_ERR_UNRESOLVED_CARVING: i32 = -17;
+
 /// A panic was caught at the membrane and converted to a status (§9).
 ///
 /// Not in `abi.md`'s table, and deliberately *outside* the allocated
-/// `-1..=-16` block so it can never be confused with a specified condition.
+/// `-1..=-17` block so it can never be confused with a specified condition.
 /// A caller seeing this has found a bug in this crate; it is reported rather
 /// than allowed to unwind into JVM frames, which would be UB.
 pub const LGJ_ERR_PANIC: i32 = -99;

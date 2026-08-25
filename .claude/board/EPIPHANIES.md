@@ -4,6 +4,93 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-THE-RESOLVER-WAS-UPSTREAM-ALL-ALONG-1
+
+**Status:** SHIPPED — ABI minor 6 + the contract accessor + the ndarray
+primitive. All three open followups closed.
+**Confidence:** High; every guard disable-verified, both directions.
+
+### The finding, again before the code
+
+`facetSumAs` was named honestly because "the fixture ClassView carries no
+carving resolver at all". That was true of the FIXTURE and false of the
+CONTRACT: `lance_graph_contract::facet::CascadeShape` has carried the three
+groupings (`G6D2` rails / `G4D3` triplets / `G3D4` quads, each `G·D = 12`), the
+full algebra, and its own sentence that the grouping is *"class-conditioned:
+`classid` selects it from the inherited schema"* all along. **The local
+`Carving` enum was a re-mint of an existing contract type** — the
+parallel-object-model anti-pattern in miniature, committed while writing a note
+about not claiming authority.
+
+What genuinely did not exist: a `ClassView` method RETURNING one. That is
+substrate-tier, so it landed upstream first per the Missing-capability STOP
+rule.
+
+Two near-misses worth recording, because both LOOKED like the answer:
+
+- `ClassView::rail_carving` returns `RailCarving` — but that is rail-path
+  geometry per axis (`InterleavedPairs` / `AxisSlab`), a different question.
+- `FacetSchema::of_classid` is classid-selected and three-way — but its third
+  reading is `Pair48` (`2 × 48-bit`), NOT the le-contract L6 quads
+  (`3 × (8:8:8:8)` SPOG, operator-RULED 2026-07-06). It answers "which payload
+  FORMAT", not "which `G·D = 12` grouping". **That divergence between the ruled
+  doc and the shipped enum is real and is left as an upstream observation, not
+  silently reconciled.**
+
+### What landed
+
+1. **contract**: `ClassView::cascade_shape(class)`, zero-fallback `G3D4`, same
+   registry-resolution pattern as its four siblings.
+2. **lgj-abi minor 6**: `lgj_reduce_facet_sum_resolved` — resolves every
+   selected row's `classid → ClassId → cascade_shape`, requires agreement, then
+   sweeps monomorphically and REPORTS the grouping back. `Carving` is now
+   `pub type Carving = CascadeShape`; only the u32 wire encoding stays local,
+   pinned BY GROUP COUNT so an upstream variant reorder cannot re-map it.
+   G11 fence widened by one module (`facet`), deliberately.
+3. **Java**: `RowStore.facetSum → FacetSum(sum, carving)`. `facetSumAs` remains
+   the deliberate reinterpretation escape hatch.
+
+**The question is asked once at the population's edge, never inside the sweep.**
+Resolution is `O(mask_words + popcount)`; the sweep carries no per-row dispatch.
+The fix for "unverified" was never "consult more often".
+
+### The fixture had to be made able to FAIL
+
+`FixtureClassView::cascade_shape` returns `class % 3` rather than the trait's
+constant. A constant answer makes every population trivially homogeneous, so the
+"does this resolve to ONE grouping" guard could never fire and its test would
+pass for an implementation that never checked. Varying makes both outcomes
+reachable on real fixture data — and the paired half matters as much: classids 3
+and 6 SHARE a grouping and must still resolve, or the refusal would just be
+"reject every multi-class population".
+
+Empty resolves to `None`, deliberately: zero rows carry zero classes, so
+reporting the zero-fallback would be inventing an answer.
+
+### Followup 2 — does `sum` earn ABI vocabulary? RETAINED, with a real reason
+
+§14's justification was weak (a benchmark's checksum). The better one, now in
+`abi.md` §15: it is the only mask-CONSUMING operation over the register, so
+without it the mask path has a build half and no execution half; and it is the
+cheapest operation that cannot be faked from outside, since any correct
+implementation must visit exactly the selected rows and decode exactly the
+resolved grouping — which is why it doubles as the parity oracle for both.
+
+**The condition to revisit is stated so it can fire:** a second reduction
+(min/max/count-distinct) must NOT become a second symbol. That is the point to
+generalise to an op-code parameter on one reduce symbol, mirroring
+`lgj_plan_eval`'s `LgjOpDesc`, with `sum` as op-code 0.
+
+### Followup 3 — the ndarray gap, closed at the right layer
+
+`ndarray::simd::masked_strided_group_sum`. The consumer's hand-rolled loop is
+now one delegating call. The upstream kernel is scalar and says why with the
+reasoning: one small register per record at a large stride is memory-bound,
+records are not adjacent so several cannot be vector-loaded, and widening six
+`u16`s inside one record optimises the part that is already free. A contiguous
+variant would genuinely vectorise and is named as a DIFFERENT primitive rather
+than a flag.
+
 ## 2026-08-25 — E-LGJ-THE-GATE-NOW-HOLDS-AT-EVERY-MINOR-1
 
 **Status:** SHIPPED — the minors-2-4 half of the eager-init defect, closed.

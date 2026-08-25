@@ -102,11 +102,25 @@ public final class OldAbiCompatTest {
                 }
             });
 
-            // Minor 5 — the mask-native sweep.
+            // Minor 5 — the mask-native sweep, under an asserted grouping.
             gate(c, loaded, 5, "RowStore.facetSumAs", () -> {
                 try (RowStore s = RowStore.open(64, 0x1234L);
                         Mask m = s.maskOfFacetClass(FacetId.of(0), 3)) {
                     s.facetSumAs(FacetId.of(0), Carving.RAILS_6X2, m);
+                }
+            });
+
+            // Minor 6 — the same sweep under a RESOLVED grouping. Uses a
+            // single-class mask so the population genuinely resolves; a mixed
+            // one would throw for a reason unrelated to the ABI minor and would
+            // make this gate report the wrong thing.
+            gate(c, loaded, 6, "RowStore.facetSum (resolved)", () -> {
+                try (RowStore s = RowStore.open(64, 0x1234L);
+                        Mask m = s.maskOfFacetClass(FacetId.of(0), 3)) {
+                    if (m.count() == 0) {
+                        throw new IllegalStateException("fixture selected no rows");
+                    }
+                    s.facetSum(FacetId.of(0), m);
                 }
             });
         } else {

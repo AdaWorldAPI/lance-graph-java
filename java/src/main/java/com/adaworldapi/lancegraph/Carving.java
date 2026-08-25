@@ -9,10 +9,17 @@ package com.adaworldapi.lancegraph;
  * of the class, resolved through its {@code ClassView}; it is never a property of the bytes and
  * never inferable from them.
  *
- * <p><strong>This enum names a reading; it does not carry authority for one.</strong>
- * {@link RowStore#facetSumAs} applies the carving it is handed without checking it against the
- * selected rows' classes — see that method's own note. Binding a resolved carving to a population
- * is a named seam awaiting a real ClassView carving resolver.
+ * <p><strong>This enum MIRRORS the contract's own {@code CascadeShape}</strong>
+ * ({@code G6D2}/{@code G4D3}/{@code G3D4}), which carries the grouping algebra and the statement
+ * that the reading is class-conditioned. It is a Java-side name for the same three answers, not a
+ * second vocabulary — the native side type-aliases straight to the contract type, and the wire
+ * values are pinned by GROUP COUNT so a variant reorder upstream cannot silently re-map them.
+ *
+ * <p><strong>Naming a reading is not authority for one.</strong> {@link RowStore#facetSumAs}
+ * applies the carving it is handed, unchecked. {@link RowStore#facetSum} is the verified sibling:
+ * it derives the grouping from the population via {@code ClassView::cascade_shape} and refuses a
+ * population that does not resolve to one. Prefer it; reach for {@code facetSumAs} only when you
+ * deliberately want a reinterpretation the class does not sanction.
  *
  * <p><strong>Why this is a parameter rather than something the sweep looks up per row.</strong>
  * Whatever resolves the reading does so <em>before</em> crossing the membrane, and hands the
@@ -39,6 +46,22 @@ public enum Carving {
      */
     int wire() {
         return wire;
+    }
+
+    /**
+     * The reading a wire value names — the inverse of {@link #wire()}, used when the native side
+     * REPORTS which grouping it resolved.
+     *
+     * @throws IllegalArgumentException on a value this build does not know, so an unrecognised
+     *     grouping can never be silently read as a known one
+     */
+    static Carving ofWire(int wire) {
+        for (Carving c : values()) {
+            if (c.wire == wire) {
+                return c;
+            }
+        }
+        throw new IllegalArgumentException("no carving for wire value " + wire);
     }
 
     /** Groups per register under this reading. {@code groups() * groupBytes() == 12}, always. */

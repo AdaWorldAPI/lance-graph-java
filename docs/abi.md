@@ -62,7 +62,7 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 22 symbols (minor 5; the "14" this line carried
+- It is **small** — currently 23 symbols (minor 6; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
   minor 2's three additions are argued in §11, minor 3's one addition in
@@ -79,7 +79,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 5    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 6    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -132,6 +132,10 @@ required — a gate that rejected everything would satisfy a rejection-only test
 - **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)
   and `lgj_hop` (one-hop graph traversal, gated by the
   `lance-graph-contract` `ClassView`/`FieldMask` LAW — §13).
+- **Minor 6** (2026-08-25) — `lgj_reduce_facet_sum_resolved` (§15): the same
+  sweep, but under the grouping the POPULATION resolves to via
+  `ClassView::cascade_shape`, rather than one the caller asserts. One new
+  status: `UNRESOLVED_CARVING` (-17).
 - **Minor 5** (2026-08-25) — `lgj_reduce_facet_sum` (§14): the mask path's
   missing EXECUTION half. The build half (`lgj_op_eq_classid`) has existed
   since minor 2; nothing could consume a mask against the 12-byte facet
@@ -161,6 +165,7 @@ are no error strings across the membrane and no `errno` dependence.
 | `-13` | `READ_ONLY` | write attempted against a read-only lane |
 | `-14` | `UNSUPPORTED_DECODE_MODE` | `lgj_hop` called with a `decode_mode` this build does not yet implement (§13, ABI minor ≥ 4) |
 | `-15` | `UNSUPPORTED_CARVING` | `lgj_reduce_facet_sum` called with a `carving` outside `0..=2` (§14, ABI minor ≥ 5) |
+| `-17` | `UNRESOLVED_CARVING` | `lgj_reduce_facet_sum_resolved`'s population does not resolve to one grouping — mixed classes, an unanswerable classid, or empty (§15, ABI minor ≥ 6) |
 | `-16` | `SUM_OVERFLOW` | `lgj_reduce_facet_sum`'s accumulator exceeded `i64`; `out_sum` is NOT written (§14, ABI minor ≥ 5) |
 
 `INVALID_HANDLE` is deliberately the response to *use-after-close*, not a crash.
@@ -321,7 +326,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (22 symbols)
+## 7. The function surface (23 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -407,6 +412,8 @@ This single call is what makes the Java fluent chain cost one crossing.
 i32 lgj_reduce_sum_i32(u64 res, u32 lane_id, u64 mask, i64* out_sum)
 i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
                          u64 mask, i64* out_sum)      // ABI minor >= 5, see §14
+i32 lgj_reduce_facet_sum_resolved(u64 res, u32 facet, u64 mask,
+                                  i64* out_sum, u32* out_carving)  // minor >= 6, §15
 ```
 
 Sums the `I32` lane over set mask bits into a widened `i64` (no overflow for
@@ -859,3 +866,100 @@ the fast path, not a tax on it.
 The control leg is equally load-bearing: under a *predictable* classid pattern
 the same measurement shows specialization buying nothing. This symbol is worth
 calling when there is entropy to remove, and not otherwise.
+
+## 15. The resolved sweep (ABI minor ≥ 6)
+
+§14 shipped `lgj_reduce_facet_sum` with an honest caveat: it applies a grouping
+the caller *asserts*, and cannot check it, because a mask is an opaque
+population and nothing on `ClassView` returned a grouping. **That second half is
+now false**, and this section is the consequence.
+
+```
+i32 lgj_reduce_facet_sum_resolved(u64 res, u32 facet, u64 mask,
+                                  i64* out_sum, u32* out_carving)
+```
+
+For every selected row it resolves `facet classid → ClassId →
+ClassView::cascade_shape` and requires every row to agree, then sweeps
+monomorphically under that answer, reporting the grouping back through
+`out_carving`. The shape the §14 note named as the next rung, built:
+
+```
+classid → ClassView → ResolvedCarving → (population + its grouping) → sum
+```
+
+**The question is asked once at the population's edge and never inside the
+sweep.** Resolution is `O(mask_words + popcount)`; the sweep that follows carries
+no per-row dispatch. Resolving per row would have been the defect this whole
+path exists to avoid — the fix for "unverified" was never "consult more often".
+
+### The resolver was upstream all along
+
+`CascadeShape` (`lance_graph_contract::facet`) has carried the three groupings
+— `G6D2` rails, `G4D3` triplets, `G3D4` quads, each `G·D = 12` — together with
+the full algebra and its own statement that the grouping is *"class-conditioned:
+`classid` selects it from the inherited schema"*. What did not exist was a
+`ClassView` method RETURNING one, which is why §14 minted a local `Carving`
+enum and documented that it claimed no authority.
+
+`ClassView::cascade_shape` (contract, 2026-08-25) is that missing accessor,
+following the exact registry-resolution pattern of its four siblings
+(`edge_codec_flavor` / `rail_carving` / `band_reading` / `value_schema`), with
+`G3D4` — `CascadeShape`'s own "canonical GUID shape" — as the zero-fallback.
+The local enum is now a `pub type Carving = CascadeShape` alias; only the u32
+**wire encoding** stays local, because a `#[repr]` discriminant is not part of
+the contract's promise. That mapping is pinned **by group count**, so a variant
+reorder upstream cannot silently re-map the wire.
+
+This also required widening the G11 contract-import fence by one module —
+`facet`, alongside `class_view`/`canonical_node`/`ontology`. Deliberate and
+recorded, not incidental.
+
+### Failure is the interesting case
+
+`LGJ_ERR_UNRESOLVED_CARVING` (-17) covers three causes and one fact — the
+population spans classes that read the register differently, a row's classid has
+no `ClassView` answer, or the population is **empty**. Zero rows carry zero
+classes, so reporting the zero-fallback there would be inventing an answer.
+Neither output is written.
+
+### Why the fixture provider varies its answer
+
+`FixtureClassView::cascade_shape` returns `class % 3` rather than the trait's
+constant zero-fallback. That is a fixture choice, stated as one: a constant
+answer makes every population trivially homogeneous, so the "does this resolve
+to ONE grouping" guard could never fire and a test for it would pass for an
+implementation that never checked. Varying makes both outcomes reachable on real
+fixture data — a `lgj_op_eq_classid` mask is single-class and resolves; a union
+across classids with different groupings is refused; and a union across classids
+that *share* a grouping still resolves, which is the paired half that stops the
+refusal from being "reject everything".
+
+### Which of the two symbols to call
+
+**`lgj_reduce_facet_sum_resolved` is the one to reach for.** §14's
+`lgj_reduce_facet_sum` remains as the deliberate reinterpretation escape hatch —
+for a caller that means to read the register under a grouping the class does not
+sanction — and its Java name (`facetSumAs`) says so.
+
+### On whether `sum` earns permanent ABI vocabulary
+
+Recorded because §1 makes symbol growth a design smell that needs justification,
+and §14's justification was weak: the operation came from a benchmark's checksum.
+It is retained, with a better reason and a falsifiable condition to revisit.
+
+**The reason:** it is the only mask-CONSUMING operation over the register. Without
+it the mask path has a build half and no execution half, and a consumer wanting
+that shape must leave the membrane — which is the pressure §6's anti-JNI rule and
+the Missing-capability STOP rule both exist to relieve. `sum` is additionally the
+cheapest operation that cannot be faked from the outside: any correct
+implementation must visit exactly the selected rows and decode exactly the
+resolved grouping, which is why it doubles as the parity oracle for both.
+
+**The condition to revisit, stated so it can actually fire:** if a second
+reduction is ever needed (min/max/count-distinct/histogram), do NOT add a second
+symbol. That is the point at which the operation should be generalised — an
+op-code parameter on one reduce symbol, mirroring how `lgj_plan_eval`'s
+`LgjOpDesc` already generalises predicates — and `sum` becomes op-code 0. Two
+reduction symbols would be the smell §1 warns about; one parameterised symbol is
+the shape this ABI already uses elsewhere.

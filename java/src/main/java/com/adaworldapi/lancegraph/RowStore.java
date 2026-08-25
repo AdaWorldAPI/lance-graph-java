@@ -125,6 +125,37 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * Sum one facet's 12-byte register under the grouping the SELECTION ITSELF resolves to
+     * (abi.md §15, ABI minor 6) — the verified sibling of {@link #facetSumAs}.
+     *
+     * <p>This is the shape {@code facetSumAs} could only name: for every selected row the native
+     * side resolves {@code facet classid → ClassId → ClassView::cascade_shape} and requires every
+     * row to agree, then sweeps monomorphically under that answer.
+     *
+     * <pre>
+     *   classid → ClassView → ResolvedCarving → (population + its grouping) → sum
+     * </pre>
+     *
+     * <p>The question is asked ONCE at the population's edge, never inside the sweep — resolving
+     * per row would be the defect this whole path exists to avoid.
+     *
+     * <p>Throws when the selection does not resolve to one grouping: it spans classes that read
+     * the register differently, a row's classid has no ClassView answer, or it is <em>empty</em>
+     * (zero rows carry zero classes, so any answer would be invented).
+     *
+     * @param facet     which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param selection the rows to sum over; must belong to this store
+     * @return the sum, and the grouping it was resolved under
+     */
+    public FacetSum facetSum(FacetId facet, Mask selection) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("facetSum()");
+        long[] r = Engine.facetSumResolved(handle, facet.index(), selection.handle());
+        return new FacetSum(r[0], Carving.ofWire((int) r[1]));
+    }
+
+    /**
      * Sum one facet's 12-byte register, <strong>reinterpreted as</strong> {@code carving}, over the
      * rows {@code selection} selects — the mask-native sweep (abi.md §14, ABI minor 5).
      *

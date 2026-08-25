@@ -60,6 +60,17 @@ public enum Status {
      */
     SUM_OVERFLOW(-16, "lgj_reduce_facet_sum's accumulator exceeded i64; the sum was not written"),
     /**
+     * {@code lgj_reduce_facet_sum_resolved}'s population does not resolve to one register
+     * grouping (docs/abi.md §15).
+     *
+     * <p>Three causes, one fact: the population spans classes whose ClassViews carve the register
+     * differently; a row's classid has no ClassView answer; or the population is empty (zero rows
+     * carry zero classes, and reporting the zero-fallback would be inventing an answer). In every
+     * case no single reading is correct for these rows, so neither output is written.
+     */
+    UNRESOLVED_CARVING(-17, "the selected rows do not resolve to a single register grouping"),
+
+    /**
      * Not tabulated in docs/abi.md §3 (reported as a doc gap) but required by §9: a panic is caught
      * at the boundary and becomes a negative status rather than unwinding into JVM frames, which
      * would be undefined behaviour. This is that status.

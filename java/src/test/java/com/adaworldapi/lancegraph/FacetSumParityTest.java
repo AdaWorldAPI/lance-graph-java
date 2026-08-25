@@ -157,6 +157,69 @@ public final class FacetSumParityTest {
             }
         }
 
+        c.section("the RESOLVED sweep (abi.md §15): the grouping comes FROM the population,"
+                + " and a population that does not resolve to one is refused");
+        try (RowStore store = RowStore.open(1000, SEED)) {
+            // A single-class selection resolves — and to that class's OWN grouping, which the
+            // fixture provider varies as class % 3. Checked across all three so an implementation
+            // returning one constant fails.
+            int[] classids = {3, 4, 5};
+            Carving[] want = {Carving.RAILS_6X2, Carving.TRIPLETS_4X3, Carving.QUADS_3X4};
+            for (int i = 0; i < classids.length; i++) {
+                try (Mask m = store.maskOfFacetClass(facet, classids[i])) {
+                    c.that("classid " + classids[i] + " selects a non-empty population",
+                            m.count() > 0);
+                    FacetSum r = store.facetSum(facet, m);
+                    c.eq("classid " + classids[i] + " resolves to its own grouping",
+                            want[i], r.carving());
+                    // The resolved sweep must agree with the raw one told the SAME grouping --
+                    // otherwise "resolved" would be a different computation, not a verified one.
+                    c.eq("resolved sum == facetSumAs under the resolved grouping",
+                            store.facetSumAs(facet, r.carving(), m), r.sum());
+                }
+            }
+
+            c.section("a population spanning classes that read the register differently is"
+                    + " REFUSED -- paired with classes that share a grouping, which must not be");
+            try (Mask a = store.maskOfFacetClass(facet, 3);
+                    Mask b = store.maskOfFacetClass(facet, 4)) {
+                long[] ra = a.materializeRows();
+                long[] rb = b.materializeRows();
+                long[] mixed = new long[ra.length + rb.length];
+                System.arraycopy(ra, 0, mixed, 0, ra.length);
+                System.arraycopy(rb, 0, mixed, ra.length, rb.length);
+                try (Mask both = store.importRows(mixed)) {
+                    c.throwsUp("classids 3 and 4 read the register differently -> refused",
+                            RuntimeException.class, () -> store.facetSum(facet, both));
+                }
+            }
+            // 3 and 6 are both class % 3 == 0, so they SHARE a grouping: a multi-class population
+            // must still resolve. Without this, the refusal above would pass for an
+            // implementation that rejected every multi-class population.
+            try (Mask a = store.maskOfFacetClass(facet, 3);
+                    Mask b = store.maskOfFacetClass(facet, 6)) {
+                long[] ra = a.materializeRows();
+                long[] rb = b.materializeRows();
+                long[] union = new long[ra.length + rb.length];
+                System.arraycopy(ra, 0, union, 0, ra.length);
+                System.arraycopy(rb, 0, union, ra.length, rb.length);
+                try (Mask both = store.importRows(union)) {
+                    c.that("classids 3 and 6 both select rows",
+                            ra.length > 0 && rb.length > 0);
+                    c.eq("different classes that SHARE a grouping still resolve",
+                            Carving.RAILS_6X2, store.facetSum(facet, both).carving());
+                }
+            }
+
+            c.section("an empty selection is refused rather than defaulted -- zero rows carry"
+                    + " zero classes, so any grouping would be invented");
+            try (Mask empty = store.importRows()) {
+                c.eq("the selection really is empty", 0L, empty.count());
+                c.throwsUp("an empty population does not resolve", RuntimeException.class,
+                        () -> store.facetSum(facet, empty));
+            }
+        }
+
         c.section("Carving's own invariant: every reading covers exactly the 12-byte register");
         for (Carving carving : Carving.values()) {
             c.eq(carving + " covers 12 bytes", 12L,
