@@ -1,5 +1,65 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-STACK-TAIL-STRANDED-MINOR-8 (2026-08-25) — RESOLVED same day
+
+**Found.** PR #32 (ABI minor 8) was opened against
+`claude/layout-probe` — PR #30's branch — because #30 (minor 7) was still
+open and a same-numbered minor in two PRs would have been a real
+collision. Correct at the time. But #30 merged to `main` FIRST, and #32
+then merged into a branch that had already been absorbed. Net effect:
+`main` sat at `LGJ_ABI_MINOR = 7` while the minor-8 commit, the
+`CarvingTable`/`CarvingTableTest` pair, the load-gate prefix fix,
+`abi.md` §17 and three board entries lived only on `claude/layout-probe`,
+two commits ahead of main.
+
+**Nothing was lost and nothing was broken** — `main` was a strict
+ancestor with no divergence — but the work was reviewed, merged, and
+still absent from the branch anyone would build.
+
+**Why it is worth an entry rather than a quiet fix.** The failure is
+generic to STACKED PRs and has no signal of its own: both PRs report
+"merged", both are green, and GitHub says nothing. It surfaced only
+because a wake event prompted a `git log origin/main` check rather than
+trusting the merge notification. A session that trusted the notification
+would have moved on believing minor 8 shipped.
+
+**Rule adopted:** when a PR's base is another PR's branch, the merge of
+the CHILD is not the end of the arc — verify the content reached `main`
+(`git log origin/main..origin/<base>` must be empty), and if the base
+merged first, land the tail explicitly.
+
+**Resolved** by the same PR that carries this entry: `claude/board-hygiene`
+→ `main`, carrying the stranded minor-8 commits plus this board work.
+
+---
+
+## ISS-LGJ-FACETSCHEMA-PAIR48 (2026-08-25) — OPEN, upstream-owned
+
+`lance_graph_contract::facet_schema::FacetSchema`'s third reading is
+`Pair48` (`2 × 48-bit`, two 6-byte codes — `facet_schema.rs:34`), NOT the
+operator-ruled L6 quads (`3 × (u8:u8:u8:u8)`) that
+`CascadeShape::G3D4` carries and that `le-contract.md` §3 names. The
+contract itself flags the tension at `class_view.rs:1168`.
+
+Both are legal readings of the same 12 bytes and both have real consumers
+(`Pair48` serves `helix` `Signed360` and `cam_pq` `[u8; 6]`, which are
+genuinely 48-bit), so this is **not** obviously a defect — it may be two
+different axes that happen to partition the same register. What is
+unresolved is whether `FacetSchema` and `CascadeShape` are meant to be the
+same question asked twice, or two questions that must both be answerable
+per class.
+
+**Deliberately NOT resolved here.** This repo consumes the contract; it
+does not arbitrate it (root `CLAUDE.md`: the contract is THE semantic
+law). Flagged during the minor-6 work, carried through minors 7 and 8
+untouched, and named in every PR body of the arc rather than left silent.
+
+Closes when upstream rules the relationship — or when a lance-graph-java
+consumer actually needs `Pair48` across the membrane, at which point the
+question stops being academic.
+
+---
+
 ## ISS-LGJ-CLASSID-WIDTH-PIN (2026-08-18) — OPEN, upstream-owned
 
 The lgj wire carries u32 classids (canon 8-hex; `lgj_op_eq_classid`,

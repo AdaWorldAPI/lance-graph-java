@@ -28,57 +28,86 @@ package com.adaworldapi.lancegraph;
  */
 public enum Carving {
     /** {@code 6 x (u8:u8)} — six little-endian {@code u16} rails. */
-    RAILS_6X2(0),
+    RAILS_6X2(6, 2),
     /** {@code 4 x (u8:u8:u8)} — four little-endian {@code u24} SPO triplets, zero-extended. */
-    TRIPLETS_4X3(1),
+    TRIPLETS_4X3(4, 3),
     /** {@code 3 x (u8:u8:u8:u8)} — three little-endian {@code u32} quads, zero-extended. */
-    QUADS_3X4(2);
+    QUADS_3X4(3, 4);
 
-    private final int wire;
+    private final int groups;
+    private final int groupBytes;
 
-    Carving(int wire) {
-        this.wire = wire;
+    Carving(int groups, int groupBytes) {
+        this.groups = groups;
+        this.groupBytes = groupBytes;
     }
 
     /**
-     * The ABI wire value (docs/abi.md §14). Package-private on purpose: a consumer names the
-     * reading, never its encoding.
+     * Groups per register under this reading. {@code groups() * groupBytes() == 12}, always.
+     *
+     * <p>Declared, not looked up, and that is the one thing here that <em>should</em> be: the
+     * arity IS the constant's identity — {@code RAILS_6X2} named anything other than {@code 6 x 2}
+     * would be a lie in its own name. What is NOT declared is the wire value (see {@link #wire()}),
+     * because that is an encoding rather than a meaning.
+     */
+    public int groups() {
+        return groups;
+    }
+
+    /** Bytes per group under this reading. */
+    public int groupBytes() {
+        return groupBytes;
+    }
+
+    /**
+     * The ABI wire value (docs/abi.md §14) — <strong>read from the library's manifest table, not
+     * declared here</strong>. Package-private on purpose: a consumer names the reading, never its
+     * encoding.
+     *
+     * <p>The encoding used to be hand-written in three places — a Rust map, this enum, and
+     * {@code abi.md}'s table — with nothing to catch drift between them. Now the native side
+     * derives it from the contract's own {@code CascadeShape::ROTATIONS} (group count descending),
+     * serves it in the manifest, and this looks its own arity up in what was served. A reorder or
+     * an addition upstream propagates; it cannot silently re-map.
+     *
+     * @throws IllegalStateException if the loaded library serves no slot for this arity — a
+     *     grouping this Java build knows and that library does not, which must fail rather than be
+     *     approximated
      */
     int wire() {
-        return wire;
+        int[] table = CarvingTable.get();
+        int packed = (groups << 8) | groupBytes;
+        for (int w = 0; w < table.length; w++) {
+            if (table[w] == packed) {
+                return w;
+            }
+        }
+        throw new IllegalStateException("the loaded library serves no wire value for " + this
+                + " (" + groups + "x" + groupBytes + "); its carving table is "
+                + CarvingTable.describe(table));
     }
 
     /**
      * The reading a wire value names — the inverse of {@link #wire()}, used when the native side
      * REPORTS which grouping it resolved.
      *
-     * @throws IllegalArgumentException on a value this build does not know, so an unrecognised
+     * @throws IllegalArgumentException on a value this build cannot name, so an unrecognised
      *     grouping can never be silently read as a known one
      */
     static Carving ofWire(int wire) {
-        for (Carving c : values()) {
-            if (c.wire == wire) {
-                return c;
+        int[] table = CarvingTable.get();
+        if (wire >= 0 && wire < table.length) {
+            int packed = table[wire];
+            for (Carving c : values()) {
+                if (((c.groups << 8) | c.groupBytes) == packed) {
+                    return c;
+                }
             }
+            throw new IllegalArgumentException("the loaded library's wire value " + wire
+                    + " names a " + (packed >>> 8) + "x" + (packed & 0xFF) + " grouping, which this"
+                    + " Java build has no constant for");
         }
-        throw new IllegalArgumentException("no carving for wire value " + wire);
-    }
-
-    /** Groups per register under this reading. {@code groups() * groupBytes() == 12}, always. */
-    public int groups() {
-        return switch (this) {
-            case RAILS_6X2 -> 6;
-            case TRIPLETS_4X3 -> 4;
-            case QUADS_3X4 -> 3;
-        };
-    }
-
-    /** Bytes per group under this reading. */
-    public int groupBytes() {
-        return switch (this) {
-            case RAILS_6X2 -> 2;
-            case TRIPLETS_4X3 -> 3;
-            case QUADS_3X4 -> 4;
-        };
+        throw new IllegalArgumentException("no carving for wire value " + wire
+                + "; the loaded library's table is " + CarvingTable.describe(table));
     }
 }

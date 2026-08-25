@@ -1,3 +1,50 @@
+## 2026-08-25 — ABI minors 6→8 + board hygiene (main thread, no fan-out)
+
+Straight-line main-thread work; no subagents spawned, so no tag-files to
+consolidate. Three rungs and a documentation pass.
+
+**Minor 6** — `lgj_reduce_facet_sum_resolved`, gated on lance-graph
+#1025 (`ClassView::cascade_shape`). Two operator corrections landed
+mid-build and both were right: the resolution belongs cached BESIDE the
+mask (not recomputed per call), and the classid→carving table is
+PROCESS-GLOBAL, not per dataset — *"the classids are not different from
+SoA to SoA."* My first version keyed it per dataset, which would have
+been a second source of truth for a global fact.
+
+**Minor 7** (PR #30) — `lgj_row_layout_probe`. My own test expectation
+was wrong here, not the code: `maskOfFacetClass(facet 3, …)` constrains
+facet 3 ONLY, so 1/32 aligned is the correct measurement.
+
+**Minor 8** (PR #32) — the carving encoding made data. Also fixed the
+latent load-gate defect the change made reachable.
+
+**Mistake owned:** ran `git checkout` on `kernels.rs` to undo a
+disable-run edit and destroyed the uncommitted work in that file.
+Reconstructed, re-verified to the same 134-test count. Disable-runs now
+back up to a file first; `git checkout` is never the undo for one.
+
+**Second mistake owned:** PR #32 was stacked on PR #30's branch and #30
+merged to main first, so minor 8 never reached main —
+`ISS-LGJ-STACK-TAIL-STRANDED-MINOR-8`. Caught by checking `git log
+origin/main` on a wake event rather than trusting the "merged"
+notification.
+
+**Board hygiene this pass** (operator: *"please also keep documentation
+updated, .claude/board similar to lance-graph board"*):
+`CROSS_REPO_PRS.md` CREATED (modeled on lance-graph's; this repo had no
+ledger of the three upstream PRs it is gated on, despite the
+missing-capability STOP rule being one of its own iron rules);
+`README.md` CREATED (the file set + what each is for + the hygiene
+rules, which previously existed only as one bullet in the root
+`CLAUDE.md`); `STATUS_BOARD.md` given the minors 5-8 arc, which had
+stopped at 2026-08-18 and carried nothing for the whole sweep;
+`ISSUES.md` two entries; `LATEST_STATE.md` / `PR_ARC_INVENTORY.md` /
+`EPIPHANIES.md` already carried the minor-8 entries from PR #32.
+
+**Gates re-run on this branch before the PR:** Rust 134 lib tests, fmt +
+clippy `-D warnings` clean; Java 304 checks; `OldAbiCompatTest` green
+against minors 1-4.
+
 ## 2026-08-25 — JDK toolchain provisioning verified + 245/245 full suite re-run
 
 Operator raised "Valhalla panama is mandatory, check technical debt in

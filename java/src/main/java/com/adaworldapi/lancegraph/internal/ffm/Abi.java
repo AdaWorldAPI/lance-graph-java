@@ -68,7 +68,11 @@ public final class Abi {
             int endianness,
             int simdBackend,
             String simdBackendName,
-            String buildProfile) {}
+            String buildProfile,
+            // Packed (groups << 8) | groupBytes per wire value, in wire order. Empty on a library
+            // predating ABI minor 8, which served no table. (A record component takes no javadoc
+            // of its own -- javac's dangling-doc-comments lint is right about that.)
+            int[] carvings) {}
 
     private static final Path LIBRARY_PATH;
     private static final SymbolLookup LOOKUP;
@@ -316,17 +320,22 @@ public final class Abi {
         }
 
         int sizeOfManifest = prefix.get(ValueLayout.JAVA_INT, Layouts.OFF_SIZE_OF_MANIFEST);
-        long expectedManifestSize = Layouts.MANIFEST.byteSize();
-        if (sizeOfManifest < expectedManifestSize) {
+        // The gate is the BASE prefix, not the full layout. The manifest grows with the ABI, and
+        // requiring every field this Java build knows about would make each new one a hard
+        // incompatibility with every older artifact — the exact opposite of docs/abi.md §2's
+        // additive promise, and it would break OldAbiCompatTest's premise that an older library
+        // still loads. Fields past the base prefix are read only when the library carries them.
+        long baseBytes = Layouts.MANIFEST_BASE_BYTES;
+        if (sizeOfManifest < baseBytes) {
             throw new AbiMismatchException(String.format(
-                    "manifest field 'size_of_manifest' disagrees: library reports %d bytes, this"
-                            + " Java build's MemoryLayout derives %d. Reading the remaining fields"
-                            + " would read past the artifact's own struct, so no further field is"
-                            + " read. Library: %s",
-                    sizeOfManifest, expectedManifestSize, path));
+                    "manifest field 'size_of_manifest' disagrees: library reports %d bytes, but the"
+                            + " ABI's base manifest prefix is %d. Reading the base fields would read"
+                            + " past the artifact's own struct, so no further field is read."
+                            + " Library: %s",
+                    sizeOfManifest, baseBytes, path));
         }
 
-        MemorySegment m = raw.reinterpret(Math.max(sizeOfManifest, expectedManifestSize));
+        MemorySegment m = raw.reinterpret(sizeOfManifest);
 
         // Every remaining check compares a number the artifact emitted against a number derived
         // from Layouts — never a constant against itself.
@@ -363,13 +372,48 @@ public final class Abi {
         String profile = cString(m, Layouts.OFF_BUILD_PROFILE,
                 Layouts.BUILD_PROFILE_BYTES);
 
+        int[] carvings = readCarvings(m, minor, sizeOfManifest);
+
         return new Manifest(magic, major, minor, sizeOfManifest,
                 (int) Layouts.LANE_DESC.byteSize(), (int) Layouts.OP_DESC.byteSize(),
                 (int) Layouts.RESOURCE_INFO.byteSize(),
                 (int) Layouts.LANE_DESC.byteAlignment(), (int) Layouts.OP_DESC.byteAlignment(),
                 (int) Layouts.RESOURCE_INFO.byteAlignment(),
-                (int) ValueLayout.ADDRESS.byteSize(), endianness, backend, backendName, profile);
+                (int) ValueLayout.ADDRESS.byteSize(), endianness, backend, backendName, profile,
+                carvings);
     }
+
+    /**
+     * The register groupings the library serves, as packed {@code (groups << 8) | groupBytes}
+     * entries in wire order — empty on a library predating ABI minor 8.
+     *
+     * <p>Both conditions are checked, not just the minor: a manifest that claims minor 8 but is
+     * too short to hold the table is a broken artifact, and reading it would produce plausible
+     * garbage rather than a failure. Whether the table AGREES with this Java build's own
+     * {@code Carving} vocabulary is a separate question, answered by the drift falsifier in
+     * {@code CarvingTableTest} — this method only reports what the artifact said.
+     */
+    private static int[] readCarvings(MemorySegment m, int minor, int sizeOfManifest) {
+        long end = Layouts.OFF_CARVINGS + (long) Layouts.CARVING_SLOTS * Short.BYTES;
+        if (minor < LGJ_ABI_MINOR_CARVINGS || sizeOfManifest < end) {
+            return new int[0];
+        }
+        int count = m.get(ValueLayout.JAVA_INT, Layouts.OFF_CARVING_COUNT);
+        if (count < 0 || count > Layouts.CARVING_SLOTS) {
+            throw new AbiMismatchException(
+                    "manifest field 'carving_count' is " + count + ", outside 0.."
+                            + Layouts.CARVING_SLOTS + "; the table cannot be read");
+        }
+        int[] out = new int[count];
+        for (int i = 0; i < count; i++) {
+            out[i] = Short.toUnsignedInt(
+                    m.get(ValueLayout.JAVA_SHORT, Layouts.OFF_CARVINGS + (long) i * Short.BYTES));
+        }
+        return out;
+    }
+
+    /** The minor at which the manifest began serving the carving table. */
+    private static final int LGJ_ABI_MINOR_CARVINGS = 8;
 
     private static void expect(Path path, String field, long javaDerived, int libraryReports) {
         if (javaDerived != libraryReports) {

@@ -8,6 +8,54 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #32 — ABI minor 8: the register groupings served as DATA (draft, opened 2026-08-25)
+
+- **Added:** `LgjAbiManifest.{carving_count, carvings[8]}` (docs/abi.md
+  §17) — the §14 wire encoding, previously hand-written in THREE places
+  (a Rust `match`, Java's `Carving` enum, §14's table) with nothing that
+  would fail if they disagreed. Now one source and two derivations: the
+  contract owns the SET (`CascadeShape::ROTATIONS`), `kernels::CARVING_ORDER`
+  (a `const`, group count descending) derives the ENCODING, and the manifest
+  serves it. Java's `Carving` keeps its declared ARITY (the name IS the
+  arity) and looks its wire value up in the served table.
+  New: `CarvingTable` (with the one clearly-named pre-minor-8 shim),
+  `CarvingTableTest` (16 checks, in `AllTests`), two Rust falsifiers.
+- **Locked:** meaning is declared, encoding is served. A variant REORDER
+  upstream cannot re-map the wire (position is computed from `groups()`,
+  not declaration order); a variant ADDED upstream appears automatically
+  and is caught by the both-ways membership test rather than surfacing on
+  someone's data. `CARVING_ORDER` is `const` and not `LazyLock` because
+  the manifest that serves it is const-initialised.
+- **Also fixed (a real latent defect, not scope creep):** Java's load gate
+  required the FULL manifest layout, so this — the first growth of the
+  manifest struct — would have made every older artifact fail to load,
+  contradicting §2's additive promise. Gate now requires only the 104-byte
+  BASE PREFIX; later fields are read when `size_of_manifest` covers them
+  AND the minor is high enough. Measured: all four historical `.so`s
+  (minors 1-4) still load and gate per-minor correctly.
+- **Deferred:** nothing new. `FacetSchema`'s third reading is still
+  `Pair48` rather than the operator-ruled L6 quads — flagged earlier,
+  untouched here.
+- **Docs:** `docs/abi.md` §17 (new), §2 (load-gate prefix + minor-8
+  history), §14 table regraded DESCRIPTIVE, manifest struct listing,
+  header constants.
+- **Gates:** Rust 134 lib tests / fmt / clippy `-D warnings` clean; Java
+  304 checks (`AllTests`, was 288); `OldAbiCompatTest` 4/7/7/7 against
+  minors 1-4. Stacked on PR #30 (minor 7).
+- **Disable-runs, all red-then-green:** swapping the packed axes fails the
+  Rust serve test; reversing the sort fails the order test and two others;
+  changing one Java constant's arity fails BOTH membership directions;
+  restoring the full-layout load gate makes the minor-4 library fail to
+  load outright.
+- **Confidence:** high on the derivation and the falsifiers (each disabled
+  and observed red). Medium on the 8-slot table width — the bound is
+  argued from `G·D = 12`'s divisors, not measured against a future
+  `CascadeShape`.
+- **Owned mistake:** mid-session I ran `git checkout` on `kernels.rs` to
+  undo a disable-run edit and destroyed the uncommitted work in that file.
+  Reconstructed and re-verified (134 tests, same count). Disable-runs are
+  now backed up to a file first, never reverted with `git checkout`.
+
 ## PR #20 — D-LGJ-W8 A3 freeze (PR-0): ratified correction spec v3 + root CLAUDE.md + board storno (merged 2026-08-18, squash `c479f76`)
 
 - **Added:** `.claude/plans/mask-native-navigation-correction-v1.md`

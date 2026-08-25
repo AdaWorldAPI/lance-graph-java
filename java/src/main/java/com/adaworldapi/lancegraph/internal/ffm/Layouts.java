@@ -112,6 +112,15 @@ public final class Layouts {
     /** Length of the manifest's {@code build_profile} byte array. */
     public static final int BUILD_PROFILE_BYTES = 16;
 
+    /**
+     * Slots in the manifest's {@code carvings} table (ABI minor 8).
+     *
+     * <p>A fixed-width array, not a pointer, because the whole table is 16 bytes and a pointer
+     * would add a lifetime question to a struct that deliberately has none. {@code carving_count}
+     * says how many slots are populated; the rest are zero.
+     */
+    public static final int CARVING_SLOTS = 8;
+
     public static final StructLayout MANIFEST = MemoryLayout.structLayout(
             ValueLayout.JAVA_LONG.withName("magic"),
             ValueLayout.JAVA_INT.withName("abi_major"),
@@ -129,7 +138,13 @@ public final class Layouts {
             MemoryLayout.sequenceLayout(SIMD_NAME_BYTES, ValueLayout.JAVA_BYTE)
                     .withName("simd_backend_name"),
             MemoryLayout.sequenceLayout(BUILD_PROFILE_BYTES, ValueLayout.JAVA_BYTE)
-                    .withName("build_profile"))
+                    .withName("build_profile"),
+            // ── added at ABI minor 8 ──
+            ValueLayout.JAVA_INT.withName("carving_count"),
+            MemoryLayout.sequenceLayout(CARVING_SLOTS, ValueLayout.JAVA_SHORT)
+                    .withName("carvings"),
+            // repr(C) rounds the struct up to its 8-byte alignment: 108 + 16 = 124 -> 128.
+            MemoryLayout.paddingLayout(4))
             .withName("LgjAbiManifest");
 
     // The manifest is read by OFFSET rather than through a struct VarHandle, and that is a
@@ -153,6 +168,21 @@ public final class Layouts {
     public static final long OFF_SIMD_BACKEND = off("simd_backend");
     public static final long OFF_SIMD_BACKEND_NAME = off("simd_backend_name");
     public static final long OFF_BUILD_PROFILE = off("build_profile");
+    public static final long OFF_CARVING_COUNT = off("carving_count");
+    public static final long OFF_CARVINGS = off("carvings");
+
+    /**
+     * Bytes of the manifest a MINOR-1 library is guaranteed to carry — everything through
+     * {@code build_profile}.
+     *
+     * <p>This is the prefix the load gate may require, and requiring more would break docs/abi.md
+     * §2's additive promise in the direction that matters here: a library OLDER than this Java
+     * build still loads, and each later minor gates independently at its own call site
+     * ({@code Abi.requireMinor}). Gating the load on the FULL layout size would have turned every
+     * future manifest field into a hard incompatibility with every older artifact — including the
+     * ones {@code OldAbiCompatTest} runs against.
+     */
+    public static final long MANIFEST_BASE_BYTES = OFF_BUILD_PROFILE + BUILD_PROFILE_BYTES;
 
     private static long off(String name) {
         return MANIFEST.byteOffset(PathElement.groupElement(name));
@@ -278,6 +308,10 @@ public final class Layouts {
         // silently disagree.
         expect("LgjAbiManifest simd_backend_name offset", 56, OFF_SIMD_BACKEND_NAME);
         expect("LgjAbiManifest build_profile offset", 88, OFF_BUILD_PROFILE);
+        expect("LgjAbiManifest base prefix bytes", 104, MANIFEST_BASE_BYTES);
+        expect("LgjAbiManifest carving_count offset", 104, OFF_CARVING_COUNT);
+        expect("LgjAbiManifest carvings offset", 108, OFF_CARVINGS);
+        expect("LgjAbiManifest size", 128, MANIFEST.byteSize());
         expect("LgjAbiManifest align", 8, MANIFEST.byteAlignment());
         return true;
     }

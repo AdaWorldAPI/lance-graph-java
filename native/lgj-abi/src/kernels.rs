@@ -425,29 +425,67 @@ pub fn masked_sum_i32(path: Path, values: &[i32], mask_words: &[u64]) -> i64 {
 /// across the membrane is this crate's job.
 pub type Carving = CascadeShape;
 
-/// Wire `u32` -> the contract's grouping. `None` for anything else, so an
-/// unknown reading is a rejected call rather than an aliased one.
+/// The wire order of the groupings, DERIVED from the contract's own rotation
+/// set — not a hand-written list here.
 ///
-/// The mapping is by GROUP COUNT, not by declaration order, so it stays correct
-/// if `CascadeShape`'s variants are ever reordered: `0 -> 6` groups, `1 -> 4`,
-/// `2 -> 3`. A test pins that correspondence.
-pub fn carving_from_wire(v: u32) -> Option<Carving> {
-    match v {
-        0 => Some(CascadeShape::G6D2),
-        1 => Some(CascadeShape::G4D3),
-        2 => Some(CascadeShape::G3D4),
-        _ => None,
+/// **The rule is group count, descending.** `6 -> 0`, `4 -> 1`, `3 -> 2` today,
+/// and whatever [`CascadeShape::ROTATIONS`] contains tomorrow. Two consequences,
+/// both deliberate:
+///
+/// - A variant REORDER upstream cannot re-map the wire, because the order is
+///   computed from `groups()` rather than from declaration position.
+/// - A variant ADDED upstream appears here automatically, in its group-count
+///   place, with no edit to this file.
+///
+/// This is "data as config" applied to the one fact that was hand-written three
+/// times — here, in Java, and in `abi.md`'s table. The contract owns the set,
+/// this derives the encoding, and the manifest serves both to Java so it need
+/// not restate them.
+///
+/// It is a `const` — not a `LazyLock` — because the manifest that SERVES this
+/// table is itself const-initialised. A runtime-initialised order could not be
+/// reached from there, and the manifest is the whole point.
+pub const CARVING_ORDER: [CascadeShape; CascadeShape::ROTATIONS.len()] = {
+    let mut order = CascadeShape::ROTATIONS;
+    // Insertion sort, descending by group count. `sort_by_key` is not const, and
+    // the set is three elements. `G·D = 12` for every shape, so no two share a
+    // group count and the order is strict.
+    let mut i = 1;
+    while i < order.len() {
+        let mut j = i;
+        while j > 0 && order[j].groups() > order[j - 1].groups() {
+            let tmp = order[j - 1];
+            order[j - 1] = order[j];
+            order[j] = tmp;
+            j -= 1;
+        }
+        i += 1;
     }
+    order
+};
+
+/// How many groupings the wire encoding can name — served in the manifest so
+/// Java does not hardcode it.
+pub const fn carving_count() -> usize {
+    CARVING_ORDER.len()
+}
+
+/// Wire `u32` -> the contract's grouping, via [`CARVING_ORDER`]. `None` for
+/// anything outside the derived set, so an unknown reading is a rejected call
+/// rather than an aliased one.
+pub fn carving_from_wire(v: u32) -> Option<Carving> {
+    usize::try_from(v)
+        .ok()
+        .and_then(|i| CARVING_ORDER.get(i).copied())
 }
 
 /// The wire value for a grouping — the inverse of [`carving_from_wire`], used
 /// when the ABI REPORTS a resolved grouping back to the caller.
 pub fn carving_to_wire(c: Carving) -> u32 {
-    match c {
-        CascadeShape::G6D2 => 0,
-        CascadeShape::G4D3 => 1,
-        CascadeShape::G3D4 => 2,
-    }
+    CARVING_ORDER
+        .iter()
+        .position(|&s| s == c)
+        .expect("every CascadeShape is in ROTATIONS") as u32
 }
 
 /// Groups per register under this reading — delegates to the contract.
@@ -936,6 +974,71 @@ mod tests {
                 groups_of(c) * group_bytes_of(c),
                 12,
                 "{c:?} does not cover 12 B"
+            );
+        }
+    }
+
+    /// The manifest must SERVE exactly the derived order — the table Java reads
+    /// and the table `carving_from_wire` decodes cannot be two answers.
+    ///
+    /// This is the falsifier for the data-as-config change: if the packing, the
+    /// count, or the order in `abi::MANIFEST` were written by hand rather than
+    /// derived, this catches it drifting from [`CARVING_ORDER`]. It compares the
+    /// SERVED bytes against the derived set, not one constant against itself.
+    #[test]
+    fn the_manifest_serves_exactly_the_derived_carving_order() {
+        let m = &crate::abi::MANIFEST;
+        assert_eq!(m.carving_count as usize, CARVING_ORDER.len());
+        assert!(
+            m.carving_count as usize <= m.carvings.len(),
+            "count past the table"
+        );
+
+        for (w, shape) in CARVING_ORDER.iter().enumerate() {
+            let packed = m.carvings[w];
+            assert_eq!(
+                (packed >> 8) as usize,
+                groups_of(*shape),
+                "wire {w}: served groups disagree with {shape:?}"
+            );
+            assert_eq!(
+                (packed & 0xFF) as usize,
+                group_bytes_of(*shape),
+                "wire {w}: served group_bytes disagree with {shape:?}"
+            );
+            // ...and the served entry must decode back to the same shape, so a
+            // table that is internally consistent but wrongly ORDERED fails too.
+            assert_eq!(carving_from_wire(w as u32), Some(*shape));
+        }
+
+        // Unpopulated slots are zero, so a reader that trusts `carving_count`
+        // and one that scans for a terminator agree.
+        for &slot in &m.carvings[m.carving_count as usize..] {
+            assert_eq!(slot, 0, "slot past carving_count is not zero");
+        }
+    }
+
+    /// The derived order is group count DESCENDING, and strictly so.
+    ///
+    /// Without this, a future `CascadeShape` variant could tie on group count
+    /// and the sort would become order-dependent again — the exact property the
+    /// derivation exists to remove. `G·D = 12` makes ties impossible today; this
+    /// pins that it stays that way, and that the sort drops nothing.
+    #[test]
+    fn the_derived_order_is_strictly_descending_by_group_count() {
+        for pair in CARVING_ORDER.windows(2) {
+            assert!(
+                pair[0].groups() > pair[1].groups(),
+                "{:?} then {:?} is not a strict descent",
+                pair[0],
+                pair[1]
+            );
+        }
+        assert_eq!(CARVING_ORDER.len(), CascadeShape::ROTATIONS.len());
+        for shape in CascadeShape::ROTATIONS {
+            assert!(
+                CARVING_ORDER.contains(&shape),
+                "{shape:?} dropped by the sort"
             );
         }
     }

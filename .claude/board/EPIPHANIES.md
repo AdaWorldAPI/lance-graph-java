@@ -4,6 +4,51 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-A-CONSTANT-COPIED-THREE-TIMES-HAS-NO-FALSIFIER-1
+
+**Status:** SHIPPED — ABI minor 8, docs/abi.md §17.
+**Confidence:** High on the mechanism; every guard disable-verified.
+
+The §14 carving wire encoding lived in three places: a Rust `match`, a
+Java `enum`, and abi.md's own table. Each was correct. Nothing anywhere
+would have failed if one had stopped agreeing with the others.
+
+**That is the finding, and it generalises past this constant.** Three
+copies of one fact is not a documentation problem to be tidied — it is a
+correctness problem with NO falsifier, and its failure mode is silent:
+a variant added or reordered upstream re-maps one copy, a sweep then
+reads the same 12 bytes under the wrong grouping, and returns a
+plausible number. "Keep them in sync" is not a mechanism.
+
+The fix is not a fourth copy that checks the others. It is ONE source
+(`CascadeShape::ROTATIONS`, the contract's) and two DERIVATIONS: the ABI
+computes the encoding from it by a RULE (group count, descending) rather
+than by declaration position, and the manifest serves the result to Java
+so Java restates nothing. A reorder upstream cannot re-map the wire; an
+addition upstream propagates.
+
+**The two corollaries worth keeping:**
+
+1. **Derive by a rule, not by position.** Had the order been "declaration
+   order of the enum", the derivation would have been just as automatic
+   and just as fragile — the drift would simply have moved upstream.
+2. **Meaning is declared; encoding is served.** `RAILS_6X2` keeps its
+   arity as a literal, because the arity IS the constant's identity and a
+   name that lies about it is worse than a hardcode. Only the encoding —
+   which carries no meaning — became data.
+
+**And the change surfaced a latent defect one layer down**, which is the
+usual reward for touching a boundary: Java's load gate required the FULL
+manifest layout, so the first growth of that struct would have made every
+older artifact fail to load, in flat contradiction of §2's additive
+promise. It had been written that way since minor 1 and was unreachable
+until now. Measured: restoring the full-layout gate makes all four
+historical libraries fail outright.
+
+Cf. `E-LGJ-THE-RESOLVER-WAS-UPSTREAM-ALL-ALONG-1` — same shape one rung
+up (the answer was already in the contract; the local version was the
+copy).
+
 ## 2026-08-25 — E-LGJ-THE-RESOLVER-WAS-UPSTREAM-ALL-ALONG-1
 
 **Status:** SHIPPED — ABI minor 6 + the contract accessor + the ndarray
