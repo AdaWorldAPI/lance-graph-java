@@ -30,6 +30,7 @@ public final class AllTests {
         suites.put("RowStoreLifetimeTest", RowStoreLifetimeTest::run);
         suites.put("MaskNativeOpsTest", MaskNativeOpsTest::run);
         suites.put("FacetSumParityTest", FacetSumParityTest::run);
+        suites.put("CarvingTableTest", CarvingTableTest::run);
 
         if (!NativeRuntime.isAvailable()) {
             // ApiSurfaceTest needs no native library — the API's shape is a compile-time property —

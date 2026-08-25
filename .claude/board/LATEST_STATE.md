@@ -1,3 +1,38 @@
+## 2026-08-25 — ABI minor 8: the register groupings are DATA, and the load gate stopped requiring the whole manifest
+
+- **The wire encoding of §14's `carving` is no longer written anywhere by
+  hand.** The contract owns the set (`CascadeShape::ROTATIONS`),
+  `kernels::CARVING_ORDER` (a `const`) derives the order by a RULE (group
+  count, descending — never declaration position), and the manifest serves
+  it in two new fields: `carving_count: u32` + `carvings: [u16; 8]`
+  (`(groups << 8) | group_bytes`). No new symbol; the manifest already
+  exists so Java can discover the ABI's shape rather than declare it.
+  `LgjAbiManifest` is now 128 bytes.
+- **Java keeps its ARITY and loses its ENCODING.** `Carving.groups()` /
+  `groupBytes()` stay declared — the arity IS the constant's identity —
+  while `wire()`/`ofWire()` look up the served table. `CarvingTable` holds
+  the one clearly-named pre-minor-8 compatibility shim, so exactly one
+  place in the build carries a literal encoding and its name says it is
+  history.
+- **A latent defect fixed on the way:** Java's load gate required the FULL
+  manifest layout, so the FIRST growth of that struct — this one — would
+  have made every older artifact fail to load, contradicting §2's additive
+  promise. The gate now requires only the 104-byte BASE PREFIX
+  (`Layouts.MANIFEST_BASE_BYTES`); later fields are read only when
+  `size_of_manifest` covers them AND the minor is high enough.
+- **Gates:** Rust 134 lib tests, fmt + clippy `-D warnings` clean; Java
+  **304** checks (`AllTests`, was 288 — `CarvingTableTest` adds 16);
+  `OldAbiCompatTest` green against all four historical `.so`s (minors
+  1-4). Four disable-runs, each red-then-green: swapped packed axes,
+  reversed sort, a mismatched Java arity (fires BOTH membership
+  directions), and the restored full-layout gate (minor-4 library fails to
+  load).
+- **Docs:** `docs/abi.md` §17 (new), §2 (load-gate prefix), §14's table
+  regraded DESCRIPTIVE rather than normative.
+- Stacked on PR #30 (minor 7); board entry in `PR_ARC_INVENTORY.md`,
+  finding in `EPIPHANIES.md`
+  (`E-LGJ-A-CONSTANT-COPIED-THREE-TIMES-HAS-NO-FALSIFIER-1`).
+
 ## 2026-08-18 — PR-W8b (FACADE + GRAPH MIGRATION) — the mask-native correction reaches the Java surface
 
 ### Current surface changes (java/ + consumers/graph)

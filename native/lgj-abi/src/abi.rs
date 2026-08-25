@@ -58,7 +58,18 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 ///
 /// `docs/abi.md` §13). Purely additive: a minor-3 Java loads fine and
 /// simply cannot call either new symbol.
-pub const LGJ_ABI_MINOR: u32 = 7;
+///
+/// Minor **8** (2026-08-25): the manifest carries the register groupings as
+/// DATA — [`LgjAbiManifest::carving_count`] and [`LgjAbiManifest::carvings`],
+/// derived from `CascadeShape::ROTATIONS` (see
+/// [`crate::kernels::CARVING_ORDER`]). No new symbol: the manifest already
+/// exists so Java can discover the ABI's shape instead of restating it, and the
+/// wire encoding is exactly such a shape. This is the FIRST growth of the
+/// manifest struct itself, so it is also the change that made Java's load gate
+/// require only the base 104-byte prefix rather than the full layout — without
+/// that, every future manifest field would be a hard incompatibility with every
+/// older artifact.
+pub const LGJ_ABI_MINOR: u32 = 8;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -366,6 +377,30 @@ pub struct LgjAbiManifest {
     pub simd_backend_name: [u8; 32],
     /// `"release"` | `"debug"`, NUL-terminated.
     pub build_profile: [u8; 16],
+    /// How many register groupings this build's `ClassView` set defines — the
+    /// number of valid entries in [`carvings`](Self::carvings). ABI minor 8.
+    pub carving_count: u32,
+    /// The register groupings, as DATA: entry `w` is the wire value `w`, packed
+    /// `(groups << 8) | group_bytes`. Entries past `carving_count` are zero.
+    ///
+    /// # Why the manifest and not a symbol
+    ///
+    /// This is the one fact that was hand-written three times — a Rust map, a
+    /// Java enum, and `abi.md`'s table — with nothing to catch drift between
+    /// them. The manifest already exists to let Java discover the ABI's shape
+    /// instead of restating it, so serving the groupings here needs no new
+    /// symbol and no new call: Java reads them at load, alongside the struct
+    /// sizes it already checks.
+    ///
+    /// The Rust side does not hand-write them either — they are derived from
+    /// the contract's own `CascadeShape::ROTATIONS`, ordered by group count
+    /// descending. So the contract owns the set, this serves it, and a
+    /// grouping added upstream propagates to Java with no edit on either side.
+    ///
+    /// Fixed at 8 slots: `G·D = 12` admits at most the divisors of 12 that are
+    /// ≥ 2 on both axes (`6×2`, `4×3`, `3×4`, `2×6`, `12×1`, `1×12`), so 8 is
+    /// headroom, not a guess. A `count` past the array is a build error below.
+    pub carvings: [u16; 8],
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +417,8 @@ const _: () = assert!(align_of::<LgjOpDesc>() == 8);
 // abi.md does not state the manifest's size (it is self-reported, which is the
 // point), but pinning it still catches an accidental field insertion:
 //   8 (magic) + 12*4 (u32 fields) + 32 (name) + 16 (profile) = 104, align 8.
-const _: () = assert!(size_of::<LgjAbiManifest>() == 104);
+// 104 (minor 7) + 4 (carving_count) + 16 (carvings) = 124, padded to 128.
+const _: () = assert!(size_of::<LgjAbiManifest>() == 128);
 const _: () = assert!(align_of::<LgjAbiManifest>() == 8);
 // A MASK_WORD is 64 row bits in one u64. If this ever stops holding, the whole
 // bit-order contract below is void.
@@ -469,6 +505,27 @@ const fn fixed_cstr<const N: usize>(src: &str) -> [u8; N] {
     out
 }
 
+/// The `carvings` table, packed from [`crate::kernels::CARVING_ORDER`].
+///
+/// Const, because [`MANIFEST`] is: the whole value of serving the groupings as
+/// data is lost if the serving side has to restate them.
+const CARVINGS: [u16; 8] = {
+    let order = crate::kernels::CARVING_ORDER;
+    // A count past the array is a build error, not a truncation: the manifest
+    // would otherwise report more entries than it carries.
+    assert!(
+        order.len() <= 8,
+        "carvings table overflow — widen the field"
+    );
+    let mut out = [0u16; 8];
+    let mut i = 0;
+    while i < order.len() {
+        out[i] = ((order[i].groups() as u16) << 8) | order[i].levels() as u16;
+        i += 1;
+    }
+    out
+};
+
 /// The `'static` the manifest getter hands out. Built entirely from
 /// `size_of` / `align_of` on the real types — never a literal.
 pub static MANIFEST: LgjAbiManifest = LgjAbiManifest {
@@ -490,6 +547,8 @@ pub static MANIFEST: LgjAbiManifest = LgjAbiManifest {
     simd_backend: detect_simd_backend().0,
     simd_backend_name: fixed_cstr::<32>(detect_simd_backend().1),
     build_profile: fixed_cstr::<16>(BUILD_PROFILE),
+    carving_count: crate::kernels::carving_count() as u32,
+    carvings: CARVINGS,
 };
 
 #[cfg(test)]
@@ -535,7 +594,10 @@ mod tests {
         assert_eq!(size_of::<LgjLaneDesc>(), 56);
         assert_eq!(size_of::<LgjResourceInfo>(), 32);
         assert_eq!(size_of::<LgjOpDesc>(), 24);
-        assert_eq!(size_of::<LgjAbiManifest>(), 104);
+        // The manifest is the one struct that GROWS with the ABI: minor 8 added
+        // the carving table. Java's load gate requires only the 104-byte base
+        // prefix, so an older artifact still loads (Layouts.MANIFEST_BASE_BYTES).
+        assert_eq!(size_of::<LgjAbiManifest>(), 128);
     }
 
     #[test]
