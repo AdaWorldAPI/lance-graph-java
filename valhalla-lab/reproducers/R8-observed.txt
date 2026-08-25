@@ -13,42 +13,42 @@ R7, and then R8 one commit later, both shipped prose quoting a different run set
 their own pinned block. Regenerate instead.
 
 === rust standalone baseline (no JVM in the process) ===
-rust-standalone generic: 0.48 s  2086.2 M ops/s  checksum 2085090877180128
-rust-standalone generic: 0.44 s  2261.8 M ops/s  checksum 2085090877180128
-rust-standalone generic: 0.47 s  2132.2 M ops/s  checksum 2085090877180128
+rust-standalone generic: 0.35 s  2881.4 M ops/s  checksum 2085090877180128
+rust-standalone generic: 0.44 s  2271.7 M ops/s  checksum 2085090877180128
+rust-standalone generic: 0.40 s  2512.8 M ops/s  checksum 2085090877180128
 
 === five arms, one JVM process, ONE native fill authority for every arm ===
 arm  ops           s        M ops/s   checksum
-A    1,000,000,000    2.19     455.7   2085090877180128
-A    1,000,000,000    3.76     266.0   2085090877180128
-A    1,000,000,000    2.21     452.7   2085090877180128
-B    1,000,000,000    0.40    2504.9   2085090877180128
-B    1,000,000,000    0.40    2488.0   2085090877180128
-B    1,000,000,000    0.40    2514.1   2085090877180128
-C      100,000,000    1.30      76.9   208554656136624
-C      100,000,000    1.19      83.7   208554656136624
-C      100,000,000    1.19      84.1   208554656136624
-D    1,000,000,000    0.43    2350.2   2085090877180128
-D    1,000,000,000    0.43    2303.4   2085090877180128
-D    1,000,000,000    0.34    2945.7   2085090877180128
+A    1,000,000,000    3.74     267.4   2085090877180128
+A    1,000,000,000    2.08     481.0   2085090877180128
+A    1,000,000,000    2.23     448.6   2085090877180128
+B    1,000,000,000    0.41    2449.8   2085090877180128
+B    1,000,000,000    0.41    2417.1   2085090877180128
+B    1,000,000,000    0.41    2437.9   2085090877180128
+C      100,000,000    1.31      76.1   208554656136624
+C      100,000,000    1.23      81.3   208554656136624
+C      100,000,000    1.21      82.4   208554656136624
+D    1,000,000,000    0.42    2377.9   2085090877180128
+D    1,000,000,000    0.42    2388.1   2085090877180128
+D    1,000,000,000    0.42    2400.5   2085090877180128
 (warm-sink true)
 C-prefix cross-check (Java sweep @1e8): 208554656136624
 
-random fill: counts rails=16290 triplets=16285 quads=32961, opsPerPass=261763, passes=3820, target=999,934,660, partition scan 40.17 ms
+random fill: counts rails=16290 triplets=16285 quads=32961, opsPerPass=261763, passes=3820, target=999,934,660, partition scan 39.68 ms
 arm  ops           s        M ops/s   checksum
-A'     999,934,660    4.85     206.2   1695630190962260
-A'     999,934,660    3.23     309.7   1695630190962260
-A'     999,934,660    5.53     180.9   1695630190962260
-B'     999,934,660    1.57     638.5   1695630190962260
-B'     999,934,660    1.57     636.3   1695630190962260
-B'     999,934,660    1.57     636.2   1695630190962260
-D'     999,934,660    0.33    3059.0   1695630190962260
-D'     999,934,660    0.32    3081.9   1695630190962260
-D'     999,934,660    0.32    3120.2   1695630190962260
-mask build (ndarray::simd, one bulk FFI call): 3.092 ms; popcounts rails=16290 triplets=16285 quads=32961 (must equal the scan's counts)
-E'     999,934,660    0.33    3036.5   1695630190962260
-E'     999,934,660    0.33    3021.1   1695630190962260
-E'     999,934,660    0.34    2935.6   1695630190962260
+A'     999,934,660    5.58     179.2   1695630190962260
+A'     999,934,660    3.63     275.8   1695630190962260
+A'     999,934,660    5.61     178.3   1695630190962260
+B'     999,934,660    1.56     640.2   1695630190962260
+B'     999,934,660    1.55     645.0   1695630190962260
+B'     999,934,660    1.55     643.7   1695630190962260
+D'     999,934,660    0.33    3036.5   1695630190962260
+D'     999,934,660    0.33    3041.6   1695630190962260
+D'     999,934,660    0.32    3090.3   1695630190962260
+mask build (ndarray::simd, one bulk FFI call): 2.882 ms; popcounts rails=16290 triplets=16285 quads=32961 (must equal the scan's counts)
+E'     999,934,660    0.34    2942.0   1695630190962260
+E'     999,934,660    0.34    2948.7   1695630190962260
+E'     999,934,660    0.33    2997.9   1695630190962260
 (warm-sink true)
 
 SYMMETRY PROOF
@@ -60,24 +60,26 @@ SYMMETRY PROOF
   so the two population representations are provably the same SET, not merely the same size.
 
 READING -- PART 1 (period-4 classid, r & 3): THE CONTROL
-  B  bulk FFI -> generic Rust   2488-2514 M ops/s vs standalone 2086-2262
-     -> ONE BULK FFI CROSSING COSTS NOTHING MEASURABLE (same compiler, same flags).
-  D  monomorphic kernels        2303-2946 M ops/s -- D > B FALSIFIED here.
+  B  bulk FFI -> generic Rust   2417-2450 M ops/s vs standalone 2272-2881
+     The two arms' observed ranges overlap.
+     -> ONE BULK PANAMA CROSSING SHOWS NO MEASURABLE PENALTY AT THIS SCALE.
+        (Deliberately NOT 'bulk FFI equals standalone Rust' -- see the note above.)
+  D  monomorphic kernels        2378-2400 M ops/s -- D > B FALSIFIED here.
      A period-4 pattern is perfectly branch-predictable, so the generic sweep's per-row
      dispatch is already free; specialization cannot beat a predictor that specialized.
-  A  Java in-process            266-456 M ops/s (~6x behind Rust, same loop)
-  C  FFI PER PROJECTION         77-84 M ops/s = ~11.9 ns/op, ~30x slower than B.
+  A  Java in-process            267-481 M ops/s (~5x behind Rust, same loop)
+  C  FFI PER PROJECTION         76-82 M ops/s = ~12.3 ns/op, ~30x slower than B.
      The anti-JNI rule, quantified.
 
 READING -- PART 2 (random classid, SplitMix64): WHERE DISPATCH ACTUALLY COSTS
-  A'  Java                       181-310 M ops/s
-  B'  generic Rust, per-row match 636-638 M ops/s -- a 3.9x COLLAPSE from part 1.
+  A'  Java                       178-276 M ops/s
+  B'  generic Rust, per-row match 640-645 M ops/s -- a 3.8x COLLAPSE from part 1.
       The dispatch cost was always there; the branch predictor was paying it.
-  D'  index-list partition -> mono kernels 3059-3120 M ops/s (4.84x B')
-  E'  ndarray::simd masks -> mask sweep    2936-3036 M ops/s (4.75x B')
+  D'  index-list partition -> mono kernels 3036-3090 M ops/s (4.73x B')
+  E'  ndarray::simd masks -> mask sweep    2942-2998 M ops/s (4.58x B')
 
 THE FINDING
-  Under a distribution where dispatch actually costs, the split architecture wins ~4.7x
+  Under a distribution where dispatch actually costs, the split architecture wins ~4.6x
   -- the selector layer (classid -> ClassView -> mask) creates the information ONCE,
   before the sweep, where the monolithic generic loop re-derives it per row and eats
   the mispredict every time.
@@ -85,17 +87,17 @@ THE FINDING
   THE COMPARISON THAT MATTERS IS END-TO-END, NOT SWEEP-ONLY (operator correction).
   D' and E' sweeps are effectively tied, so quoting E' as '2-3% slower' understates it.
   What differs is BUILDING the population, and that must be counted:
-      D' = build  40.17 ms (Java scalar scan -> index lists) + sweep  320.0 ms =  360.2 ms
-      E' = build   3.09 ms (ndarray::simd, ONE bulk call)   + sweep  330.0 ms =  333.1 ms
-    -> the lawful mask pipeline wins END-TO-END by 8% on the FIRST execution (13.0x cheaper to build),
+      D' = build  39.68 ms (Java scalar scan -> index lists) + sweep  330.0 ms =  369.7 ms
+      E' = build   2.88 ms (ndarray::simd, ONE bulk call)   + sweep  340.0 ms =  342.9 ms
+    -> the lawful mask pipeline wins END-TO-END by 8% on the FIRST execution (13.8x cheaper to build),
        and leaves behind a MASK -- reusable for and/or/andnot, authorization, traversal,
        attention -- where D' leaves an index list that is a materialized population the
        mask-native law forbids as internal currency.
 
   Amortization terms:
-      B' 0.4114 ms/pass; D' 0.0849; E' 0.0866 -> saving 0.3247 ms/pass vs B'
-      break-even for the 3.09 ms mask build : ~10 passes
-      break-even for the 40.17 ms Java scan  : ~124 passes
+      B' 0.4067 ms/pass; D' 0.0861; E' 0.0888 -> saving 0.3179 ms/pass vs B'
+      break-even for the 2.88 ms mask build : ~9 passes
+      break-even for the 39.68 ms Java scan  : ~125 passes
 
 WHAT THIS DOES AND DOES NOT SHOW
   - NOT 'Java is faster than Rust'. The winning kernels ARE Rust; the masks are built by
@@ -109,4 +111,4 @@ WHAT THIS DOES AND DOES NOT SHOW
 
 STABILITY
   Every figure above is an observed range or a median over the raw runs printed in this
-  same file. Java arms spread up to 1.7x run-to-run; Rust-kernel arms a few percent.
+  same file. Java arms spread up to 1.8x run-to-run; Rust-kernel arms a few percent.
