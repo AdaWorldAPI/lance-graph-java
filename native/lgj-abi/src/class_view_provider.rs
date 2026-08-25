@@ -47,6 +47,7 @@
 //! side of this conversion for real.
 
 use lance_graph_contract::class_view::{ClassId, ClassView, FieldMask};
+use lance_graph_contract::facet::CascadeShape;
 use lance_graph_contract::ontology::{DisplayTemplate, FieldRef};
 use std::sync::OnceLock;
 
@@ -98,6 +99,13 @@ impl ClassView for FixtureClassView {
         DisplayTemplate::Card
     }
 
+    /// The fixture's per-class register grouping — see
+    /// [`FixtureClassView::fixture_cascade_shape`] for why this varies rather
+    /// than returning the trait's constant zero-fallback.
+    fn cascade_shape(&self, class: ClassId) -> CascadeShape {
+        FixtureClassView::fixture_cascade_shape(class)
+    }
+
     /// No DOLCE taxonomy in the fixture domain — category `0` for every
     /// class, the same "no answer beyond the default" reading
     /// `is_a_parent`'s trait default already uses for taxonomy.
@@ -108,6 +116,35 @@ impl ClassView for FixtureClassView {
     // `edge_codec_flavor` is left at the trait default (`CoarseOnly`,
     // class_view.rs:1109) — unused by decode mode 0 (spec §3.4), and this
     // fixture domain has no reason to opt into residue/PQ fidelity.
+}
+
+/// How this fixture carves the 12-byte content-blind register, per class —
+/// the `ClassView::cascade_shape` override (contract, 2026-08-25).
+///
+/// **This VARIES by class, deliberately, and that is a fixture choice rather
+/// than canon.** The trait's own zero-fallback is a constant `G3D4`, and a
+/// constant answer would make every population trivially homogeneous — so the
+/// "does this population resolve to ONE grouping" guard could never fire, and a
+/// test for it would pass for an implementation that never checked. Varying by
+/// `class % 3` makes both outcomes reachable on the real fixture: a mask built
+/// by `lgj_op_eq_classid` is single-class and resolves; a union across classids
+/// is mixed and is rejected.
+///
+/// The cycle is `G6D2, G4D3, G3D4` — the contract's own `ROTATIONS` order
+/// reversed to group-count ascending, matching how `CascadeShape` documents the
+/// three inherited schemas (Rails `6×2`, other frameworks `4×3`, the GUID
+/// `3×4`). A real provider resolves this from the class registry instead.
+impl FixtureClassView {
+    /// The fixture's per-class grouping, exposed for tests that need to predict
+    /// it without going through the trait object.
+    #[must_use]
+    pub const fn fixture_cascade_shape(class: ClassId) -> CascadeShape {
+        match class % 3 {
+            0 => CascadeShape::G6D2,
+            1 => CascadeShape::G4D3,
+            _ => CascadeShape::G3D4,
+        }
+    }
 }
 
 /// Which of a class's 32 facet positions [`crate::exports::lgj_hop`] may

@@ -909,7 +909,7 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum(
         if out_sum.is_null() {
             return LGJ_ERR_NULL_ARGUMENT;
         }
-        let carving = match kernels::Carving::from_wire(carving) {
+        let carving = match kernels::carving_from_wire(carving) {
             Some(c) => c,
             None => return LGJ_ERR_UNSUPPORTED_CARVING,
         };
@@ -959,6 +959,114 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum(
         drop(g);
         // SAFETY: non-null, checked above; written only on success.
         unsafe { *out_sum = sum };
+        LGJ_OK
+    })
+}
+
+/// Sum one facet's register under the grouping the POPULATION ITSELF resolves
+/// to — the verified sibling of [`lgj_reduce_facet_sum`] (ABI minor >= 6,
+/// `docs/abi.md` §15).
+///
+/// `lgj_reduce_facet_sum` applies a grouping the caller asserts. This one
+/// DERIVES it: for every selected row it resolves `facet classid -> ClassId ->
+/// ClassView::cascade_shape` and requires every row to agree, then sweeps
+/// monomorphically under that answer. The resolved grouping is reported back
+/// through `out_carving`, so a caller learns what it got rather than assuming.
+///
+/// This is the `ResolvedCarving` shape: `classid -> ClassView -> (population +
+/// its grouping) -> sum`. The question is asked ONCE at the population's edge
+/// and never inside the sweep, so the hot loop still carries no dispatch —
+/// resolving per row would be the defect this whole path exists to avoid.
+///
+/// # Failure is the interesting case
+///
+/// `LGJ_ERR_UNRESOLVED_CARVING` when the population does not resolve to one
+/// grouping: it spans classes that read the register differently, or a row's
+/// classid has no `ClassView` answer, or it is EMPTY (zero rows carry zero
+/// classes — reporting the zero-fallback there would be inventing an answer).
+/// Neither output is written in that case.
+///
+/// # Safety
+///
+/// Null `out_sum`/`out_carving` are *handled*, not UB: `NULL_ARGUMENT`.
+/// Otherwise each must point at one writable, correctly-aligned slot; both are
+/// written only on `LGJ_OK`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_reduce_facet_sum_resolved(
+    res: u64,
+    facet: u32,
+    mask: u64,
+    out_sum: *mut i64,
+    out_carving: *mut u32,
+) -> i32 {
+    guard(|| {
+        if out_sum.is_null() || out_carving.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        if facet >= crate::rowstore::ROW_FACETS {
+            return LGJ_ERR_INVALID_LANE;
+        }
+        let (maskr, parent) = match registry::resolve_mask_with_parent(mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        if maskr.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let facet_off = facet as usize * crate::rowstore::FACET_BYTES as usize;
+        let stride = crate::rowstore::ROW_BYTES as usize;
+        let n = store_entry.n_rows as usize;
+
+        // The ClassView consult, once per selected row, BEFORE any sweep.
+        let carving = match kernels::resolve_population_carving(
+            store.as_bytes(),
+            facet_off,
+            stride,
+            n,
+            &g.words,
+            |classid| {
+                crate::class_view_provider::class_id_for(classid).map(|cid| {
+                    use lance_graph_contract::class_view::ClassView;
+                    crate::class_view_provider::FixtureClassView.cascade_shape(cid)
+                })
+            },
+        ) {
+            Some(c) => c,
+            None => return LGJ_ERR_UNRESOLVED_CARVING,
+        };
+
+        let sum = match kernels::masked_facet_sum(
+            store.as_bytes(),
+            facet_off,
+            stride,
+            n,
+            carving,
+            &g.words,
+        ) {
+            Some(v) => v,
+            None => return LGJ_ERR_SUM_OVERFLOW,
+        };
+        drop(g);
+        // SAFETY: both non-null, checked above; written only on success.
+        unsafe {
+            *out_sum = sum;
+            *out_carving = kernels::carving_to_wire(carving);
+        }
         LGJ_OK
     })
 }

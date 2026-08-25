@@ -35,6 +35,9 @@ public final class Engine {
         // explicit lifetime to get wrong, and no leak because the ThreadLocal holds exactly one.
         private final Arena arena = Arena.ofAuto();
         private final MemorySegment out = arena.allocate(OUT_BYTES, 8);
+        // A SECOND out slot, for the one op that returns two scalars
+        // (lgj_reduce_facet_sum_resolved: the sum AND the grouping it resolved).
+        private final MemorySegment out2 = arena.allocate(OUT_BYTES, 8);
         private final MemorySegment info = arena.allocate(Layouts.RESOURCE_INFO);
         private final MemorySegment desc = arena.allocate(Layouts.LANE_DESC);
         private MemorySegment ops = arena.allocate(Layouts.OP_DESC, 8);
@@ -203,6 +206,17 @@ public final class Engine {
      * {@code mask} selects (abi.md §14, ABI minor 5). Cost is
      * {@code O(mask words + popcount * groups)}. Requires ABI minor &gt;= 5.
      */
+    /**
+     * Sum one facet's register under the grouping the POPULATION resolves to (abi.md §15, ABI
+     * minor 6), returning {@code [sum, carvingWire]}. Requires ABI minor &gt;= 6.
+     */
+    public static long[] facetSumResolved(long store, int facet, long mask) {
+        Abi.requireMinor(6);
+        Scratch s = SCRATCH.get();
+        long sum = Downcalls.reduceFacetSumResolved(store, facet, mask, s.out, s.out2);
+        return new long[] {sum, s.out2.get(ValueLayout.JAVA_INT, 0)};
+    }
+
     public static long facetSumAs(long store, int facet, int carving, long mask) {
         Abi.requireMinor(5);
         Scratch s = SCRATCH.get();

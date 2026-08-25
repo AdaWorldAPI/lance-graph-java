@@ -32,6 +32,10 @@
 //! the final word are zero.
 
 use crate::abi::*;
+use lance_graph_contract::facet::CascadeShape;
+
+/// Bytes of classid at the head of each facet, before its 12-byte register.
+const FACET_CLASSID_BYTES: usize = 4;
 
 // ───────────────────────────────────────────────────────────────────────────
 // SIMD path — thin wrappers over ndarray::simd
@@ -406,54 +410,117 @@ pub fn masked_sum_i32(path: Path, values: &[i32], mask_words: &[u64]) -> i64 {
     }
 }
 
-/// The three readings of the V3 content-blind 12-byte facet register
-/// (`le-contract.md` §3): `6*(u8:u8)` rails, `4*(u8:u8:u8)` SPO triplets,
-/// `3*(u8:u8:u8:u8)` odoo quads. `6*2 = 4*3 = 3*4 = 12` — the SAME bytes,
-/// three groupings, and which one applies is a property of the class, never
-/// of the bytes.
+/// The three readings of the V3 content-blind 12-byte facet register.
 ///
-/// The wire form is a caller-supplied, validated `u32` rather than a
-/// ClassView consult, following `lgj_hop`'s `decode_mode` precedent
-/// (spec §3.4): a reserved value is REJECTED, never silently defaulted.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Carving {
-    /// 6 groups of 2 bytes, little-endian `u16` each.
-    Rails6x2,
-    /// 4 groups of 3 bytes, little-endian `u24` each (zero-extended).
-    Triplets4x3,
-    /// 3 groups of 4 bytes, little-endian `u32` each (zero-extended).
-    Quads3x4,
+/// **This is a THIN WIRE ADAPTER over the contract's own
+/// [`CascadeShape`](lance_graph_contract::facet::CascadeShape), not a type of
+/// its own.** An earlier version of this file minted a local `Carving` enum
+/// with variants `Rails6x2`/`Triplets4x3`/`Quads3x4`; those are exactly
+/// `CascadeShape::{G6D2, G4D3, G3D4}`, which have carried the full algebra
+/// (`groups`/`levels`/`group_of`/`index`) and the statement that the grouping
+/// is "class-conditioned: `classid` selects it from the inherited schema" all
+/// along. Re-minting them here was the parallel-object-model anti-pattern in
+/// miniature. What remains local is only the u32 WIRE ENCODING, because a
+/// `#[repr]` discriminant is not part of the contract's promise and pinning one
+/// across the membrane is this crate's job.
+pub type Carving = CascadeShape;
+
+/// Wire `u32` -> the contract's grouping. `None` for anything else, so an
+/// unknown reading is a rejected call rather than an aliased one.
+///
+/// The mapping is by GROUP COUNT, not by declaration order, so it stays correct
+/// if `CascadeShape`'s variants are ever reordered: `0 -> 6` groups, `1 -> 4`,
+/// `2 -> 3`. A test pins that correspondence.
+pub fn carving_from_wire(v: u32) -> Option<Carving> {
+    match v {
+        0 => Some(CascadeShape::G6D2),
+        1 => Some(CascadeShape::G4D3),
+        2 => Some(CascadeShape::G3D4),
+        _ => None,
+    }
 }
 
-impl Carving {
-    /// Wire `u32` -> carving. `None` for every other value, so an unknown
-    /// reading is a rejected call rather than an aliased one.
-    pub fn from_wire(v: u32) -> Option<Self> {
-        match v {
-            0 => Some(Carving::Rails6x2),
-            1 => Some(Carving::Triplets4x3),
-            2 => Some(Carving::Quads3x4),
-            _ => None,
-        }
+/// The wire value for a grouping — the inverse of [`carving_from_wire`], used
+/// when the ABI REPORTS a resolved grouping back to the caller.
+pub fn carving_to_wire(c: Carving) -> u32 {
+    match c {
+        CascadeShape::G6D2 => 0,
+        CascadeShape::G4D3 => 1,
+        CascadeShape::G3D4 => 2,
     }
+}
 
-    /// Groups per register under this reading.
-    pub fn groups(self) -> usize {
-        match self {
-            Carving::Rails6x2 => 6,
-            Carving::Triplets4x3 => 4,
-            Carving::Quads3x4 => 3,
-        }
-    }
+/// Groups per register under this reading — delegates to the contract.
+#[inline]
+fn groups_of(c: Carving) -> usize {
+    c.groups() as usize
+}
 
-    /// Bytes per group. `groups() * group_bytes() == 12`, asserted in tests.
-    pub fn group_bytes(self) -> usize {
-        match self {
-            Carving::Rails6x2 => 2,
-            Carving::Triplets4x3 => 3,
-            Carving::Quads3x4 => 4,
+/// Bytes per group under this reading — delegates to the contract.
+/// `groups_of * group_bytes_of == 12` for every shape, by `CascadeShape`'s own
+/// `G·D = CASCADE_UNITS` invariant.
+#[inline]
+fn group_bytes_of(c: Carving) -> usize {
+    c.levels() as usize
+}
+
+/// Resolve the ONE grouping a masked population reads its register under, or
+/// report that it has none.
+///
+/// This is `ResolvedCarving`: the answer is derived FROM the population and
+/// verified, instead of supplied alongside it and trusted. For every selected
+/// row it reads the facet's classid, resolves it through the `ClassView`
+/// (`classid -> ClassId -> cascade_shape`), and requires every row to agree.
+///
+/// Returns `None` when the population does not resolve to a single grouping —
+/// either it spans classes with different groupings, or some row's classid has
+/// no `ClassView` answer at all. Both are the same fact for a caller: there is
+/// no one reading that is correct for these rows.
+///
+/// An EMPTY population resolves to `None` too, and deliberately: zero rows
+/// carry zero classes, so there is nothing to resolve from. Reporting the
+/// zero-fallback there would be inventing an answer.
+///
+/// # Cost, and where the question is NOT asked
+///
+/// `O(mask_words + popcount)` — one classid read per selected row, ONCE, before
+/// any sweep. The sweep that follows is monomorphic: the grouping is decided,
+/// so the hot loop carries no per-row dispatch. That is the whole point — the
+/// question is asked once at the population's edge, never per row inside it.
+pub fn resolve_population_carving(
+    bytes: &[u8],
+    facet_off: usize,
+    row_stride: usize,
+    n_rows: usize,
+    mask_words: &[u64],
+    shape_of: impl Fn(u32) -> Option<Carving>,
+) -> Option<Carving> {
+    let mut resolved: Option<Carving> = None;
+    for (w, &word) in mask_words.iter().enumerate() {
+        let base_row = w * 64;
+        if base_row >= n_rows {
+            break;
+        }
+        let mut bits = word;
+        let valid = n_rows - base_row;
+        if valid < 64 {
+            bits &= (1u64 << valid) - 1;
+        }
+        while bits != 0 {
+            let row = base_row + bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let o = row * row_stride + facet_off;
+            let classid = u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+            let shape = shape_of(classid)?;
+            match resolved {
+                None => resolved = Some(shape),
+                Some(seen) if seen == shape => {}
+                // Mixed groupings: no single reading is correct here.
+                Some(_) => return None,
+            }
         }
     }
+    resolved
 }
 
 /// Sum every group of one facet's 12-byte register, over the rows selected by
@@ -464,23 +531,20 @@ impl Carving {
 /// the mask's POPCOUNT, not to `n_rows`, so an empty mask is O(words) and the
 /// anti-JNI rule (§6: bulk or lifecycle) is satisfied by construction.
 ///
-/// # SIMD provenance, stated honestly (§8)
+/// # SIMD provenance (§8) — the named gap is CLOSED
 ///
-/// This kernel is SCALAR, and deliberately so. `ndarray::simd` has no
-/// primitive for "gather a sub-word group out of a 512-byte-strided register
-/// under a runtime grouping and widen-accumulate"; `masked_sum_i32` is
-/// contiguous `i32`, and the strided classid compare
-/// (`eq_u32_strided_to_mask`) reads ONE aligned `u32` per row, not six
-/// unaligned `u16`s. Writing raw intrinsics here would create exactly the
-/// second SIMD surface §8 exists to prevent, so the scalar form is the
-/// in-bounds implementation and the vector form is a NAMED GAP: a candidate
-/// `ndarray::simd` addition under the W1a consumer contract, to be added
-/// THERE and consumed here — never re-implemented at this layer.
+/// This delegates to `ndarray::simd::masked_strided_group_sum`. An earlier
+/// version carried its own scalar loop and documented the absence of that
+/// primitive as a named gap under the W1a consumer contract: added THERE,
+/// consumed here, never re-implemented at this layer. It was added there, so
+/// this is now the consumption.
 ///
-/// Sub-word loads are byte-wise rather than `u16`/`u32` reads because a
-/// group's offset is `facet*16 + 4 + g*group_bytes`, which is not guaranteed
-/// aligned for the 3-byte reading — and an unaligned wide read is UB in Rust
-/// even where the hardware tolerates it.
+/// The upstream kernel is itself scalar, and its doc says why with the
+/// measurement rather than an apology: one small register per record at a large
+/// stride is memory-bound, records are not adjacent so several cannot be
+/// vector-loaded, and widening six `u16`s inside one record would optimise the
+/// part that is already free. A contiguous variant would genuinely vectorise and
+/// is named there as a different primitive, not a flag on this one.
 ///
 /// # Overflow is REPORTED, never wrapped
 ///
@@ -505,38 +569,20 @@ pub fn masked_facet_sum(
     carving: Carving,
     mask_words: &[u64],
 ) -> Option<i64> {
-    let groups = carving.groups();
-    let gb = carving.group_bytes();
-    let mut acc: i128 = 0;
-    for (w, &word) in mask_words.iter().enumerate() {
-        let base_row = w * 64;
-        if base_row >= n_rows {
-            break;
-        }
-        let mut bits = word;
-        // Clamp the final partial word so a dirty tail cannot index past the
-        // row count — the same guard `masked_sum_i32` applies, for the same
-        // reason (mask tails are cleared on write, but a kernel that only
-        // works on well-formed input is a latent bug, not a contract).
-        let valid = n_rows - base_row;
-        if valid < 64 {
-            bits &= (1u64 << valid) - 1;
-        }
-        while bits != 0 {
-            let row = base_row + bits.trailing_zeros() as usize;
-            bits &= bits - 1;
-            let reg = row * row_stride + facet_off + 4; // +4: past the classid
-            for g in 0..groups {
-                let o = reg + g * gb;
-                let mut v: u32 = 0;
-                for k in 0..gb {
-                    v |= (bytes[o + k] as u32) << (8 * k);
-                }
-                acc += v as i128;
-            }
-        }
-    }
-    i64::try_from(acc).ok()
+    // The whole body is now ONE call into the sanctioned surface. The hand-rolled
+    // loop this replaces was the §8 violation-in-waiting the doc-comment above
+    // named as a gap: it lived here only because `ndarray::simd` had no primitive
+    // for a strided sub-word group gather. It does now, so this crate consumes it
+    // rather than carrying its own copy.
+    ndarray::simd::masked_strided_group_sum(
+        bytes,
+        facet_off + FACET_CLASSID_BYTES,
+        row_stride,
+        n_rows,
+        groups_of(carving),
+        group_bytes_of(carving),
+        mask_words,
+    )
 }
 
 #[cfg(test)]
@@ -808,9 +854,9 @@ mod tests {
     /// still returns a plausible number.
     #[test]
     fn every_carving_covers_exactly_the_twelve_byte_register() {
-        for c in [Carving::Rails6x2, Carving::Triplets4x3, Carving::Quads3x4] {
+        for c in [CascadeShape::G6D2, CascadeShape::G4D3, CascadeShape::G3D4] {
             assert_eq!(
-                c.groups() * c.group_bytes(),
+                groups_of(c) * group_bytes_of(c),
                 12,
                 "{c:?} does not cover 12 B"
             );
@@ -821,11 +867,11 @@ mod tests {
     /// reading. `from_wire` is the only place that decision is made.
     #[test]
     fn unknown_carving_wire_values_are_rejected_not_defaulted() {
-        assert_eq!(Carving::from_wire(0), Some(Carving::Rails6x2));
-        assert_eq!(Carving::from_wire(1), Some(Carving::Triplets4x3));
-        assert_eq!(Carving::from_wire(2), Some(Carving::Quads3x4));
+        assert_eq!(carving_from_wire(0), Some(CascadeShape::G6D2));
+        assert_eq!(carving_from_wire(1), Some(CascadeShape::G4D3));
+        assert_eq!(carving_from_wire(2), Some(CascadeShape::G3D4));
         for v in [3u32, 4, 16, u32::MAX] {
-            assert_eq!(Carving::from_wire(v), None, "wire {v} must not decode");
+            assert_eq!(carving_from_wire(v), None, "wire {v} must not decode");
         }
     }
 
@@ -863,15 +909,15 @@ mod tests {
         let quads = 0x04030201 + 0x08070605 + 0x0C0B0A09i64;
 
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 2, Carving::Rails6x2, &only_row0).unwrap(),
+            masked_facet_sum(&b, 0, 512, 2, CascadeShape::G6D2, &only_row0).unwrap(),
             rails
         );
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 2, Carving::Triplets4x3, &only_row0).unwrap(),
+            masked_facet_sum(&b, 0, 512, 2, CascadeShape::G4D3, &only_row0).unwrap(),
             trips
         );
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &only_row0).unwrap(),
+            masked_facet_sum(&b, 0, 512, 2, CascadeShape::G3D4, &only_row0).unwrap(),
             quads
         );
 
@@ -883,7 +929,7 @@ mod tests {
         // None of them may have touched facet 1's 0xFFFFFFFF poison: any sum
         // that did would exceed the largest legal quads reading by a wide
         // margin (the poison alone is 4 294 967 295).
-        for c in [Carving::Rails6x2, Carving::Triplets4x3, Carving::Quads3x4] {
+        for c in [CascadeShape::G6D2, CascadeShape::G4D3, CascadeShape::G3D4] {
             assert!(
                 masked_facet_sum(&b, 0, 512, 2, c, &only_row0).unwrap() < 0xFFFF_FFFF,
                 "{c:?} read past its 12-byte register into the next facet"
@@ -898,7 +944,7 @@ mod tests {
     #[test]
     fn the_mask_selects_rows_rather_than_being_decoration() {
         let b = two_row_fixture();
-        let f = |m: u64| masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[m]).unwrap();
+        let f = |m: u64| masked_facet_sum(&b, 0, 512, 2, CascadeShape::G3D4, &[m]).unwrap();
         let (r0, r1) = (f(0b01), f(0b10));
         assert_eq!(f(0b00), 0, "an empty mask must sum nothing");
         assert_ne!(r0, r1, "the two rows must carry different content");
@@ -914,8 +960,8 @@ mod tests {
     #[test]
     fn a_dirty_tail_bit_past_n_rows_is_ignored() {
         let b = two_row_fixture();
-        let clean = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b011]).unwrap();
-        let dirty = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b111]).unwrap();
+        let clean = masked_facet_sum(&b, 0, 512, 2, CascadeShape::G3D4, &[0b011]).unwrap();
+        let dirty = masked_facet_sum(&b, 0, 512, 2, CascadeShape::G3D4, &[0b111]).unwrap();
         assert_eq!(clean, dirty, "a bit past n_rows must contribute nothing");
     }
 
@@ -937,7 +983,7 @@ mod tests {
         let b = vec![0u8; 512]; // one row of storage...
         let words = vec![0u64; 16]; // ...but a mask sized for 1024 rows
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 1024, Carving::Rails6x2, &words).unwrap(),
+            masked_facet_sum(&b, 0, 512, 1024, CascadeShape::G6D2, &words).unwrap(),
             0
         );
     }
@@ -964,7 +1010,7 @@ mod tests {
         let b = vec![0u8; 512]; // exactly one row of storage
         let words = vec![0u64, 0, 0b1]; // word 2 starts at row 128 > n_rows
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 64, Carving::Quads3x4, &words).unwrap(),
+            masked_facet_sum(&b, 0, 512, 64, CascadeShape::G3D4, &words).unwrap(),
             0
         );
     }
@@ -993,7 +1039,7 @@ mod tests {
         let per_sweep = rows as i128 * 3 * 0xFFFF_FFFFi128;
 
         // One sweep is comfortably inside i64 — the guard must not fire here.
-        let one = masked_facet_sum(&b, 0, 512, rows, Carving::Quads3x4, &all);
+        let one = masked_facet_sum(&b, 0, 512, rows, CascadeShape::G3D4, &all);
         assert_eq!(
             one,
             Some(per_sweep as i64),
@@ -1020,5 +1066,132 @@ mod tests {
         let per_row = 3i128 * 0xFFFF_FFFFi128;
         let rows_to_overflow = i64::MAX as i128 / per_row;
         assert_eq!(rows_to_overflow, 715_827_882, "the documented row bound");
+    }
+
+    // ── resolve_population_carving (ABI minor 6, docs/abi.md §15) ──
+
+    /// The wire mapping is pinned BY GROUP COUNT, not by declaration order, so
+    /// it survives a reorder of `CascadeShape`'s variants upstream. Without
+    /// this, swapping the local enum for the contract's type could silently
+    /// re-map every wire value.
+    #[test]
+    fn the_wire_mapping_is_pinned_by_group_count_not_declaration_order() {
+        assert_eq!(groups_of(carving_from_wire(0).unwrap()), 6);
+        assert_eq!(groups_of(carving_from_wire(1).unwrap()), 4);
+        assert_eq!(groups_of(carving_from_wire(2).unwrap()), 3);
+        for v in [3u32, 4, u32::MAX] {
+            assert!(carving_from_wire(v).is_none(), "wire {v} must not decode");
+        }
+        // Round-trip, so REPORTING a resolved grouping cannot disagree with
+        // accepting one.
+        for shape in CascadeShape::ROTATIONS {
+            assert_eq!(carving_from_wire(carving_to_wire(shape)), Some(shape));
+        }
+        // And every shape still tiles the same 12 units.
+        for shape in CascadeShape::ROTATIONS {
+            assert_eq!(groups_of(shape) * group_bytes_of(shape), 12);
+        }
+    }
+
+    /// A buffer of `n` rows whose facet-0 classids are `classids[i]`.
+    fn rows_with_classids(classids: &[u32]) -> Vec<u8> {
+        let mut b = vec![0u8; classids.len() * 512];
+        for (r, &cid) in classids.iter().enumerate() {
+            b[r * 512..r * 512 + 4].copy_from_slice(&cid.to_le_bytes());
+            for k in 0..12 {
+                b[r * 512 + 4 + k] = (r + k) as u8;
+            }
+        }
+        b
+    }
+
+    /// The fixture resolver used below: class % 3, matching
+    /// `class_view_provider::FixtureClassView`'s own override.
+    fn shape_by_class(classid: u32) -> Option<Carving> {
+        match classid % 3 {
+            0 => Some(CascadeShape::G6D2),
+            1 => Some(CascadeShape::G4D3),
+            _ => Some(CascadeShape::G3D4),
+        }
+    }
+
+    /// A single-class population resolves; and it resolves to the class's OWN
+    /// answer, not to a constant — checked across all three groupings, so an
+    /// implementation returning one fixed shape fails.
+    #[test]
+    fn a_single_class_population_resolves_to_that_class_grouping() {
+        for (cid, want) in [
+            (3u32, CascadeShape::G6D2),
+            (4, CascadeShape::G4D3),
+            (5, CascadeShape::G3D4),
+        ] {
+            let b = rows_with_classids(&[cid, cid, cid]);
+            let got = resolve_population_carving(&b, 0, 512, 3, &[0b111], shape_by_class);
+            assert_eq!(got, Some(want), "classid {cid}");
+        }
+    }
+
+    /// A population spanning classes that read the register DIFFERENTLY has no
+    /// single correct reading, and must say so rather than pick one.
+    ///
+    /// Paired with a can-stay-silent half: two classes that happen to share a
+    /// grouping (3 and 6 are both `% 3 == 0`) must still RESOLVE. Without that,
+    /// this would pass for an implementation that rejected every multi-class
+    /// population regardless of whether the groupings actually differ.
+    #[test]
+    fn a_mixed_grouping_population_is_rejected_but_a_mixed_class_one_is_not() {
+        let mixed = rows_with_classids(&[3, 4, 5]); // G6D2, G4D3, G3D4
+        assert_eq!(
+            resolve_population_carving(&mixed, 0, 512, 3, &[0b111], shape_by_class),
+            None,
+            "three different groupings must not resolve"
+        );
+
+        let same_shape = rows_with_classids(&[3, 6, 9]); // all % 3 == 0 -> G6D2
+        assert_eq!(
+            resolve_population_carving(&same_shape, 0, 512, 3, &[0b111], shape_by_class),
+            Some(CascadeShape::G6D2),
+            "different CLASSES that share a grouping must still resolve"
+        );
+
+        // And the mask genuinely selects which rows are consulted: masking the
+        // mixed buffer down to one row resolves to that row's own grouping.
+        assert_eq!(
+            resolve_population_carving(&mixed, 0, 512, 3, &[0b010], shape_by_class),
+            Some(CascadeShape::G4D3),
+            "row 1 alone must resolve to classid 4's grouping"
+        );
+    }
+
+    /// A classid with no ClassView answer makes the population unresolvable —
+    /// it is not silently skipped, which would let one unknown row hide inside
+    /// an otherwise uniform population.
+    #[test]
+    fn a_row_with_no_classview_answer_makes_the_population_unresolvable() {
+        let b = rows_with_classids(&[3, 3, 3]);
+        let deny_row_1 = |cid: u32| if cid == 99 { None } else { shape_by_class(cid) };
+        assert_eq!(
+            resolve_population_carving(&b, 0, 512, 3, &[0b111], deny_row_1),
+            Some(CascadeShape::G6D2),
+            "control: all answerable"
+        );
+
+        let with_unknown = rows_with_classids(&[3, 99, 3]);
+        assert_eq!(
+            resolve_population_carving(&with_unknown, 0, 512, 3, &[0b111], deny_row_1),
+            None,
+            "an unanswerable classid must not be skipped"
+        );
+    }
+
+    /// An EMPTY population resolves to nothing. Zero rows carry zero classes,
+    /// so any answer would be invented — including the zero-fallback.
+    #[test]
+    fn an_empty_population_resolves_to_nothing_rather_than_a_default() {
+        let b = rows_with_classids(&[3, 3, 3]);
+        assert_eq!(
+            resolve_population_carving(&b, 0, 512, 3, &[0b000], shape_by_class),
+            None
+        );
     }
 }

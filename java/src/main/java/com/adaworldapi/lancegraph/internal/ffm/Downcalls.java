@@ -429,6 +429,16 @@ public final class Downcalls {
         private Minor5() {}
     }
 
+    /** The mask-native sweep under a RESOLVED grouping (docs/abi.md §15, ABI minor 6). */
+    private static final class Minor6 {
+        static final MethodHandle REDUCE_FACET_SUM_RESOLVED = mh("lgj_reduce_facet_sum_resolved",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS));
+
+        private Minor6() {}
+    }
+
     /**
      * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
      *
@@ -445,6 +455,24 @@ public final class Downcalls {
             throw wrap("lgj_reduce_facet_sum", t);
         }
         Status.check("lgj_reduce_facet_sum", st);
+        return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * Sum one facet's register under the grouping the population itself resolves to, writing the
+     * sum to {@code outSum} and the resolved grouping's wire value to {@code outCarving}.
+     */
+    public static long reduceFacetSumResolved(long res, int facet, long mask, MemorySegment outSum,
+            MemorySegment outCarving) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor6.REDUCE_FACET_SUM_RESOLVED.invokeExact(res, facet, mask, outSum,
+                    outCarving);
+        } catch (Throwable t) {
+            throw wrap("lgj_reduce_facet_sum_resolved", t);
+        }
+        Status.check("lgj_reduce_facet_sum_resolved", st);
         return outSum.get(ValueLayout.JAVA_LONG, 0);
     }
 
