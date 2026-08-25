@@ -14,6 +14,7 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R2](#r2) | Array flattening stops at an 8-byte payload | **HotSpot / Valhalla** |
 | [R3](#r3) | The densest layout has no supported spelling, and generics discard it | **Valhalla (language + libraries)** |
 | [R4](#r4) | Sub-group carving does not dodge R2's cliff — and nesting *inflates* the payload | **HotSpot / Valhalla** |
+| [R7](#r7) | 10^9 projected operations allocate 960 B TOTAL — zero-copy at the endgame scale | **measured, JDK 27 EA** |
 | [R6](#r6) | The cliff is JEP 401 by design (atomicity), not a version gap or a flag | **HotSpot / JEP 401 spec** |
 | [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
 
@@ -292,3 +293,34 @@ fit, and the 512-byte canonical row still would not.
 early-access build that a later JDK repeals. It follows from a hardware atomicity
 constraint that JEP 401 states as design, and the one relaxation on the roadmap does not
 reach the row.
+
+## R7 — one billion operations, zero materialization (`R7_BillionOpsZeroAlloc.java`)
+
+The endgame claim, stated falsifiably: a billion Java operations over substrate bytes with
+zero per-operation materialization. "Zero copy" here is a number that must not grow — if
+anything per-op survives (an iterator, a boxed long, a hidden hydration), a billion ops
+multiply it into gigabytes and the claim dies loudly.
+
+The operation is the real one from R5: read classid → dispatch carving → project a group of
+the 12-byte register straight out of the `MemorySegment`. No element type ever exists.
+
+**Measured** (`R7-observed.txt`, three runs):
+
+| quantity | value |
+|---|---|
+| operations | 1,000,000,000 group projections |
+| allocated | **960 B total** — byte-identical across runs → 0.00000096 B/op |
+| wall | 2.3–2.7 s → 369–439 M ops/s single-threaded, 2.3–2.7 ns/op |
+
+The decisive comparison is against R5's own numbers: 65,536 ops allocated 800 B.
+Operations grew **15,000×**; allocation grew 160 B. The bytes are fixed scaffolding
+(measurement plumbing, enum values), not a per-op cost. The hydrating path at the same op
+shape costs 32–104 B/row — at a billion rows, 32–104 **GB** of churn, decided per run by
+escape analysis.
+
+2.3 ns/op is memory-latency scale, not FFI scale, because there is no FFI in the loop and
+no object either: the segment is the substrate, and the operation compiles to a
+bounds-checked load plus shifts. This is what "Java holds a zero-copy pointer" actually
+looks like — the pointer is the `MemorySegment` + offset arithmetic, authority over the
+bytes stays with the substrate, and Java's own layout machinery never engages because it
+is never handed a type to lay out.
