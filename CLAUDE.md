@@ -133,7 +133,13 @@ each closed substrate-first before the consumer wave dispatched).
   are red-then-green or they are not evidence.
 - Board discipline: append-only, storno cites what it corrects, board
   artifacts land in the SAME commit as the change, PR-arc sha recorded
-  post-merge only.
+  post-merge only. **`.claude/board/README.md` is the full rule set** —
+  what each board file answers, the one-writer rule and its base case,
+  the non-recursion clause, and what is deliberately absent.
+- A PR stacked on another PR's branch is not finished when it merges:
+  if the base merged FIRST, the child's content never reaches `main`.
+  Verify with `git log origin/main..origin/<base>` — it must be empty.
+  (`ISSUES.md` `ISS-LGJ-STACK-TAIL-STRANDED-MINOR-8`.)
 - **No model identifier in any committed artifact** (chat only). This
   file deliberately carries NO model-policy section; worker-tier
   allocation is stated by role in session briefs.

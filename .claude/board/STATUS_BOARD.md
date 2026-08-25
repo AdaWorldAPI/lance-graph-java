@@ -1,3 +1,35 @@
+## the mask-native SWEEP arc — ABI minors 5-8 (2026-08-25)
+
+The execution half of the mask path. The BUILD half (`lgj_op_eq_classid`)
+has existed since minor 2; until minor 5 nothing could consume a mask
+against a facet's 12-byte register. Each rung is one ABI minor, and each
+was gated on its upstream capability landing FIRST (see
+`CROSS_REPO_PRS.md` — the missing-capability STOP rule in action three
+times).
+
+| D-id | Deliverable | Status |
+|---|---|---|
+| D-LGJ-SWEEP-5 | `lgj_reduce_facet_sum` — the mask-driven, carving-monomorphic sweep over a facet's 12-byte register (`abi.md` §14). Statuses −15 `UNSUPPORTED_CARVING`, −16 `SUM_OVERFLOW` | **DONE 2026-08-25, ABI minor 5** — gated on **ndarray #283** (`masked_strided_group_sum`; the STOP rule, not a local scalar loop). The carving is a caller-ASSERTED parameter at this rung and `abi.md` §14 says so — `ClassView` carried no resolver yet. `i64` is NOT closed under this reduction (one row contributes up to `3 × (2³² − 1)`), so the kernel accumulates in `i128` and range-checks once: overflow is REPORTED, never wrapped |
+| D-LGJ-SWEEP-6 | `lgj_reduce_facet_sum_resolved` — the same sweep under the grouping the POPULATION resolves to, not one the caller asserts. Status −17 `UNRESOLVED_CARVING` | **DONE 2026-08-25, ABI minor 6** — gated on **lance-graph #1025** (`ClassView::cascade_shape`). Three causes, one fact: mixed classes, an unanswerable classid, or an EMPTY population — reporting the zero-fallback for an empty selection would be inventing an answer, so neither output is written. Resolution cached beside the mask (`MaskWords.resolved_carving`, `AtomicU64` with a present bit) and invalidated inside `write_mask`/`lock_masks_ordered`; the classid→carving table is a process-global `LazyLock` (65 536 entries) because **classids do not differ from SoA to SoA** — operator correction, my first version keyed it per dataset |
+| D-LGJ-SWEEP-7 | `lgj_row_layout_probe` — the whole-row alignment answer, all 32 facets in one crossing | **DONE 2026-08-25, ABI minor 7** (PR #30) — OR-accumulated 3-bit layout sets per facet, `LAYOUT_UNANSWERABLE = 0b1000`. Bulk by construction: one crossing regardless of population. Measured 1/32 facets fully aligned on the fixture — my own test expectation was the thing that was wrong, not the code (`maskOfFacetClass(facet 3, …)` constrains facet 3 ONLY) |
+| D-LGJ-SWEEP-8 | The register groupings served as DATA — `carving_count` + `carvings[8]` in the manifest (`abi.md` §17) | **DONE 2026-08-25, ABI minor 8** (PR #32) — the §14 wire encoding had lived in THREE hand-written places with no falsifier between them. Now one source (`CascadeShape::ROTATIONS`) and two derivations: `kernels::CARVING_ORDER` (a `const`, group count DESCENDING — a rule, never declaration position) and the manifest that serves it. **No new symbol**; the manifest already exists so Java can discover the ABI's shape rather than declare it. Java keeps its ARITY declared and looks its WIRE value up. Also fixed the latent defect this made reachable: the load gate required the FULL manifest layout, so the first growth of that struct would have made every older artifact fail to load — now the 104-byte BASE PREFIX only |
+
+### The through-line
+
+Each rung answers the question the rung below it had to punt. Minor 5
+asserts the carving; minor 6 resolves it; minor 8 stops anyone from
+writing the encoding down a fourth time. The pattern generalises past
+this arc, and is recorded as
+`E-LGJ-A-CONSTANT-COPIED-THREE-TIMES-HAS-NO-FALSIFIER-1`.
+
+### Open on this arc
+
+`FacetSchema`'s third reading is `Pair48`, not the operator-ruled L6
+quads — see `ISSUES.md` `ISS-LGJ-FACETSCHEMA-PAIR48`. Flagged during the
+minor-6 work, deliberately untouched by minors 7 and 8.
+
+---
+
 ## mask-native-navigation-correction-v1 — D-LGJ-W8 (operator CORRECTION WAVE, 2026-08-18)
 
 Plan: `.claude/plans/mask-native-navigation-correction-v1.md` (spec v3,
