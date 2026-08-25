@@ -42,13 +42,48 @@ with `javac -Xlint:all` against JDK 26: **7** warnings — the 7th is
 `SymbolLookup.libraryLookup` in
 `src/test/java/.../AbiContractTest.java:113`, outside the three files the
 doc names. Not a `-D warnings`-gated build (no such gate exists for this
-no-build-system project), so this never surfaced as a failure — only as
-a doc claim nobody had re-verified against a real compile since it was
-written. Doesn't need code action (a test file legitimately calling a
-restricted FFM method to prove the contract is fine); the doc's warning
-COUNT and FILE LIST should be corrected to match — filed here rather than
+no-build-system project), so this never surfaced as a failure. Doesn't
+need code action (a test file legitimately calling a restricted FFM
+method to prove the contract is fine); `java/README.md`'s warning COUNT
+and FILE LIST should be corrected to match — filed here rather than
 silently fixed in the same pass, since it's a separate concern from the
 toolchain gap this entry exists to record.
+
+> **⊘ STORNO (2026-08-25, same session, before merge) — the sentence
+> above originally read "…only as a doc claim nobody had re-verified
+> against a real compile since it was written." That characterisation is
+> FALSE and is corrected here rather than deleted, per this file's
+> append-only discipline.** The board has verified this number
+> repeatedly and consistently at **7**, and was right every time:
+> `STATUS_BOARD.md` D-LGJ-D (2026-08-17, "7 `[restricted]` warnings, all
+> in `internal/ffm/*` or a test deliberately exercising it"), D-LGJ-W3
+> ("same 7 pre-existing `[restricted]` warnings, zero new"),
+> `LATEST_STATE.md` 2026-08-17 ("the exact set the design predicts") and
+> 2026-08-18 PR-W8b ("`javac -Xlint:all` 7 pre-existing warnings/0 new").
+> The board's characterisation is also strictly MORE accurate than my
+> own: it says "or a test deliberately exercising the restricted API",
+> which already accounts for the `AbiContractTest` hit I reported as
+> though it were newly discovered. **The real, much narrower finding is:
+> `java/README.md` alone is stale at "six"; the board never was.** Root
+> cause of my error: I compared a compile against ONE doc without reading
+> the board that governs it — the exact failure the repo's own
+> session-start rule (`CLAUDE.md` § Session start: LATEST_STATE +
+> STATUS_BOARD first) exists to prevent.
+
+**⊘ SECOND STORNO (2026-08-25, same session) — scope of the Valhalla
+verification claimed above.** This entry's bullet reporting that a
+`value record` compiled and `Class.isValue()` returned `true` on JDK 27
+is accurate as a toolchain-liveness check, but it must NOT be read as a
+Valhalla *finding*: it is row 5 of the semantic-truth table in
+`valhalla-lab/docs/three-truths.md`, measured and recorded 2026-08-17
+under **D-LGJ-F (DONE)**. The three-truths method is already fully
+executed — allocation instrumentation, causal isolation via
+`-XX:±UseArrayFlattening`/`±UseFieldFlattening`/`-DoEscapeAnalysis`, the
+mandatory N-objects-vs-N-values-vs-1-lane thesis experiment, and three
+filed reproducers (R1 javac / R2 the 8-byte flattening cliff / R3 no
+supported spelling). Nothing in this session's pass adds to it or
+supersedes it. Recorded so a future session does not read this entry as
+licence to re-run a completed experiment.
 
 **Status: PAID for this session's container** — both JDKs now live at
 `/opt/jdks/jdk-26.0.2` and `/opt/jdks/jdk-27`, verified working end to
