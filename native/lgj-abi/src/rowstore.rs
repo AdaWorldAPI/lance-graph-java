@@ -90,6 +90,48 @@ pub struct RowStore {
     /// The seed the buffer was generated from.
     pub seed: u64,
     bytes: Arc<[u8]>,
+    /// The dataset's `classid -> register grouping` table, built ONCE on first
+    /// use (abi.md §15).
+    ///
+    /// Resolution is a per-CLASS fact and a dataset shares one `ClassView`, so
+    /// consulting it per row per sweep re-derives a constant. This memoises the
+    /// whole answer space: `class_id_for` narrows a `u32` classid to `u16`, so
+    /// the table is 65_536 entries of one byte — `0` = no `ClassView` answer,
+    /// otherwise the grouping's wire value plus one.
+    ///
+    /// 64 KiB per dataset, built with 65_536 `ClassView` calls on first resolved
+    /// sweep and never again. That trade is the right way round here: the table
+    /// is bounded and one-off, while the per-row consult it replaces is
+    /// unbounded in sweeps. A `OnceLock` rather than a `LazyLock` because the
+    /// resolver is supplied by the caller (the provider is not in scope at this
+    /// layer) — the first caller wins and every later one reads.
+    carving_table: std::sync::OnceLock<Box<[u8]>>,
+}
+
+impl RowStore {
+    /// This dataset's grouping for `classid`, from the memo table, building it
+    /// on first call with `resolve`.
+    ///
+    /// `resolve` is called at most 65_536 times for the life of the store, and
+    /// exactly zero times after the table exists. It must be a pure function of
+    /// the classid — it is a `ClassView` consult, which by contract is.
+    pub fn carving_of(&self, classid: u32, resolve: impl Fn(u32) -> Option<u8>) -> Option<u8> {
+        let table = self.carving_table.get_or_init(|| {
+            let mut t = vec![0u8; 1 << 16].into_boxed_slice();
+            for (cid, slot) in t.iter_mut().enumerate() {
+                // +1 so that 0 keeps its "no answer" meaning.
+                *slot = resolve(cid as u32).map_or(0, |w| w + 1);
+            }
+            t
+        });
+        // A classid outside u16 range has no ClassView answer at all — the same
+        // fact the table's 0 encodes, reached without indexing past it.
+        let idx = usize::try_from(classid).ok().filter(|&i| i < table.len())?;
+        match table[idx] {
+            0 => None,
+            w => Some(w - 1),
+        }
+    }
 }
 
 impl std::fmt::Debug for RowStore {
@@ -131,6 +173,7 @@ impl RowStore {
             n_rows,
             seed,
             bytes: Arc::from(bytes),
+            carving_table: std::sync::OnceLock::new(),
         })
     }
 
@@ -226,6 +269,7 @@ impl RowStore {
             n_rows,
             seed,
             bytes: Arc::from(bytes),
+            carving_table: std::sync::OnceLock::new(),
         })
     }
 
