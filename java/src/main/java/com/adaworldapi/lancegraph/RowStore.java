@@ -125,6 +125,54 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * Sum one facet's 12-byte register, <strong>reinterpreted as</strong> {@code carving}, over the
+     * rows {@code selection} selects — the mask-native sweep (abi.md §14, ABI minor 5).
+     *
+     * <p><strong>This is a raw reinterpretation primitive, and the {@code As} in its name is the
+     * honest part.</strong> It applies the carving you name to every selected row. It does NOT
+     * verify that the carving is the one those rows' classes actually specify — it cannot: the
+     * mask is an opaque population (it may be a {@link #importRows} union spanning several
+     * classids), and the fixture {@code ClassView} carries no carving resolver at all today. So
+     * this method claims no ClassView authority; the caller supplies the reading and owns its
+     * correctness.
+     *
+     * <p>The stronger shape — binding the resolved answer to the population ONCE, so the sweep
+     * receives an answer rather than a promise — is a named seam, not something this method
+     * pretends to be:
+     *
+     * <pre>
+     *   classid → ClassView → ResolvedCarving → (population + its carving) → sum
+     * </pre>
+     *
+     * <p>That preserves the property this whole path exists for (the ALU gets the answer, not the
+     * question) while making the binding checkable. It needs a real ClassView carving resolver
+     * upstream, which does not exist yet — so it is recorded as the next rung rather than faked
+     * with a per-row consult, which would put the entropy straight back into the loop.
+     *
+     * <p>This is the execution half of the mask path whose build half is
+     * {@link #maskOfFacetClass}. Together they are the whole shape: classid becomes a mask once,
+     * then the sweep runs over a population that no longer carries the classid question. The
+     * population never leaves mask form — there is no row-id list, no index array, no per-row Java
+     * object anywhere on this path.
+     *
+     * <p>One native crossing, and its work is proportional to the mask's <em>popcount</em> rather
+     * than to the row count, so a narrow selection over a large store is cheap and an empty one
+     * costs only the mask scan.
+     *
+     * @param facet     which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param carving   the reading to apply — supplied by the caller, NOT verified against the
+     *                  selected rows' classes
+     * @param selection the rows to sum over; must belong to this store
+     */
+    public long facetSumAs(FacetId facet, Carving carving, Mask selection) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        java.util.Objects.requireNonNull(carving, "carving");
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("facetSumAs()");
+        return Engine.facetSumAs(handle, facet.index(), carving.wire(), selection.handle());
+    }
+
+    /**
      * For every row, which of its 32 facets carry {@code classId} as their classid — one native
      * crossing ({@code lgj_row_facet_match}, abi.md §11).
      *

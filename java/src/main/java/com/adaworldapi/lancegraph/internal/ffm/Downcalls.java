@@ -13,10 +13,11 @@ import java.util.concurrent.atomic.LongAdder;
  * Every downcall handle in the project, resolved <strong>once</strong> into static finals.
  *
  * <p>Resolution is not free — {@code Linker.downcallHandle} builds a native stub — so doing it per
- * call would be a per-crossing tax on top of the crossing itself. There are 20 downcall symbols
- * resolved here (docs/abi.md §7 + §11 + §13) and 20 handles; the 21st ABI symbol, {@code
- * lgj_abi_manifest}, resolves separately in {@link Abi} because it returns a pointer rather than a
- * status and has no failure mode.
+ * call would be a per-crossing tax on top of the crossing itself. There are 21 downcall symbols
+ * resolved here (docs/abi.md §7 + §11 + §13 + §14) and 21 handles — 20 eagerly, plus the minor-5
+ * {@code lgj_reduce_facet_sum} in the lazy {@code Minor5} holder below. The 22nd ABI symbol,
+ * {@code lgj_abi_manifest}, resolves separately in {@link Abi} because it returns a pointer rather
+ * than a status and has no failure mode.
  *
  * <p><strong>The anti-JNI rule (docs/abi.md §6) lives here.</strong> Panama makes it easy to write
  * JNI-shaped code: one downcall per element. Every wrapper below either does work proportional to
@@ -352,6 +353,57 @@ public final class Downcalls {
             throw wrap("lgj_reduce_sum_i32", t);
         }
         Status.check("lgj_reduce_sum_i32", st);
+        return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * The minor-5 handle, resolved LAZILY.
+     *
+     * <p>Every other handle in this class is a static final resolved in {@code <clinit>}, which
+     * means a single absent symbol makes the whole class unusable. That is not a style
+     * preference — it actively DEFEATS {@link Abi#requireMinor(int)}, whose own contract promises
+     * to fail "before any downcall for the feature is attempted". Measured against a real
+     * ABI 0.4 library: {@code SmokeTest}, which touches nothing newer than minor 1, died in
+     * {@code Downcalls.<clinit>} because {@code lgj_reduce_facet_sum} was missing. The guard
+     * never got to run.
+     *
+     * <p>A nested holder class is initialised on first ACCESS, not when {@code Downcalls} is,
+     * so an old library now fails only when the minor-5 feature is actually called — and
+     * {@link Engine#facetSum} calls {@code requireMinor(5)} first, so what a caller sees is the
+     * intended {@link com.adaworldapi.lancegraph.AbiMismatchException}, not a bare "no such
+     * symbol".
+     *
+     * <p><strong>The same latent defect applies to minors 2-4</strong> (row store, edges, hop):
+     * their handles are still eager, so an ABI 0.1 library would break this class before
+     * {@code requireMinor(2)} could report anything useful. Not changed here — that is a
+     * pre-existing gap this PR did not introduce, and converting every handle is its own
+     * change with its own falsifier. Recorded so it is tracked rather than noticed twice.
+     */
+    private static final class Minor5 {
+        static final MethodHandle REDUCE_FACET_SUM = mh("lgj_reduce_facet_sum",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.ADDRESS));
+
+        private Minor5() {}
+    }
+
+    /**
+     * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
+     *
+     * <p>Work is proportional to the mask's popcount, not the row count — this is a bulk op in
+     * the §6 sense, and an empty mask costs O(mask words).
+     */
+    public static long reduceFacetSum(long res, int facet, int carving, long mask,
+            MemorySegment outSum) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor5.REDUCE_FACET_SUM.invokeExact(res, facet, carving, mask, outSum);
+        } catch (Throwable t) {
+            throw wrap("lgj_reduce_facet_sum", t);
+        }
+        Status.check("lgj_reduce_facet_sum", st);
         return outSum.get(ValueLayout.JAVA_LONG, 0);
     }
 

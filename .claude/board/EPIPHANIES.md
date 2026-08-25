@@ -4,6 +4,176 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-A-FEATURE-GATE-DEFEATED-BY-EAGER-CLASS-INIT-1
+
+**Status:** SIX REVIEW FINDINGS, ALL CONFIRMED AND FIXED (PR #26, pre-merge).
+**Confidence:** High — each was reproduced before being fixed, and the two
+substantive ones are disable-verified.
+
+Operator review of the minor-5 work found six things **117 Rust + 263 Java green
+gates did not falsify.** Recorded because the pattern is the lesson: every one
+sat in a place no test was pointed at.
+
+### 1. The guard was defeated by the class it guards (the serious one)
+
+`Abi.requireMinor(N)`'s own javadoc promises it "fails loudly, **before any
+downcall for the feature is attempted**". It could not: every handle in
+`Downcalls` is a `static final` resolved in `<clinit>`, and `mh()` throws on an
+absent symbol. Reproduced against a REAL ABI 0.4 library built from merged
+`main`: `SmokeTest` — which touches nothing newer than minor 1 — died in
+`Downcalls.<clinit>` on the missing `lgj_reduce_facet_sum`. The guard never ran.
+
+Fixed with a nested `Minor5` holder (initialised on first ACCESS, not with
+`Downcalls`), and `OldAbiCompatTest` now proves BOTH halves against the real 0.4
+`.so`: a minor-1 fluent count still succeeds, and `facetSumAs` alone fails with
+`AbiMismatchException` naming the minor. Disable-verified — reverting the holder
+reproduces the `<clinit>` crash.
+
+**The same latent defect applies to minors 2-4** and is NOT fixed here: their
+handles are still eager. Pre-existing, not introduced by this PR, and its own
+change with its own falsifier. Recorded so it is tracked rather than rediscovered.
+
+### 2. The normative ledger contradicted itself on a membrane change
+
+`abi.md` still said `LGJ_ABI_MINOR = 4`, "currently 21 symbols", a history
+stopping at minor 4, and a status table stopping at `-14` — while §14 and the §7
+header had been updated to 22 symbols and `-15`. The one document that must never
+self-contradict on a membrane change did. Now consistent at minor 5.
+
+### 3. Claimed ClassView authority the symbol cannot verify
+
+`Carving`'s doc said the reading "is resolved through its ClassView", and the
+method took any `(FacetId, Carving, Mask)` triple. But a mask is an **opaque
+population** — the test itself unions rows from classids 1 and 2 and applies one
+carving to all of them — and the fixture ClassView has **no carving resolver at
+all**. The primitive cannot check what it claimed.
+
+Fixed by naming it honestly rather than faking the authority: **`facetSumAs`**, a
+raw reinterpretation primitive whose caller owns correctness. The stronger shape
+is recorded as the next rung, not pretended:
+`classid → ClassView → ResolvedCarving → (population + its carving) → sum` —
+binding the answer to the population ONCE, which keeps the ALU receiving an
+answer rather than a question while making the binding checkable. Deliberately
+NOT a per-row consult, which would put the entropy straight back in the loop.
+
+### 4. `i64` is not closed under the reduction
+
+The kernel used `wrapping_add`. Under quads one row contributes up to
+`3 × (2³² − 1)`, so `i64::MAX` falls after ~715 827 882 maximum-valued rows —
+about 341 GiB of 512-byte rows, INSIDE this substrate's contemplated scale, not
+safely beyond it. §14 merely said "widened to i64" and defined no wrapping
+semantics. Now accumulates in `i128`, range-checks once, and returns
+`LGJ_ERR_SUM_OVERFLOW` (-16) with `out_sum` untouched. Silent wrapping is exactly
+the plausible-but-wrong result this ABI otherwise works to prevent.
+
+### 5-8. Four cleanups, each a small untruth
+
+Rust export doc named `LGJ_ERR_INVALID_ARGUMENT` while the code returned
+`LGJ_ERR_UNSUPPORTED_CARVING`; `Downcalls`' header still counted 20 handles;
+`Engine.java` stranded `eqClassid`'s javadoc above the new method; and the
+complexity claim said "proportional to popcount" when the implementation scans
+every mask word regardless — now `O(mask_words + popcount × groups)`.
+
+### 9. An overclaimed reachability, corrected
+
+The early-break test called an overlong mask-word slice ABI-reachable. It is not:
+`registry` allocates at exactly `mask_words_for(n_rows)` and boxes that slice.
+Test kept — a kernel correct only on well-formed input is a latent bug, and the
+`rlib` has callers other than `exports.rs` — but reclassified as internal kernel
+robustness rather than a membrane case.
+
+### The open question this review left standing
+
+**Is `sum` the first product operation, or R8's checksum escaping the lab?** The
+ABI's own law says symbol growth is a design smell needing justification. R8
+proved the *execution shape*; it did not prove that "sum packed rails/triplets/
+quads" deserves permanent ABI vocabulary. If no consumer needs facet sum, the
+honest move is to keep the shape and drop the operation. Left open deliberately —
+it is a product question, not an engineering one.
+
+## 2026-08-25 — E-LGJ-THE-MASK-PATH-WAS-HALF-WIRED-ALL-ALONG-1
+
+**Status:** SHIPPED — ABI minor 5, `lgj_reduce_facet_sum` (`docs/abi.md` §14).
+**Confidence:** High. 117 Rust + 263 Java checks green; every guard disable-verified
+red-then-green on both sides of the membrane.
+
+### The finding, before the code
+
+"Wire the mask path into lgj-abi" turned out to be **half a task**, and reading the
+membrane before writing to it is what showed that:
+
+- **The BUILD half has existed since ABI minor 2.** `lgj_op_eq_classid` already turns a
+  classid column into a mask, and already routes through
+  `ndarray::simd::eq_u32_strided_to_mask` — the *same* primitive R8 arm E' measured. The
+  whole mask algebra (`create`/`and`/`or`/`andnot`/`count`/`describe`) was already there,
+  and `lgj_mask_create` already accepted a row store as parent.
+- **The EXECUTION half was the gap.** Nothing could CONSUME a mask against the 12-byte
+  facet register. `lgj_reduce_sum_i32` sums a contiguous `I32` *pattern* lane — not a
+  strided facet register under a carving. So a consumer wanting the R8 E' shape had to
+  leave the membrane, which is exactly the pressure the Missing-capability STOP rule
+  exists to relieve.
+
+Recording this because the pre-reading is the reusable part: the instinct was to build a
+mask surface, and the mask surface was already 80% shipped.
+
+### What landed
+
+`lgj_reduce_facet_sum(res, facet, carving, mask, out_sum)` — sums every group of one
+facet's 12-byte register, under `carving`, over the rows a mask selects. Work is
+proportional to the mask's POPCOUNT, so §6's bulk-or-lifecycle rule holds by construction
+and an empty mask costs O(words).
+
+**The carving is a caller-supplied, VALIDATED parameter, not a ClassView consult — and
+that is the load-bearing design decision.** It follows `lgj_hop`'s `decode_mode`
+precedent (§13) rather than `edge_participation`'s consult, because the reading is what
+the caller already resolved from the ClassView *before* crossing. Re-resolving it per row
+inside the sweep would put the question back in the hot loop — which is the exact thing
+the symbol exists to take out of it. A per-row ClassView consult here would be the
+mask-native law's own defect, one layer down.
+
+New status `LGJ_ERR_UNSUPPORTED_CARVING` (-15), checked FIRST so `out_sum` is provably
+untouched on rejection. Deliberately not a reuse of `-14`: that names the edge-decode
+axis, and an unknown register reading must never alias a known one.
+
+### SIMD provenance: a NAMED GAP, not a quiet scalar
+
+The kernel is **scalar, deliberately.** `ndarray::simd` has no primitive for "gather a
+sub-word group out of a 512-byte-strided register under a runtime grouping and
+widen-accumulate" — `masked_sum_i32` is contiguous `i32`, `eq_u32_strided_to_mask` reads
+ONE aligned `u32` per row, not six unaligned `u16`s. Writing raw intrinsics here would
+create precisely the second SIMD surface §8 exists to prevent. So the vector form belongs
+in `ndarray::simd` under the W1a consumer contract — added THERE, consumed here, never
+re-implemented at this layer. Stated in the kernel doc, in `abi.md` §14, and here, so it
+is a tracked gap rather than an unexamined choice.
+
+(Sub-word loads are byte-wise rather than `u16`/`u32` reads because a group's offset is
+`facet*16 + 4 + g*group_bytes`, not guaranteed aligned for the 3-byte reading — and an
+unaligned wide read is UB in Rust even where the hardware tolerates it.)
+
+### A vacuous test, caught by its own disable-run
+
+`an_empty_mask_never_touches_the_buffer` claimed to cover BOTH the mask-selection property
+and the `base_row >= n_rows` early break. The disable-run proved it covered only the
+first: with all-zero words the inner loop never runs either way, so removing the break
+changed nothing. The break's real job is preventing `n_rows - base_row` from UNDERFLOWING
+for a word beginning past the row count — a reachable input, since `lgj_mask_create`
+rounds up to whole words. Split into a second test with a set bit in a word starting at
+row 128 over a 64-row store; that one goes red under the disable.
+
+**Five Rust disables and two Java disables, all red-then-green:** ignore the carving,
+ignore the mask, drop the tail clamp, drop the early break, accept any carving wire value;
+and through the membrane, ignore the carving argument and accept a foreign-parent mask.
+
+### Java surface
+
+`RowStore.facetSum(FacetId, Carving, Mask)` beside its build-half partner
+`maskOfFacetClass`, plus a public `Carving` enum whose wire encoding is package-private —
+a consumer names the reading, never its encoding. `FacetSumParityTest` recomputes every
+expected value **in Java from the public per-row accessors** (`payloadLow64At` +
+`payloadHi32At`, reassembled into the 12 bytes and re-carved), never by calling
+`facetSum` twice. The two paths share no code, so agreement is evidence rather than
+tautology.
+
 ## 2026-08-25 — E-LGJ-THE-MEASUREMENT-LEDGER-DRIFTED-TWICE-SO-THE-REPORT-IS-NOW-GENERATED-1
 
 **Status:** DEFECT FOUND TWICE, REPAIRED STRUCTURALLY (R7, R8; merged in PR #24).

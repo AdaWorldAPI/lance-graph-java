@@ -50,9 +50,15 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// `lgj_hop` (one-hop graph traversal over a row store — the FIRST symbol
 /// gated by the `lance-graph-contract` `ClassView`/`FieldMask` LAW via the
 /// fixture's `crate::class_view_provider::edge_participation` seam;
+/// Minor 5 adds `lgj_reduce_facet_sum` — the mask-driven, carving-
+/// monomorphic sweep over a facet's 12-byte register (`docs/abi.md` §14),
+/// the execution half of a mask path whose build half
+/// (`lgj_op_eq_classid`) has existed since minor 2. Purely additive: a
+/// minor-4 Java loads fine and never calls it.
+///
 /// `docs/abi.md` §13). Purely additive: a minor-3 Java loads fine and
 /// simply cannot call either new symbol.
-pub const LGJ_ABI_MINOR: u32 = 4;
+pub const LGJ_ABI_MINOR: u32 = 5;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -103,10 +109,32 @@ pub const LGJ_ERR_READ_ONLY: i32 = -13;
 /// rejected call. D-LGJ-W8, ABI minor 4.
 pub const LGJ_ERR_UNSUPPORTED_DECODE_MODE: i32 = -14;
 
+/// `lgj_reduce_facet_sum` was handed a `carving` wire value outside `0..=2`
+/// (`0` rails `6*(u8:u8)`, `1` triplets `4*(u8:u8:u8)`, `2` quads
+/// `3*(u8:u8:u8:u8)` — `le-contract.md` §3's three readings of the same 12
+/// bytes). Checked FIRST, before the store or mask are resolved, so
+/// `out_sum` is provably untouched on a rejected call (§7's
+/// write-only-on-OK rule).
+///
+/// Deliberately NOT a reuse of `LGJ_ERR_UNSUPPORTED_DECODE_MODE`: that code
+/// names the edge-decode axis (`EdgeCodecFlavor`), and a register reading is
+/// a different question. An unknown reading must never alias a known one.
+/// ABI minor 5.
+pub const LGJ_ERR_UNSUPPORTED_CARVING: i32 = -15;
+
+/// `lgj_reduce_facet_sum`'s accumulator exceeded `i64`.
+///
+/// `i64` is not closed under this reduction: a single row contributes up to
+/// `3 * (2^32 - 1)` under the quads reading, so a large enough selection of
+/// large enough registers genuinely does not fit. The kernel accumulates in
+/// `i128` and range-checks once, so the caller gets this status instead of a
+/// wrapped value — `out_sum` is NOT written. ABI minor 5.
+pub const LGJ_ERR_SUM_OVERFLOW: i32 = -16;
+
 /// A panic was caught at the membrane and converted to a status (§9).
 ///
 /// Not in `abi.md`'s table, and deliberately *outside* the allocated
-/// `-1..=-14` block so it can never be confused with a specified condition.
+/// `-1..=-16` block so it can never be confused with a specified condition.
 /// A caller seeing this has found a bug in this crate; it is reported rather
 /// than allowed to unwind into JVM frames, which would be UB.
 pub const LGJ_ERR_PANIC: i32 = -99;
