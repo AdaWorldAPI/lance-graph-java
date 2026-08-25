@@ -435,3 +435,33 @@ Absolute figures move run to run (one regeneration saw B′ shift ~25% while eve
 conclusion — B ≈ standalone, D > B falsified, C ~30×, the B′ collapse, the ~4.8× D′/E′
 recovery, the end-to-end E′ win — held identically). That stability of *conclusions* under
 *unstable* absolutes is why the ratios are the result and the raw numbers are the evidence.
+
+## R11 — the physical layout is a schema, and applying it is a descriptor swap (`R11_LayoutIsASchema.java`)
+
+The store today is AoS: 32 facets × 16 B interleaved in a 512-B row, lanes exposed as
+*strided views*. R11 expresses the layout as **data** — a `LayoutSchema` record whose only
+job is the address function — and runs ONE projector under both:
+
+```
+AoS : slot(r,f) = r*512 + f*16          (rows outer — today)
+SoA : slot(r,f) = f*(N*16) + r*16       (facet lanes — 32 × 12-byte-register buckets)
+```
+
+Checksum parity across all 32 facets proves the two are readings of the same logical
+content, so the timing difference is layout, not data.
+
+**Measured** (`R11-observed.txt`): ~12.0–13.0 ns/row (AoS) vs ~1.30 ns/row (SoA) —
+**~9.2×** on a one-facet sweep. Line arithmetic alone predicts 4× (16/64 B used per line vs
+64/64); the rest is sequential prefetch plus 32× denser TLB coverage. An earlier claim in
+this repo called the 4× "arithmetic, not a result" — it is now a result, and it was an
+*under*-estimate.
+
+**The structural finding outranks the ratio.** Because Java only ever projects (R5/R7), the
+AoS→SoA flip touched no Java type and no sweep code — only the descriptor. Valhalla is
+untouched by construction: what crosses is still a ≤4-B group; only offsets moved. And the
+native kernels are already stride-parameterized, so the same holds below the membrane. **The
+layout was already data at every boundary except the store's constructor.**
+
+**Honest scope:** a whole-row consumer inverts the preference — AoS is contiguous for "all
+32 facets of one row", SoA scattered. The schema is a per-workload choice, which is exactly
+why it belongs in data rather than in code.

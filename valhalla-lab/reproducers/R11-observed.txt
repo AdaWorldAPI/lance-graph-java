@@ -1,0 +1,38 @@
+checksum parity: all 32 facets identical across layouts
+
+layout               ns/sweep     ns/row   (one-facet full sweep, 65536 rows, 3 runs)
+AoS 512-stride        849,685     12.965
+SoA facet-lane        139,245      2.125
+AoS 512-stride        797,358     12.167
+SoA facet-lane        139,135      2.123
+AoS 512-stride        914,754     13.958
+SoA facet-lane        158,012      2.411
+(sink true)
+
+line arithmetic: AoS touches 16/64 B per line (1 row/line);
+SoA packs 4 rows/line ? the measured ratio above is the extent
+to which this sweep is line-bound rather than compute-bound.
+
+READING
+  Checksum parity across all 32 facets proves the two layouts are READINGS of the same
+  logical content; the timing difference is therefore layout, not data.
+
+  Measured: ~12.0-13.0 ns/row (AoS) vs ~1.30-1.33 ns/row (SoA) -- ~9.2x. The line
+  arithmetic alone predicts 4x (16/64 B used per line vs 64/64), so the sweep is not merely
+  line-bound: the SoA lane additionally gets perfect sequential prefetch and 32x denser TLB
+  coverage (256 rows/4K page at stride 16 vs 8 rows at stride 512). Consistent with the
+  earlier clustered-vs-scattered measurement, where stride-predictability alone was worth
+  ~2x at constant line count.
+
+  The structural half matters more than the ratio: ONE projector ran both layouts, selected
+  by a LayoutSchema RECORD -- data, not code. Java types unchanged, Valhalla untouched by
+  construction (what crosses is still a <=4-B group; only offsets moved). And the native
+  kernels are already stride-parameterized (masked_strided_group_sum,
+  eq_u32_strided_to_mask), so the same holds below the membrane: AoS is stride 512, an SoA
+  facet lane is stride 16, one code path either way.
+
+WHAT THIS DOES NOT SHOW
+  A whole-ROW consumer (all 32 facets of one row) inverts the preference: there AoS is the
+  contiguous layout and SoA the scattered one. The schema is a per-WORKLOAD choice, which is
+  exactly why it should be data. Nor does this measure the write/generation side, or Lance's
+  own columnar behaviour, which already stores the value slab columnar on disk.
