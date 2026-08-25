@@ -4,6 +4,84 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-THE-MEASUREMENT-LEDGER-DRIFTED-TWICE-SO-THE-REPORT-IS-NOW-GENERATED-1
+
+**Status:** DEFECT FOUND TWICE, REPAIRED STRUCTURALLY (R7, R8; merged in PR #24).
+**Confidence:** The defect and its repair are certain. The measurements are ranges,
+regenerable, and deliberately not pinned as absolutes — see below.
+
+### The defect
+
+`R7-observed.txt` shipped with its READING prose quoting a throughput range its OWN pinned
+raw runs contradicted (prose said 369-439 M ops/s; the three pinned runs said 1.76-3.48 s,
+i.e. 287-567). Operator review caught it. It was repaired — and then **R8 committed the
+identical defect one commit later**: prose quoting 2417-2479 / 3959-4014 / 41.01 ms while
+its own regenerated raw block held 3172-3248 / 3841-3946 / 40.36 ms.
+
+**Root cause is mechanical, not attentional.** The prose was hand-copied from run N while
+the raw block was regenerated at run N+1. Every artifact built that way is one
+regeneration away from lying about itself. "Be more careful" does not fix a method that
+produces the defect by construction — twice in two consecutive commits is the proof.
+
+### The repair
+
+`valhalla-lab/reproducers/r8_report.py` GENERATES the report: it runs every arm, parses
+the output it just captured, and derives every quoted range, ratio, per-pass cost and
+break-even from that same output. Raw block and prose come from one subprocess result and
+cannot disagree. The generated file states this at its head and instructs regeneration
+rather than hand-editing.
+
+The README's R8 section was also rewritten to stop duplicating absolute figures at all: it
+states structural results and ratios, and names the generated file as the authority.
+
+### Why that turned out to be the right shape, not merely a safer one
+
+The first regeneration produced materially different absolutes — B' moved ~25% — while
+EVERY structural conclusion held identically: B ~ standalone, D > B falsified, C ~30x,
+the B' collapse, the ~4.8x D'/E' recovery, the end-to-end E' win. **The stability of the
+conclusions under unstable absolutes is itself the result**, and it is only visible
+because the numbers are regenerable rather than pinned. A hand-pinned artifact would have
+hidden it.
+
+### Two further corrections from the same review, both real
+
+1. **Toolchain was not unified.** The native kernels and standalone baseline built with
+   rustc 1.94.1 while the ndarray crate required 1.97.1. That left an escape hatch on the
+   load-bearing "one bulk FFI crossing costs nothing measurable" claim, since the control
+   and the arm were not the same compiler. All three artifacts now build with 1.97.1,
+   `-O -Ctarget-cpu=x86-64-v4 -Cdebuginfo=0`.
+2. **Sweep-only comparison understated the lawful shape.** R8 first reported E' (masks) as
+   "2-3% slower" than D' (index lists). That compares SWEEPS, and the sweeps are tied. The
+   whole difference is BUILDING the population, which must be counted:
+   `ndarray::simd::eq_u32_strided_to_mask` (one bulk call) is an order of magnitude cheaper
+   than the Java scalar partition scan, so **E' wins END-TO-END on the first execution**,
+   moving break-even from ~120 passes to ~10 — and leaves behind a reusable mask where D'
+   leaves a materialized population the mask-native law forbids as internal currency.
+   Obeying the law is the fast path, not a tax on it.
+
+### The measured architecture (R6-R8), for the record
+
+- **R6:** the 8-byte cliff is JEP 401 BY DESIGN, not a version gap and not a flag. These
+  already are the JDK 27 numbers (27-jep401ea3); forcing all five flattening flags changes
+  nothing (`UseArrayFlattening`/`UseFieldFlattening` are `false` by DEFAULT in that build,
+  which is why the flags-on run had to be done rather than assumed). JEP 401 states the
+  cause: flattened references must be read/written atomically, capping mutable flattened
+  fields at 64 bits. The exemption it names is for value-class FIELDS; SoA lanes are
+  ARRAYS, whose elements are mutable by definition. Its speculative 128-bit note would move
+  the cliff to 16 B — the 12-byte register would fit, the 512-byte row would not.
+- **R7:** 10^9 projections allocate 960 B TOTAL. Against R5's 65,536 ops at 800 B:
+  operations grew 15,000x, allocation grew 160 B — fixed scaffolding, not per-op cost.
+- **R8:** five arms, checksum-identical including a standalone Rust process. Bulk FFI is
+  free; per-projection FFI is ~30x (the anti-JNI rule, quantified); specialization buys
+  NOTHING when dispatch is branch-predictable (part 1 is the control that keeps part 2
+  honest); under random classids the split architecture wins ~4.8x because the selector
+  layer creates the information once, before the sweep.
+
+**Not "Java is faster than Rust"** — the winning kernels ARE Rust and so is the mask
+builder. The win is specialization PLACEMENT. The durable principle: **entropy belongs
+outside the hot loop**, and its scope leg — when there is no entropy, moving it buys
+nothing.
+
 ## 2026-08-25 — E-LGJ-LAYOUT-AUTHORITY-IS-TRANSFERABLE-BUT-ONLY-ABOVE-8-BYTES-1
 
 **Status:** MEASURED (R4, R5, `valhalla-lab/reproducers/`, JDK 27 EA).

@@ -367,7 +367,12 @@ review so "bulk FFI costs nothing" has no compiler escape hatch.)
 
 ### Part 1 — period-4 classid: the control
 
-- **B ≈ the standalone Rust process.** One bulk FFI crossing costs nothing measurable.
+- **One bulk Panama crossing shows no measurable penalty at this scale.** Stated that way
+  deliberately, *not* as "bulk FFI equals standalone Rust" (calibration from operator
+  review): one generated run had the in-JVM arm **faster** than the standalone process,
+  which means process/JIT/turbo/cache context is larger than any crossing cost — so the two
+  arms must not be called performance-identical even though no penalty is exposed. The
+  generator now detects which of the three cases a run lands in and says so.
 - **D > B is falsified.** A period-4 pattern is perfectly branch-predictable, so the generic
   sweep's per-row dispatch is already free — specialization cannot beat a predictor that has
   specialized.

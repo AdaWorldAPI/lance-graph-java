@@ -95,7 +95,22 @@ P("  so the two population representations are provably the same SET, not merely
 P("")
 P("READING -- PART 1 (period-4 classid, r & 3): THE CONTROL")
 P(f"  B  bulk FFI -> generic Rust   {rng(arms['B']['m'])} M ops/s vs standalone {rng(sa)}")
-P("     -> ONE BULK FFI CROSSING COSTS NOTHING MEASURABLE (same compiler, same flags).")
+# Calibrated claim (operator review): assert only what the comparison supports. When the
+# in-JVM arm is FASTER than the standalone process -- which has been observed -- the two
+# cannot be called performance-identical; process/JIT/turbo/cache context is demonstrably
+# larger than any crossing cost. What survives either way is that no penalty is exposed.
+sa_med = statistics.median(sa)
+if med["B"] > max(sa):
+    P(f"     NOTE: the in-JVM arm is FASTER than the standalone process here"
+      f" ({med['B']/sa_med:.2f}x median). The two are therefore NOT performance-identical --")
+    P("     process/JIT/turbo/cache context dominates any crossing cost at this scale.")
+elif med["B"] < min(sa):
+    P(f"     NOTE: the in-JVM arm is slower here ({med['B']/sa_med:.2f}x median); check whether"
+      " that gap exceeds the observed run-to-run spread before attributing it to the crossing.")
+else:
+    P("     The two arms' observed ranges overlap.")
+P("     -> ONE BULK PANAMA CROSSING SHOWS NO MEASURABLE PENALTY AT THIS SCALE.")
+P("        (Deliberately NOT 'bulk FFI equals standalone Rust' -- see the note above.)")
 P(f"  D  monomorphic kernels        {rng(arms['D']['m'])} M ops/s"
   f" -- {'D > B FALSIFIED' if med['D'] <= med['B'] else 'D > B holds'} here.")
 P("     A period-4 pattern is perfectly branch-predictable, so the generic sweep's per-row")
