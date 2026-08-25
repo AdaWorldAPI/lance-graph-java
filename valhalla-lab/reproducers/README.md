@@ -13,6 +13,8 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R1](#r1) | `@NullRestricted` field in an ordinary class fails at class load | **javac** |
 | [R2](#r2) | Array flattening stops at an 8-byte payload | **HotSpot / Valhalla** |
 | [R3](#r3) | The densest layout has no supported spelling, and generics discard it | **Valhalla (language + libraries)** |
+| [R4](#r4) | Sub-group carving does not dodge R2's cliff — and nesting *inflates* the payload | **HotSpot / Valhalla** |
+| [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
 
 Environment for every observation below: `openjdk 27-jep401ea3+1-1`, Linux x86-64,
 Intel Xeon @ 2.10 GHz (4 vCPU, AVX-512).
@@ -157,3 +159,86 @@ It also removes a temptation worth naming: if `List<LaneId>` had flattened, "jus
 `List<Row>`" would look like a viable alternative to the native lane. It does not flatten, so the
 bulk path is not competing with a hypothetical fast object path — it is competing with the same
 boxed one Java has always had.
+
+---
+
+## R4 — can the carving dodge the 8-byte cliff? (`R4_CarvingVsCliff.java`)
+
+**Question.** R2 measured *monolithic* 12/16-byte value classes and found them never
+flat. The V3 register is carved three ways (`6x(u8:u8)` rails / `4x(u8:u8:u8)` triplets
+/ `3x(u8:u8:u8:u8)` quads). Does spelling the same total as a *composition* of
+sub-8-byte value classes behave differently?
+
+**Answer: no, and the nested spelling is strictly worse.** Observed output is pinned in
+`R4-observed.txt`.
+
+- The sub-groups alone are perfectly flat: `Pair` 2 B, `Triplet` 3 B, `Quad` 4 B — all
+  `true` in all three array kinds.
+- Every real width is `false` in all three kinds: `Reg12AsRails`, `Reg12AsTriplets`,
+  `Reg12AsQuads`, `Reg12Flat`, `Facet16AsRails`, `Facet16AsQuads`. The carving changes
+  nothing; the monolithic control `Reg12Flat` behaves identically.
+- Nesting costs flatness *even under the budget*: `Nest7` (3+4 B) is `false` while the
+  unnested `Flat7` is `true`. Mechanism: a record component is **nullable** by default,
+  so it is stored in its nullable flat layout (`Pair` 2→4, `Quad` 4→8), and it is the
+  *inflated* sum the budget must satisfy.
+- That mechanism is confirmed, not assumed: `@NullRestricted` flips all three predicted
+  failures — `Nest7`→`Nest7NR`, `Nest8AsQuads`→`Nest8AsQuadsNR`,
+  `Nest6AsPairs`→`Nest6AsPairsNR`, each `false`→`true`.
+- Removing the inflation still does not rescue the real widths: `Reg12AsQuadsNR`,
+  `Reg12AsRailsNR`, `Facet16AsQuadsNR` remain `false`. **The cliff is on total payload.**
+
+**Actionable consequence.** The carving is sound *as SoA and only as SoA*: N parallel
+rail arrays, each element under the budget, never one `Facet[]`.
+
+### `isFlatArray()` alone is not a sufficient test — read the element size
+
+Group F (the word-aligned family, added when the operator asked whether `32x(2x8 byte)`
+would behave differently) produced a **non-monotone** row that looked like good news and
+is not:
+
+| type | payload | isFlatArray | VM element size |
+|---|---|---|---|
+| `Lane8` | 8 B | `true` | 8 |
+| `Two8` | 16 B | `false` | — |
+| `Two8NR` | 16 B | `false` | — |
+| `Four8AsTwo8` | **32 B** | **`true`** | **8** |
+| `Blk64AsTwo8` | 64 B | `false` | — |
+
+A 32-byte record reporting flat at **element size 8** is not carrying 32 bytes inline.
+Its two `@NullRestricted Two8` components are themselves non-flattenable, so each is
+stored as a **reference**; the array is flat *in pointers*, which is the exact opposite
+of the property being sought. `Nest8Single` shows the same hazard from the other side:
+an 8-byte payload at element size **16**.
+
+So the rule is: **never report `isFlatArray()` without the VM's element size beside it.**
+`R4-observed.txt` now carries both, from `-XX:+UnlockDiagnosticVMOptions
+-XX:+PrintFlatArrayLayout`. Answering "does 2x8 grouping help?" from the boolean alone
+would have shipped a false positive.
+
+## R5 — a classid-dependent layout has no static spelling (`R5_ClassidHasNoStaticSpelling.java`)
+
+**Question.** The classid's ClassView chooses which carving applies. Can either
+mechanism express a layout selected by a runtime value?
+
+**Answer: neither can, so a dispatch helper is structurally required.** A Panama
+`VarHandle` is bound to one path at construction and cannot re-derive it from a runtime
+`int`; a Valhalla value class is a static type and cannot be selected by one either. The
+carving choice is a Java-side `switch` in every possible design — the question is only
+what it switches *over*.
+
+**Measured, 65,536 rows** (`R5-observed.txt`):
+
+| strategy | allocated |
+|---|---|
+| project — classid-dispatched, no element type | **800 B total / 0.01 B/row** |
+| hydrate — a 16-byte `Facet` value object per row | 32–104 B/row, varying by run |
+
+The hydrate spread across four identical runs (32.01, 37.24, 104.01, 101.76 B/row) is
+the finding, not noise: escape analysis is best-effort, nothing in the source chooses
+whether it fires, and the cost ranges over 3x between runs of the same binary. Project
+has no spread because the JVM is never given an element type to have an opinion about.
+
+**This is the operator's insight, quantified.** Java asserts an independent awareness of
+its own layout — up to 104 bytes of it to carry 16 bytes of substrate. Zero-copy
+transparency is therefore not obtained by finding a better Java spelling of the row; it
+is obtained by never handing Java a row type at all. **Project, do not hydrate.**

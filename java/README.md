@@ -40,10 +40,17 @@ cd java
 /opt/jdks/jdk-26.0.2/bin/javac -d out $(find src/main/java src/test/java -name '*.java')
 ```
 
-Compilation emits six `[restricted]` warnings with `-Xlint:all`, all of them in
-`internal/ffm/{Abi,Downcalls,Engine}.java`. That is not noise to be suppressed — it is a
-machine-checkable statement that every unsafe FFM operation in the project lives in the one package
-that is allowed to contain them.
+Compilation emits **seven** `[restricted]` warnings with `-Xlint:all`: six in
+`internal/ffm/{Abi,Downcalls,Engine}.java`, plus one in `AbiContractTest`, which deliberately calls
+`SymbolLookup.libraryLookup` to prove the manifest cross-check rejects a wrong library. That is not
+noise to be suppressed — it is a machine-checkable statement that every unsafe FFM operation in the
+project lives either in the one package allowed to contain them or in the one test that exists to
+exercise the restriction itself.
+
+> Corrected 2026-08-25: this line previously read "six … all of them in `internal/ffm/…`", omitting
+> the test. The board had it right all along — `STATUS_BOARD.md` D-LGJ-D and D-LGJ-W3 and
+> `LATEST_STATE.md` have said "7 … all in `internal/ffm/*` **or a test deliberately exercising it**"
+> since 2026-08-17. This file was the only place carrying the stale count.
 
 ## Run
 
