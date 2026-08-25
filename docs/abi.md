@@ -90,6 +90,41 @@ The magic doubles as an endianness probe: read as a `u64` little-endian it yield
 a known constant; anything else means the library was built for a different byte
 order and every subsequent read would be garbage.
 
+### Backward compatibility is enforced, not merely promised
+
+§2's additive-minor promise ("an older Java build against a newer `.so` always
+loads") has a second direction the promise itself does not cover: a **newer Java
+against an older `.so`**. That case is governed by `Abi.requireMinor(N)`, whose
+contract is to fail before the feature's downcall is attempted, naming the
+minor.
+
+**That guard was defeated by eager class initialization until 2026-08-25.**
+Every downcall handle was resolved in `Downcalls.<clinit>`, so a single absent
+symbol broke the whole class and the guard never ran. Measured with the Java of
+that day against real libraries built from this repo's own history:
+
+| library | `SmokeTest` (uses nothing newer than minor 1) died on |
+|---|---|
+| minor 1 | `lgj_rowstore_open` — a **minor-2** symbol |
+| minor 2 | `lgj_rowstore_open_with_edges` — minor 3 |
+| minor 3 | `lgj_mask_andnot` — minor 4 |
+| minor 4 | `lgj_reduce_facet_sum` — minor 5 |
+
+Note the severity: against the minor-1 library, **minor-1 operations could not
+run either.**
+
+The fix is one lazy holder class per minor (`Minor2`/`Minor3`/`Minor4`/`Minor5`
+in `Downcalls`), initialised on first *access*. The minor-1 base surface stays
+eager deliberately — a library missing any of it is not an older library, it is
+a wrong one, and that failure should be immediate and total.
+
+`OldAbiCompatTest` is the falsifier. It takes
+`-Dlgj.oldlibrary=…` and checks each minor **in whichever direction the loaded
+library calls for**: available ⇒ the feature must actually work; absent ⇒
+`AbiMismatchException` naming that minor, never a bare missing-symbol failure
+and never a failure of some *other* minor's feature. Both directions are
+required — a gate that rejected everything would satisfy a rejection-only test.
+
 ### Minor version history
 
 - **Minor 2** (2026-08-17) — the SoA row store (§11).
