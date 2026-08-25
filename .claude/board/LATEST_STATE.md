@@ -1,3 +1,26 @@
+## 2026-08-25 — the Ghidra end of the R2IL arc: seam verified, vocabulary measured
+
+Working the `r2il-machine-semantic-contract-v1` plan (lance-graph, PR #1027,
+merged) from the GHIDRA side while a sibling session drives W0-W4.
+
+- **The seam is an interface.** `Language.parse` -> `InstructionPrototype`
+  -> `getPcode()`, both interfaces, `InstructionPrototype` with exactly two
+  implementations and ONE construction site
+  (`SleighLanguage.java:392`). **No Ghidra core fork required** — this was
+  an open unknown gating the whole Java half.
+- **R12** (`valhalla-lab/reproducers/`): Ghidra's P-code payloads do NOT
+  flatten even at their optimistic lower bound (16 B / 12 B, references
+  deleted); ordinals do, at VM element size 8. A real 2-input `PcodeOp` is
+  **five heap objects**. Verdict: the W5 facade ADDRESSES the vocabulary
+  rather than carrying it — which needs nothing new, it is what
+  `LaneId`/`Ordinal`/`MaskId` already do.
+- **Unanticipated:** an 8-byte `VarnodeNarrow` (u8 space, u8 size, 48-bit
+  offset) also flattens — so a content-bearing descriptor is possible, not
+  only a pointer. Recorded as an option for W1, deliberately not proposed
+  as the design.
+- Nothing swapped, nothing minted, no layout touched. Measurement + trace
+  only.
+
 ## 2026-08-25 — ABI minor 8: the register groupings are DATA, and the load gate stopped requiring the whole manifest
 
 - **The wire encoding of §14's `carving` is no longer written anywhere by

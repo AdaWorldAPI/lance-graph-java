@@ -4,6 +4,71 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-GHIDRAS-SEAM-IS-AN-INTERFACE-AND-ITS-VOCABULARY-CANNOT-FLATTEN-1
+
+**Status:** MEASURED — R12 + the Ghidra source trace. No code swapped yet.
+**Confidence:** High on both halves; each is a citation or a VM-reported number.
+
+Starting the `r2il-machine-semantic-contract-v1` arc from the GHIDRA end
+while a sibling session drives W0-W4. Two findings, and they point the
+same way.
+
+**1. The seam is an interface, and no core fork is required.** Traced:
+
+```
+Language (INTERFACE, model/lang/Language.java:29)
+  .parse(MemBuffer, ProcessorContext, boolean)
+      -> InstructionPrototype (INTERFACE, :35)
+           .getPcode(context, override)  -> PcodeOp[]
+```
+
+`InstructionDB.getPcode()` (`:608-628`) does nothing but delegate to
+`proto.getPcode(...)`. `InstructionPrototype` has exactly TWO
+implementations — `SleighInstructionPrototype` and `InvalidPrototype` —
+and `SleighLanguage` constructs the former at exactly ONE site
+(`SleighLanguage.java:392`). `Instruction` is itself an interface with an
+`InstructionStub` already in tree, so alternative implementations are an
+established pattern rather than a hack.
+
+This was an OPEN UNKNOWN that had been flagged twice this session and
+never checked; it gates the whole Java half, and the answer is favourable.
+
+**2. Ghidra's P-code vocabulary cannot be carried as value classes — its
+identity can.** R12, field shapes transcribed from
+`Varnode.java:51-54` / `PcodeOp.java:102-105`, run on the JEP 401 EA build
+with the VM reporting element sizes:
+
+| shape | flat? |
+|---|---|
+| `VarnodePayload(int,int,long)` 16 B | **no** |
+| `PcodeOpPayload(int,long)` 12 B | **no** |
+| `VarnodeRef` / `PcodeOpRef` / `InstructionRef` (`long`) | **yes**, element size 8 |
+
+And those Payload rows are the OPTIMISTIC bound — every reference deleted.
+The real `Varnode` holds an `Address`; the real `PcodeOp` holds a
+`SequenceNumber`, a `Varnode[]` and a `Varnode`, so **a 2-input `PcodeOp`
+is five heap objects**. That is "ONE ROW IS NOT ONE JAVA OBJECT" at its
+worst: one instruction becomes a small object graph.
+
+**Why this needs nothing new.** The verdict — *address the vocabulary,
+don't carry it* — is the same result `LaneId`/`Ordinal`/`MaskId` already
+rely on, and the same reason `RowRange` (16 B) does not flatten. The
+existing descriptor discipline answers W5's central question before W5
+starts.
+
+**The unanticipated part, recorded so it is not lost.** `VarnodeNarrow`
+(`spaceId:u8`, `size:u8`, 48-bit offset) ALSO flattens. So 8 bytes is
+enough to carry a varnode's real CONTENT, not merely a pointer to it — a
+content-bearing descriptor that reads space and size without a lane
+round-trip. Bounded by exactly one condition: a 48-bit offset. Whether
+that suffices is a W0/W1 address-space question, not a Valhalla one.
+**Named as an option, NOT proposed as the design** — pre-empting W1's
+tenant carving from this side is precisely what the plan's R1 rule
+("no private object graph then serialize") forbids one layer up.
+
+Cross-ref: `.claude/plans/r2il-machine-semantic-contract-v1.md` §2 (the
+facade-not-data-model correction) and §6 W5, both in lance-graph.
+
 ## 2026-08-25 — E-LGJ-A-CONSTANT-COPIED-THREE-TIMES-HAS-NO-FALSIFIER-1
 
 **Status:** SHIPPED — ABI minor 8, docs/abi.md §17.
