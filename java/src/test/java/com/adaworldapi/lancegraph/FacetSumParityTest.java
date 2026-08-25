@@ -2,11 +2,11 @@ package com.adaworldapi.lancegraph;
 
 /**
  * Falsifiers for the mask-native sweep (docs/abi.md §14, ABI minor &ge; 5):
- * {@link RowStore#facetSum} and {@link Carving}.
+ * {@link RowStore#facetSumAs} and {@link Carving}.
  *
  * <p>Every expected value is recomputed <strong>in Java, from the public per-row accessors</strong>
  * ({@link RowStore#payloadLow64At} / {@link RowStore#payloadHi32At}) — never by calling
- * {@code facetSum} a second time. That is what makes this a cross-language check rather than a
+ * {@code facetSumAs} a second time. That is what makes this a cross-language check rather than a
  * tautology: the native kernel walks mask bits over a 512-byte-strided buffer, while the Java side
  * reconstructs each register from two independent accessors and re-carves it here. The two paths
  * share no code, so agreement is evidence.
@@ -86,16 +86,16 @@ public final class FacetSumParityTest {
                         rows.length > 0 && rows.length < nRows);
 
                 for (Carving carving : Carving.values()) {
-                    c.eq("facetSum(" + carving + ") agrees with Java recomputation",
+                    c.eq("facetSumAs(" + carving + ") agrees with Java recomputation",
                             expected(store, facet, carving, rows),
-                            store.facetSum(facet, carving, selected));
+                            store.facetSumAs(facet, carving, selected));
                 }
 
                 c.section("the three carvings genuinely differ — otherwise the parity checks"
                         + " above would all pass for a kernel that ignored its carving argument");
-                long rails = store.facetSum(facet, Carving.RAILS_6X2, selected);
-                long trips = store.facetSum(facet, Carving.TRIPLETS_4X3, selected);
-                long quads = store.facetSum(facet, Carving.QUADS_3X4, selected);
+                long rails = store.facetSumAs(facet, Carving.RAILS_6X2, selected);
+                long trips = store.facetSumAs(facet, Carving.TRIPLETS_4X3, selected);
+                long quads = store.facetSumAs(facet, Carving.QUADS_3X4, selected);
                 c.notEq("rails differs from triplets", rails, trips);
                 c.notEq("triplets differs from quads", trips, quads);
                 c.notEq("rails differs from quads", rails, quads);
@@ -109,8 +109,8 @@ public final class FacetSumParityTest {
                 long[] rb = b.materializeRows();
                 c.that("both selections are non-empty", ra.length > 0 && rb.length > 0);
 
-                long sa = store.facetSum(facet, Carving.QUADS_3X4, a);
-                long sb = store.facetSum(facet, Carving.QUADS_3X4, b);
+                long sa = store.facetSumAs(facet, Carving.QUADS_3X4, a);
+                long sb = store.facetSumAs(facet, Carving.QUADS_3X4, b);
 
                 // The union is built by IMPORTING the two row sets — the named import exception,
                 // used for a test oracle. Classids 1 and 2 are disjoint by construction, so the
@@ -120,7 +120,7 @@ public final class FacetSumParityTest {
                 System.arraycopy(rb, 0, union, ra.length, rb.length);
                 try (Mask both = store.importRows(union)) {
                     c.eq("union of disjoint selections sums to the sum of the parts",
-                            sa + sb, store.facetSum(facet, Carving.QUADS_3X4, both));
+                            sa + sb, store.facetSumAs(facet, Carving.QUADS_3X4, both));
                 }
             }
 
@@ -128,7 +128,7 @@ public final class FacetSumParityTest {
             try (Mask empty = store.importRows()) {
                 c.eq("an empty mask selects no rows", 0L, empty.count());
                 c.eq("an empty selection sums to zero", 0L,
-                        store.facetSum(facet, Carving.QUADS_3X4, empty));
+                        store.facetSumAs(facet, Carving.QUADS_3X4, empty));
             }
 
             c.section("work scales with popcount, not row count (docs/abi.md §6): a one-row"
@@ -136,15 +136,15 @@ public final class FacetSumParityTest {
             try (Mask one = store.importRows(517)) {
                 c.eq("a single-row sweep equals that row, recomputed independently",
                         carve(register(store, 517, facet), Carving.TRIPLETS_4X3),
-                        store.facetSum(facet, Carving.TRIPLETS_4X3, one));
+                        store.facetSumAs(facet, Carving.TRIPLETS_4X3, one));
             }
 
             c.section("guards");
             try (Mask m = store.maskOfFacetClass(facet, 7)) {
                 c.throwsUp("a null carving is rejected", NullPointerException.class,
-                        () -> store.facetSum(facet, null, m));
+                        () -> store.facetSumAs(facet, null, m));
                 c.throwsUp("a null selection is rejected", NullPointerException.class,
-                        () -> store.facetSum(facet, Carving.RAILS_6X2, null));
+                        () -> store.facetSumAs(facet, Carving.RAILS_6X2, null));
             }
 
             c.section("a mask over a DIFFERENT store is rejected even at the same row count —"
@@ -153,7 +153,7 @@ public final class FacetSumParityTest {
                     Mask foreign = other.maskOfFacetClass(facet, 7)) {
                 c.throwsUp("a foreign-parent mask of the same length is rejected",
                         RuntimeException.class,
-                        () -> store.facetSum(facet, Carving.RAILS_6X2, foreign));
+                        () -> store.facetSumAs(facet, Carving.RAILS_6X2, foreign));
             }
         }
 

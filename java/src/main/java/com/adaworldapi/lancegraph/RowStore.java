@@ -125,8 +125,29 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
-     * Sum one facet's 12-byte register, read as {@code carving}, over the rows {@code selection}
-     * selects — the mask-native sweep (abi.md §14, ABI minor 5).
+     * Sum one facet's 12-byte register, <strong>reinterpreted as</strong> {@code carving}, over the
+     * rows {@code selection} selects — the mask-native sweep (abi.md §14, ABI minor 5).
+     *
+     * <p><strong>This is a raw reinterpretation primitive, and the {@code As} in its name is the
+     * honest part.</strong> It applies the carving you name to every selected row. It does NOT
+     * verify that the carving is the one those rows' classes actually specify — it cannot: the
+     * mask is an opaque population (it may be a {@link #importRows} union spanning several
+     * classids), and the fixture {@code ClassView} carries no carving resolver at all today. So
+     * this method claims no ClassView authority; the caller supplies the reading and owns its
+     * correctness.
+     *
+     * <p>The stronger shape — binding the resolved answer to the population ONCE, so the sweep
+     * receives an answer rather than a promise — is a named seam, not something this method
+     * pretends to be:
+     *
+     * <pre>
+     *   classid → ClassView → ResolvedCarving → (population + its carving) → sum
+     * </pre>
+     *
+     * <p>That preserves the property this whole path exists for (the ALU gets the answer, not the
+     * question) while making the binding checkable. It needs a real ClassView carving resolver
+     * upstream, which does not exist yet — so it is recorded as the next rung rather than faked
+     * with a per-row consult, which would put the entropy straight back into the loop.
      *
      * <p>This is the execution half of the mask path whose build half is
      * {@link #maskOfFacetClass}. Together they are the whole shape: classid becomes a mask once,
@@ -139,16 +160,16 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * costs only the mask scan.
      *
      * @param facet     which of the 32 facet lanes to read — a facet index, not a lane id
-     * @param carving   which reading of the 12-byte register applies, resolved by the caller from
-     *                  the class's {@code ClassView} before the crossing
+     * @param carving   the reading to apply — supplied by the caller, NOT verified against the
+     *                  selected rows' classes
      * @param selection the rows to sum over; must belong to this store
      */
-    public long facetSum(FacetId facet, Carving carving, Mask selection) {
+    public long facetSumAs(FacetId facet, Carving carving, Mask selection) {
         java.util.Objects.requireNonNull(facet, "facet");
         java.util.Objects.requireNonNull(carving, "carving");
         java.util.Objects.requireNonNull(selection, "selection");
-        requireOpen("facetSum()");
-        return Engine.facetSum(handle, facet.index(), carving.wire(), selection.handle());
+        requireOpen("facetSumAs()");
+        return Engine.facetSumAs(handle, facet.index(), carving.wire(), selection.handle());
     }
 
     /**

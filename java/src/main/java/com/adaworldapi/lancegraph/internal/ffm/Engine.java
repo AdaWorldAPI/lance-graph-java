@@ -199,20 +199,21 @@ public final class Engine {
     }
 
     /**
-     * Overwrite {@code dstMask} with {@code classid(facet, row) == classId} for every row of
-     * {@code store} (docs/abi.md §11). {@code facet} is a facet index {@code 0..32} into the row's
-     * 32 facet lanes, not a lane id. Requires ABI minor &gt;= 2.
+     * Sum one facet's 12-byte register, reinterpreted as {@code carving}, over the rows
+     * {@code mask} selects (abi.md §14, ABI minor 5). Cost is
+     * {@code O(mask words + popcount * groups)}. Requires ABI minor &gt;= 5.
      */
-    /**
-     * Sum one facet's 12-byte register, under {@code carving}, over the rows {@code mask} selects
-     * (abi.md §14, ABI minor 5). Work scales with the mask's popcount, not the row count.
-     */
-    public static long facetSum(long store, int facet, int carving, long mask) {
+    public static long facetSumAs(long store, int facet, int carving, long mask) {
         Abi.requireMinor(5);
         Scratch s = SCRATCH.get();
         return Downcalls.reduceFacetSum(store, facet, carving, mask, s.out);
     }
 
+    /**
+     * Overwrite {@code dstMask} with {@code classid(facet, row) == classId} for every row of
+     * {@code store} (docs/abi.md §11). {@code facet} is a facet index {@code 0..32} into the row's
+     * 32 facet lanes, not a lane id. Requires ABI minor &gt;= 2.
+     */
     public static void eqClassid(long store, int facet, int classId, long dstMask) {
         Abi.requireMinor(2);
         Downcalls.opEqClassid(store, facet, classId, dstMask);

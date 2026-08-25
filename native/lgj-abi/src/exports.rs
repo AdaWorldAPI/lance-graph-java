@@ -876,7 +876,7 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
 ///
 /// `carving` is a caller-supplied, VALIDATED wire value — `0` rails
 /// (`6*(u8:u8)`), `1` triplets (`4*(u8:u8:u8)`), `2` quads
-/// (`3*(u8:u8:u8:u8)`). Anything else is `LGJ_ERR_INVALID_ARGUMENT`, never a
+/// (`3*(u8:u8:u8:u8)`). Anything else is `LGJ_ERR_UNSUPPORTED_CARVING`, never a
 /// silent default. This follows [`lgj_hop`]'s `decode_mode` precedent
 /// (spec §3.4) rather than `edge_participation`'s ClassView consult: the
 /// register's reading is what the CALLER resolved from the ClassView before
@@ -884,8 +884,13 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
 /// question back in the hot loop, which is precisely what this symbol exists
 /// to take out of it.
 ///
-/// Work is proportional to the mask's popcount, so an empty mask costs
-/// O(words) and §6's bulk-or-lifecycle rule holds by construction.
+/// Cost is `O(mask_words + popcount * groups)` — the mask scan is
+/// unconditional, so an empty mask still costs one pass over the mask words
+/// rather than nothing. §6's bulk-or-lifecycle rule holds either way: no term
+/// is per-crossing-per-element.
+///
+/// Overflow is REPORTED (`LGJ_ERR_SUM_OVERFLOW`), never wrapped — `i64` is not
+/// closed under this reduction.
 ///
 /// # Safety
 ///
@@ -938,14 +943,19 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum(
             Some(g) => g,
             None => return LGJ_ERR_WRONG_RESOURCE_KIND,
         };
-        let sum = kernels::masked_facet_sum(
+        let sum = match kernels::masked_facet_sum(
             store.as_bytes(),
             facet as usize * crate::rowstore::FACET_BYTES as usize,
             crate::rowstore::ROW_BYTES as usize,
             store_entry.n_rows as usize,
             carving,
             &g.words,
-        );
+        ) {
+            Some(v) => v,
+            // i64 is not closed under this reduction (see the kernel's own
+            // doc). Report it; never write a wrapped value.
+            None => return LGJ_ERR_SUM_OVERFLOW,
+        };
         drop(g);
         // SAFETY: non-null, checked above; written only on success.
         unsafe { *out_sum = sum };

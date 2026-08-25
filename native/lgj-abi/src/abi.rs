@@ -122,10 +122,19 @@ pub const LGJ_ERR_UNSUPPORTED_DECODE_MODE: i32 = -14;
 /// ABI minor 5.
 pub const LGJ_ERR_UNSUPPORTED_CARVING: i32 = -15;
 
+/// `lgj_reduce_facet_sum`'s accumulator exceeded `i64`.
+///
+/// `i64` is not closed under this reduction: a single row contributes up to
+/// `3 * (2^32 - 1)` under the quads reading, so a large enough selection of
+/// large enough registers genuinely does not fit. The kernel accumulates in
+/// `i128` and range-checks once, so the caller gets this status instead of a
+/// wrapped value — `out_sum` is NOT written. ABI minor 5.
+pub const LGJ_ERR_SUM_OVERFLOW: i32 = -16;
+
 /// A panic was caught at the membrane and converted to a status (§9).
 ///
 /// Not in `abi.md`'s table, and deliberately *outside* the allocated
-/// `-1..=-15` block so it can never be confused with a specified condition.
+/// `-1..=-16` block so it can never be confused with a specified condition.
 /// A caller seeing this has found a bug in this crate; it is reported rather
 /// than allowed to unwind into JVM frames, which would be UB.
 pub const LGJ_ERR_PANIC: i32 = -99;

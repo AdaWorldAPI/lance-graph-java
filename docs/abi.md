@@ -62,7 +62,7 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 21 symbols (minor 4; the "14" this line carried
+- It is **small** — currently 22 symbols (minor 5; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
   minor 2's three additions are argued in §11, minor 3's one addition in
@@ -79,7 +79,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 4    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 5    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -97,6 +97,11 @@ order and every subsequent read would be garbage.
 - **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)
   and `lgj_hop` (one-hop graph traversal, gated by the
   `lance-graph-contract` `ClassView`/`FieldMask` LAW — §13).
+- **Minor 5** (2026-08-25) — `lgj_reduce_facet_sum` (§14): the mask path's
+  missing EXECUTION half. The build half (`lgj_op_eq_classid`) has existed
+  since minor 2; nothing could consume a mask against the 12-byte facet
+  register until now. Two new statuses: `UNSUPPORTED_CARVING` (-15) and
+  `SUM_OVERFLOW` (-16).
 
 ## 3. Status codes
 
@@ -120,6 +125,8 @@ are no error strings across the membrane and no `errno` dependence.
 | `-12` | `ALLOCATION_FAILED` | the allocator refused |
 | `-13` | `READ_ONLY` | write attempted against a read-only lane |
 | `-14` | `UNSUPPORTED_DECODE_MODE` | `lgj_hop` called with a `decode_mode` this build does not yet implement (§13, ABI minor ≥ 4) |
+| `-15` | `UNSUPPORTED_CARVING` | `lgj_reduce_facet_sum` called with a `carving` outside `0..=2` (§14, ABI minor ≥ 5) |
+| `-16` | `SUM_OVERFLOW` | `lgj_reduce_facet_sum`'s accumulator exceeded `i64`; `out_sum` is NOT written (§14, ABI minor ≥ 5) |
 
 `INVALID_HANDLE` is deliberately the response to *use-after-close*, not a crash.
 See §4.
@@ -718,9 +725,21 @@ i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
 ```
 
 Sums every group of `facet`'s 12-byte register, under `carving`, over the rows
-`mask` selects, widened to `i64`. Work is proportional to the mask's
-**popcount**, so an empty mask is O(words) and §6's bulk-or-lifecycle rule
-holds by construction.
+`mask` selects. Cost is **`O(mask_words + popcount × groups)`** — the mask-word
+scan is unconditional, so an empty mask costs one pass over the mask rather than
+nothing. §6's bulk-or-lifecycle rule holds either way: no term is
+per-crossing-per-element.
+
+### Overflow is reported, never wrapped
+
+`i64` is **not closed** under this reduction. Under the quads reading one row
+contributes up to `3 × (2³² − 1) = 12 884 901 885`, so `i64::MAX` is exceeded
+after ~715 827 882 maximum-valued selected rows — about 341 GiB of 512-byte
+rows, which is inside the scale this substrate contemplates rather than safely
+beyond it. The kernel accumulates in `i128` (which cannot overflow: the per-row
+bound × `u64::MAX` rows still fits) and range-checks once, returning
+`LGJ_ERR_SUM_OVERFLOW` with `out_sum` untouched. A silent wrap would be exactly
+the plausible-but-wrong answer this ABI otherwise works to prevent.
 
 ### The carving is a caller-supplied, validated parameter — not a ClassView consult
 
@@ -738,12 +757,31 @@ before the store or mask are resolved, so `out_sum` is provably untouched on a
 rejected call. An unknown reading must never alias a known one.
 
 This follows `lgj_hop`'s `decode_mode` precedent (§13, spec §3.4) rather than
-`edge_participation`'s ClassView consult, and the reason is the point of the
-symbol: **the reading is what the caller already resolved from the ClassView
-before crossing.** Re-resolving it per row inside the sweep would put the
-question back in the hot loop — exactly what this symbol exists to take out of
-it. A per-row ClassView consult here would be the mask-native law's own defect,
-one layer down.
+`edge_participation`'s ClassView consult. Re-resolving the reading per row
+inside the sweep would put the question back in the hot loop — exactly what this
+symbol exists to take out of it, and a per-row ClassView consult here would be
+the mask-native law's own defect one layer down.
+
+**But be precise about what that does and does not establish.** This symbol is a
+RAW REINTERPRETATION primitive. It applies the carving it is handed to every
+selected row; it does not — and cannot — verify that this is the reading those
+rows' classes specify. A mask is an opaque population (it may be an
+`lgj_mask_or`/import union spanning several classids), and the fixture
+`ClassView` carries no carving resolver at all today. The Java surface is named
+`facetSumAs` for exactly this reason: the caller supplies the reading and owns
+its correctness.
+
+The stronger shape binds the answer to the population ONCE, so the sweep
+receives an answer rather than a promise:
+
+```
+classid → ClassView → ResolvedCarving → (population + its carving) → sum
+```
+
+That keeps the property this path exists for (the ALU gets the answer, not the
+question) while making the binding checkable. It needs a real ClassView carving
+resolver upstream, which does not exist yet, so it is recorded here as the next
+rung — deliberately not faked with a per-row consult.
 
 ### Mask parentage
 

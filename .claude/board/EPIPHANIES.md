@@ -4,6 +4,93 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-25 — E-LGJ-A-FEATURE-GATE-DEFEATED-BY-EAGER-CLASS-INIT-1
+
+**Status:** SIX REVIEW FINDINGS, ALL CONFIRMED AND FIXED (PR #26, pre-merge).
+**Confidence:** High — each was reproduced before being fixed, and the two
+substantive ones are disable-verified.
+
+Operator review of the minor-5 work found six things **117 Rust + 263 Java green
+gates did not falsify.** Recorded because the pattern is the lesson: every one
+sat in a place no test was pointed at.
+
+### 1. The guard was defeated by the class it guards (the serious one)
+
+`Abi.requireMinor(N)`'s own javadoc promises it "fails loudly, **before any
+downcall for the feature is attempted**". It could not: every handle in
+`Downcalls` is a `static final` resolved in `<clinit>`, and `mh()` throws on an
+absent symbol. Reproduced against a REAL ABI 0.4 library built from merged
+`main`: `SmokeTest` — which touches nothing newer than minor 1 — died in
+`Downcalls.<clinit>` on the missing `lgj_reduce_facet_sum`. The guard never ran.
+
+Fixed with a nested `Minor5` holder (initialised on first ACCESS, not with
+`Downcalls`), and `OldAbiCompatTest` now proves BOTH halves against the real 0.4
+`.so`: a minor-1 fluent count still succeeds, and `facetSumAs` alone fails with
+`AbiMismatchException` naming the minor. Disable-verified — reverting the holder
+reproduces the `<clinit>` crash.
+
+**The same latent defect applies to minors 2-4** and is NOT fixed here: their
+handles are still eager. Pre-existing, not introduced by this PR, and its own
+change with its own falsifier. Recorded so it is tracked rather than rediscovered.
+
+### 2. The normative ledger contradicted itself on a membrane change
+
+`abi.md` still said `LGJ_ABI_MINOR = 4`, "currently 21 symbols", a history
+stopping at minor 4, and a status table stopping at `-14` — while §14 and the §7
+header had been updated to 22 symbols and `-15`. The one document that must never
+self-contradict on a membrane change did. Now consistent at minor 5.
+
+### 3. Claimed ClassView authority the symbol cannot verify
+
+`Carving`'s doc said the reading "is resolved through its ClassView", and the
+method took any `(FacetId, Carving, Mask)` triple. But a mask is an **opaque
+population** — the test itself unions rows from classids 1 and 2 and applies one
+carving to all of them — and the fixture ClassView has **no carving resolver at
+all**. The primitive cannot check what it claimed.
+
+Fixed by naming it honestly rather than faking the authority: **`facetSumAs`**, a
+raw reinterpretation primitive whose caller owns correctness. The stronger shape
+is recorded as the next rung, not pretended:
+`classid → ClassView → ResolvedCarving → (population + its carving) → sum` —
+binding the answer to the population ONCE, which keeps the ALU receiving an
+answer rather than a question while making the binding checkable. Deliberately
+NOT a per-row consult, which would put the entropy straight back in the loop.
+
+### 4. `i64` is not closed under the reduction
+
+The kernel used `wrapping_add`. Under quads one row contributes up to
+`3 × (2³² − 1)`, so `i64::MAX` falls after ~715 827 882 maximum-valued rows —
+about 341 GiB of 512-byte rows, INSIDE this substrate's contemplated scale, not
+safely beyond it. §14 merely said "widened to i64" and defined no wrapping
+semantics. Now accumulates in `i128`, range-checks once, and returns
+`LGJ_ERR_SUM_OVERFLOW` (-16) with `out_sum` untouched. Silent wrapping is exactly
+the plausible-but-wrong result this ABI otherwise works to prevent.
+
+### 5-8. Four cleanups, each a small untruth
+
+Rust export doc named `LGJ_ERR_INVALID_ARGUMENT` while the code returned
+`LGJ_ERR_UNSUPPORTED_CARVING`; `Downcalls`' header still counted 20 handles;
+`Engine.java` stranded `eqClassid`'s javadoc above the new method; and the
+complexity claim said "proportional to popcount" when the implementation scans
+every mask word regardless — now `O(mask_words + popcount × groups)`.
+
+### 9. An overclaimed reachability, corrected
+
+The early-break test called an overlong mask-word slice ABI-reachable. It is not:
+`registry` allocates at exactly `mask_words_for(n_rows)` and boxes that slice.
+Test kept — a kernel correct only on well-formed input is a latent bug, and the
+`rlib` has callers other than `exports.rs` — but reclassified as internal kernel
+robustness rather than a membrane case.
+
+### The open question this review left standing
+
+**Is `sum` the first product operation, or R8's checksum escaping the lab?** The
+ABI's own law says symbol growth is a design smell needing justification. R8
+proved the *execution shape*; it did not prove that "sum packed rails/triplets/
+quads" deserves permanent ABI vocabulary. If no consumer needs facet sum, the
+honest move is to keep the shape and drop the operation. Left open deliberately —
+it is a product question, not an engineering one.
+
 ## 2026-08-25 — E-LGJ-THE-MASK-PATH-WAS-HALF-WIRED-ALL-ALONG-1
 
 **Status:** SHIPPED — ABI minor 5, `lgj_reduce_facet_sum` (`docs/abi.md` §14).

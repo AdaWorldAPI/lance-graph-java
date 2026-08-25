@@ -51,6 +51,15 @@ public enum Status {
     UNSUPPORTED_CARVING(-15, "lgj_reduce_facet_sum was called with a carving outside 0..=2"
             + " (0=rails 6x2, 1=triplets 4x3, 2=quads 3x4)"),
     /**
+     * {@code lgj_reduce_facet_sum}'s accumulator exceeded {@code i64} (docs/abi.md §14).
+     *
+     * <p>{@code i64} is not closed under that reduction — one row contributes up to
+     * {@code 3 * (2^32 - 1)} under the quads reading. The kernel accumulates in {@code i128} and
+     * range-checks once, so this status arrives instead of a silently wrapped value, and
+     * {@code out_sum} is not written.
+     */
+    SUM_OVERFLOW(-16, "lgj_reduce_facet_sum's accumulator exceeded i64; the sum was not written"),
+    /**
      * Not tabulated in docs/abi.md §3 (reported as a doc gap) but required by §9: a panic is caught
      * at the boundary and becomes a negative status rather than unwinding into JVM frames, which
      * would be undefined behaviour. This is that status.

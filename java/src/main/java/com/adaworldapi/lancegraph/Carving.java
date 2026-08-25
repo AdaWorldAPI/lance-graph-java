@@ -9,10 +9,15 @@ package com.adaworldapi.lancegraph;
  * of the class, resolved through its {@code ClassView}; it is never a property of the bytes and
  * never inferable from them.
  *
+ * <p><strong>This enum names a reading; it does not carry authority for one.</strong>
+ * {@link RowStore#facetSumAs} applies the carving it is handed without checking it against the
+ * selected rows' classes — see that method's own note. Binding a resolved carving to a population
+ * is a named seam awaiting a real ClassView carving resolver.
+ *
  * <p><strong>Why this is a parameter rather than something the sweep looks up per row.</strong>
- * The caller resolves the reading from the ClassView <em>before</em> crossing the membrane, and
- * hands the answer down. Re-resolving it inside the sweep would put the question back in the hot
- * loop — which is precisely what {@link RowStore#facetSum} exists to take out of it.
+ * Whatever resolves the reading does so <em>before</em> crossing the membrane, and hands the
+ * answer down. Re-resolving it inside the sweep would put the question back in the hot loop —
+ * precisely what {@link RowStore#facetSumAs} exists to take out of it.
  */
 public enum Carving {
     /** {@code 6 x (u8:u8)} — six little-endian {@code u16} rails. */

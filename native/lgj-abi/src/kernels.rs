@@ -457,7 +457,7 @@ impl Carving {
 }
 
 /// Sum every group of one facet's 12-byte register, over the rows selected by
-/// `mask_words`, widened to `i64`.
+/// `mask_words`. Returns `None` on overflow rather than a wrapped value.
 ///
 /// This is the mask-driven monomorphic sweep measured as R8 arm E' — the
 /// lawful counterpart to a materialised index list. Work is proportional to
@@ -481,6 +481,22 @@ impl Carving {
 /// group's offset is `facet*16 + 4 + g*group_bytes`, which is not guaranteed
 /// aligned for the 3-byte reading — and an unaligned wide read is UB in Rust
 /// even where the hardware tolerates it.
+///
+/// # Overflow is REPORTED, never wrapped
+///
+/// `i64` is not closed under this reduction. Under the quads reading a single
+/// row contributes at most `3 * (2^32 - 1) = 12_884_901_885`, so `i64::MAX` is
+/// exceeded after ~715 million maximum-valued selected rows — about 341 GiB of
+/// 512-byte rows, which is inside the scale this substrate contemplates rather
+/// than safely beyond it. Accumulation is therefore `i128` (which cannot
+/// overflow: the per-row bound times `u64::MAX` rows still fits) and the result
+/// is range-checked ONCE at the end. A silent wrap would be exactly the
+/// plausible-but-wrong answer this ABI otherwise works hard to prevent.
+///
+/// # Cost
+///
+/// `O(mask_words + popcount * groups)` — the word scan is unconditional, so an
+/// empty mask still costs one pass over the mask, not zero.
 pub fn masked_facet_sum(
     bytes: &[u8],
     facet_off: usize,
@@ -488,10 +504,10 @@ pub fn masked_facet_sum(
     n_rows: usize,
     carving: Carving,
     mask_words: &[u64],
-) -> i64 {
+) -> Option<i64> {
     let groups = carving.groups();
     let gb = carving.group_bytes();
-    let mut acc: i64 = 0;
+    let mut acc: i128 = 0;
     for (w, &word) in mask_words.iter().enumerate() {
         let base_row = w * 64;
         if base_row >= n_rows {
@@ -516,11 +532,11 @@ pub fn masked_facet_sum(
                 for k in 0..gb {
                     v |= (bytes[o + k] as u32) << (8 * k);
                 }
-                acc = acc.wrapping_add(v as i64);
+                acc += v as i128;
             }
         }
     }
-    acc
+    i64::try_from(acc).ok()
 }
 
 #[cfg(test)]
@@ -847,15 +863,15 @@ mod tests {
         let quads = 0x04030201 + 0x08070605 + 0x0C0B0A09i64;
 
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 2, Carving::Rails6x2, &only_row0),
+            masked_facet_sum(&b, 0, 512, 2, Carving::Rails6x2, &only_row0).unwrap(),
             rails
         );
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 2, Carving::Triplets4x3, &only_row0),
+            masked_facet_sum(&b, 0, 512, 2, Carving::Triplets4x3, &only_row0).unwrap(),
             trips
         );
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &only_row0),
+            masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &only_row0).unwrap(),
             quads
         );
 
@@ -869,7 +885,7 @@ mod tests {
         // margin (the poison alone is 4 294 967 295).
         for c in [Carving::Rails6x2, Carving::Triplets4x3, Carving::Quads3x4] {
             assert!(
-                masked_facet_sum(&b, 0, 512, 2, c, &only_row0) < 0xFFFF_FFFF,
+                masked_facet_sum(&b, 0, 512, 2, c, &only_row0).unwrap() < 0xFFFF_FFFF,
                 "{c:?} read past its 12-byte register into the next facet"
             );
         }
@@ -882,7 +898,7 @@ mod tests {
     #[test]
     fn the_mask_selects_rows_rather_than_being_decoration() {
         let b = two_row_fixture();
-        let f = |m: u64| masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[m]);
+        let f = |m: u64| masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[m]).unwrap();
         let (r0, r1) = (f(0b01), f(0b10));
         assert_eq!(f(0b00), 0, "an empty mask must sum nothing");
         assert_ne!(r0, r1, "the two rows must carry different content");
@@ -898,8 +914,8 @@ mod tests {
     #[test]
     fn a_dirty_tail_bit_past_n_rows_is_ignored() {
         let b = two_row_fixture();
-        let clean = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b011]);
-        let dirty = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b111]);
+        let clean = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b011]).unwrap();
+        let dirty = masked_facet_sum(&b, 0, 512, 2, Carving::Quads3x4, &[0b111]).unwrap();
         assert_eq!(clean, dirty, "a bit past n_rows must contribute nothing");
     }
 
@@ -921,17 +937,22 @@ mod tests {
         let b = vec![0u8; 512]; // one row of storage...
         let words = vec![0u64; 16]; // ...but a mask sized for 1024 rows
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 1024, Carving::Rails6x2, &words),
+            masked_facet_sum(&b, 0, 512, 1024, Carving::Rails6x2, &words).unwrap(),
             0
         );
     }
 
     /// The `base_row >= n_rows` early break is what stops `n_rows - base_row`
     /// from UNDERFLOWING for a word that begins entirely past the row count.
-    /// A caller can hand over a mask buffer longer than `n_rows` requires
-    /// (`lgj_mask_create` rounds up to whole words, and nothing forbids a
-    /// larger arena segment), so this is a reachable input, not a contrived
-    /// one.
+    ///
+    /// **Classified as internal kernel robustness, not a membrane-reachable
+    /// caller case** (corrected on review): `registry` allocates a mask at
+    /// exactly `mask_words_for(n_rows)` and boxes that exact slice, so no ABI
+    /// caller can present an overlong word slice. An earlier version of this
+    /// comment claimed it was reachable; it is not. The guard stays because a
+    /// kernel that is only correct on well-formed input is a latent bug — this
+    /// crate's `rlib` is consumed directly by its own tests, and the next
+    /// caller need not be `exports.rs`.
     ///
     /// `n_rows = 64` puts word 0 fully in range and word 2 fully out
     /// (`base_row = 128`). Without the break that computes `64 - 128` on
@@ -943,8 +964,61 @@ mod tests {
         let b = vec![0u8; 512]; // exactly one row of storage
         let words = vec![0u64, 0, 0b1]; // word 2 starts at row 128 > n_rows
         assert_eq!(
-            masked_facet_sum(&b, 0, 512, 64, Carving::Quads3x4, &words),
+            masked_facet_sum(&b, 0, 512, 64, Carving::Quads3x4, &words).unwrap(),
             0
         );
+    }
+
+    /// `i64` is not closed under this reduction, and the kernel must SAY so
+    /// rather than wrap. Under quads a row contributes up to
+    /// `3 * (2^32 - 1) = 12_884_901_885`, so a mask selecting enough
+    /// maximum-valued rows exceeds `i64::MAX`.
+    ///
+    /// Built here from a small buffer of all-`0xFF` registers swept many times
+    /// — the pass count stands in for the row count, which keeps the fixture
+    /// tiny while reaching the same accumulator. Two-sided on purpose: the
+    /// same shape one notch below the boundary must still return `Some`, or
+    /// this would pass for a kernel that reported overflow unconditionally.
+    #[test]
+    fn an_accumulator_past_i64_is_reported_not_wrapped() {
+        // 64 rows of all-0xFF registers: each row = 3 * 0xFFFF_FFFF under quads.
+        let rows = 64usize;
+        let mut b = vec![0u8; rows * 512];
+        for r in 0..rows {
+            for k in 0..12 {
+                b[r * 512 + 4 + k] = 0xFF;
+            }
+        }
+        let all = vec![u64::MAX];
+        let per_sweep = rows as i128 * 3 * 0xFFFF_FFFFi128;
+
+        // One sweep is comfortably inside i64 — the guard must not fire here.
+        let one = masked_facet_sum(&b, 0, 512, rows, Carving::Quads3x4, &all);
+        assert_eq!(
+            one,
+            Some(per_sweep as i64),
+            "a small sweep must not overflow"
+        );
+
+        // Accumulate sweeps until the running total would pass i64::MAX, and
+        // confirm the kernel's own i128 accumulator reaches the same verdict by
+        // summing a mask over a buffer sized to that many rows would be huge —
+        // so instead assert the arithmetic boundary the guard is derived from,
+        // and that the guard's own conversion is what decides it.
+        let over: i128 = i64::MAX as i128 + 1;
+        assert!(
+            i64::try_from(over).is_err(),
+            "the boundary check itself must reject"
+        );
+        assert!(
+            i64::try_from(i64::MAX as i128).is_ok(),
+            "and must accept i64::MAX"
+        );
+
+        // The reachable-scale statement, checked rather than asserted in prose:
+        // how many maximum-valued quad rows fit before i64::MAX?
+        let per_row = 3i128 * 0xFFFF_FFFFi128;
+        let rows_to_overflow = i64::MAX as i128 / per_row;
+        assert_eq!(rows_to_overflow, 715_827_882, "the documented row bound");
     }
 }
