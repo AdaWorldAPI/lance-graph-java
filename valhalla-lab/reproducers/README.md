@@ -14,6 +14,7 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R2](#r2) | Array flattening stops at an 8-byte payload | **HotSpot / Valhalla** |
 | [R3](#r3) | The densest layout has no supported spelling, and generics discard it | **Valhalla (language + libraries)** |
 | [R4](#r4) | Sub-group carving does not dodge R2's cliff — and nesting *inflates* the payload | **HotSpot / Valhalla** |
+| [R6](#r6) | The cliff is JEP 401 by design (atomicity), not a version gap or a flag | **HotSpot / JEP 401 spec** |
 | [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
 
 Environment for every observation below: `openjdk 27-jep401ea3+1-1`, Linux x86-64,
@@ -242,3 +243,52 @@ has no spread because the JVM is never given an element type to have an opinion 
 its own layout — up to 104 bytes of it to carry 16 bytes of substrate. Zero-copy
 transparency is therefore not obtained by finding a better Java spelling of the row; it
 is obtained by never handing Java a row type at all. **Project, do not hydrate.**
+
+## R6 — is the cliff a version gap, a tunable, or Valhalla's design? (`R6_WhyEightBytes.java`)
+
+R4 measured *where* the cliff is. R6 asks *why*, because the answer decides whether the
+architecture call is durable or just a workaround for an early build. Three arms:
+
+**Is it a JDK-version gap? No — this already is 27.** R4, R5 and R6 all run on
+`27-jep401ea3+1-1`, the JEP 401 early-access build. There is no later JDK to upgrade to.
+
+**Is it a tunable? No.** Forcing all five flattening flags — `UseArrayFlattening`,
+`UseFieldFlattening`, `UseAtomicValueFlattening`, `UseNonAtomicValueFlattening`,
+`UseNullableValueFlattening` — produces output byte-identical to the default run. (Note
+that `UseArrayFlattening` and `UseFieldFlattening` are `false` by default in this build,
+which is why the flags-on run had to be done rather than assumed.)
+
+**Is it by design? Yes, and JEP 401 says so directly:**
+
+> Reference flattening must maintain the integrity of data. A flattened reference must
+> always be read and written atomically, or it could become corrupted. On common hardware
+> architectures, this limits the size of mutable fields that store flattened references to
+> no more than 64 bits.
+
+So the 8 bytes are one machine word, and the constraint is hardware atomicity — not a
+prototype limitation someone will patch.
+
+### The exemption the JEP names, tested — and why it would not rescue SoA anyway
+
+The JEP continues: *"The fields of a value class, by contrast, do not have this atomicity
+limitation, since the fields of value objects can never be observed to be mutated."* That
+is a distinction R4 never tested, so R6 tests it: a 12-byte `Reg12` as a field of a value
+class, with field + non-atomic flattening enabled.
+
+Measured: `HoldsReg12.r` is `REGULAR 4/4` — **a reference, not flattened.** The 4-byte
+control `HoldsQuad.q` flattens as expected, and `Reg12`'s own three `Quad` fields are each
+`FLAT 4/4` inline, so field flattening plainly works at 4 bytes. Whether 12 B failing here
+is an EA implementation gap or a further constraint is **not determined by this
+reproducer** and is recorded as an open item, not a conclusion.
+
+But the durable point does not depend on resolving that: **the exemption is for FIELDS,
+and SoA lanes are ARRAYS.** Array elements are mutable by definition, which puts them
+inside the constraint rather than the exemption. And the JEP's own forward-looking note —
+*"Future enhancements may enable more flattening... perhaps 128-bit atomic mutable fields
+will become viable"* — would move the cliff from 8 to 16 bytes: the 12-byte register would
+fit, and the 512-byte canonical row still would not.
+
+**Consequence for the architecture.** "Project, don't hydrate" is not a workaround for an
+early-access build that a later JDK repeals. It follows from a hardware atomicity
+constraint that JEP 401 states as design, and the one relaxation on the roadmap does not
+reach the row.
