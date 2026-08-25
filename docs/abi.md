@@ -963,3 +963,46 @@ op-code parameter on one reduce symbol, mirroring how `lgj_plan_eval`'s
 `LgjOpDesc` already generalises predicates — and `sum` becomes op-code 0. Two
 reduction symbols would be the smell §1 warns about; one parameterised symbol is
 the shape this ABI already uses elsewhere.
+
+### Two memos, at two lifetimes
+
+Resolution is a per-CLASS fact consulted over a population, so it is cacheable at
+two different lifetimes and both are wired.
+
+**Per dataset — `classid → grouping`.** `RowStore` carries a `OnceLock` table
+built on first resolved sweep: `class_id_for` narrows a `u32` classid to `u16`,
+so the table is 65 536 one-byte entries (`0` = no `ClassView` answer, else the
+wire value plus one). 64 KiB, 65 536 `ClassView` calls once, then never again.
+That trade is the right way round — the table is bounded and one-off, while the
+per-row consult it replaces is unbounded in sweeps. A `OnceLock` rather than a
+`LazyLock` because the resolver is supplied by the caller; the first caller wins
+and every later one reads.
+
+**Per population — the resolved grouping itself.** The memo lives *inside*
+`MaskWords`, so it is read under the same lock that guards the words: a
+resolution can never be observed against a population it was not computed from.
+
+Three properties make it safe rather than merely fast:
+
+- **Keyed by facet, not merely cached.** Different facets of the same rows carry
+  different classids and can resolve differently. A memo holding only "the
+  grouping" would answer a question about facet 3 with facet 7's answer — wrong,
+  not stale.
+- **Invalidation cannot be forgotten.** It happens in `write_mask()` and
+  `lock_masks_ordered()` — the only two ways to obtain the right to mutate a
+  mask. Any writer invalidates whether or not it changes a bit: conservative,
+  and impossible for a new mask-mutating op to skip.
+- **Filled under the READ guard.** The obvious alternative — compute under read,
+  upgrade to write, store — is wrong twice: it would clear the very memo it is
+  storing (that is what a write guard means here), and between dropping the read
+  and taking the write another thread could change the population, so the stored
+  value would describe rows that no longer match. Holding the read guard is
+  exactly the interval in which the population is stable, so the fill belongs
+  there. Hence an atomic field rather than a plain `Option`.
+
+The encoding carries an explicit present bit, so `facet 0, grouping 0` is a real
+answer rather than reading as an empty memo.
+
+A test-only counter (`RESOLUTIONS`) makes the memo's behaviour observable rather
+than asserted: the first sweep resolves, five repeats over the same population do
+not, a different facet does, and a rewritten population does.

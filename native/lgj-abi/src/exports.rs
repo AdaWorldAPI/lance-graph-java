@@ -963,6 +963,13 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum(
     })
 }
 
+/// Test-only: how many times the resolved sweep has run a full ClassView
+/// resolution. A memo that never hits is pure overhead; a memo that hits when
+/// the population CHANGED is a wrong answer. This counter is what makes both
+/// observable instead of asserted.
+#[cfg(test)]
+pub static RESOLUTIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Sum one facet's register under the grouping the POPULATION ITSELF resolves
 /// to — the verified sibling of [`lgj_reduce_facet_sum`] (ABI minor >= 6,
 /// `docs/abi.md` §15).
@@ -1024,30 +1031,60 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum_resolved(
         if maskr.n_rows != store_entry.n_rows {
             return LGJ_ERR_MASK_LENGTH_MISMATCH;
         }
+        // The memo lives with the words, so it is read under the SAME lock that
+        // guards them — a resolution can never be observed against a population
+        // it was not computed from.
         let g = match maskr.read_mask() {
             Some(g) => g,
             None => return LGJ_ERR_WRONG_RESOURCE_KIND,
         };
+        // Keyed by facet: facet 3's answer must never be served for facet 7.
+        let cached = g
+            .cached_carving(facet)
+            .and_then(|wire| kernels::carving_from_wire(u32::from(wire)));
         let facet_off = facet as usize * crate::rowstore::FACET_BYTES as usize;
         let stride = crate::rowstore::ROW_BYTES as usize;
         let n = store_entry.n_rows as usize;
 
-        // The ClassView consult, once per selected row, BEFORE any sweep.
-        let carving = match kernels::resolve_population_carving(
-            store.as_bytes(),
-            facet_off,
-            stride,
-            n,
-            &g.words,
-            |classid| {
-                crate::class_view_provider::class_id_for(classid).map(|cid| {
-                    use lance_graph_contract::class_view::ClassView;
-                    crate::class_view_provider::FixtureClassView.cascade_shape(cid)
-                })
-            },
-        ) {
+        // The ClassView consult, once per selected row, BEFORE any sweep — and
+        // only when the memo misses. Each consult is itself a lookup into the
+        // DATASET's own classid -> grouping table (built once, `RowStore::carving_of`),
+        // so a repeated sweep over a stable population does no ClassView work at
+        // all and a first sweep does none per row beyond a byte read.
+        let carving = match cached {
             Some(c) => c,
-            None => return LGJ_ERR_UNRESOLVED_CARVING,
+            None => {
+                #[cfg(test)]
+                RESOLUTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                match kernels::resolve_population_carving(
+                    store.as_bytes(),
+                    facet_off,
+                    stride,
+                    n,
+                    &g.words,
+                    |classid| {
+                        store
+                            .carving_of(classid, |cid| {
+                                crate::class_view_provider::class_id_for(cid).map(|c| {
+                                    use lance_graph_contract::class_view::ClassView;
+                                    kernels::carving_to_wire(
+                                        crate::class_view_provider::FixtureClassView
+                                            .cascade_shape(c),
+                                    ) as u8
+                                })
+                            })
+                            .and_then(|w| kernels::carving_from_wire(u32::from(w)))
+                    },
+                ) {
+                    Some(c) => {
+                        // Filled while still holding the read guard, so the
+                        // population it describes cannot have changed underneath it.
+                        g.set_cached_carving(facet, kernels::carving_to_wire(c) as u8);
+                        c
+                    }
+                    None => return LGJ_ERR_UNRESOLVED_CARVING,
+                }
+            }
         };
 
         let sum = match kernels::masked_facet_sum(
@@ -2772,5 +2809,73 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), len, "status codes must be distinct");
         assert!(all.iter().skip(1).all(|&s| s < 0));
+    }
+
+    /// The memo must actually HIT — otherwise it is pure overhead — and must
+    /// MISS after the population changes, otherwise it is a wrong answer.
+    /// Both halves are needed: a memo that never hits passes the second alone,
+    /// and a memo that never invalidates passes the first alone.
+    #[test]
+    fn the_carving_memo_hits_on_repeat_and_misses_after_a_write() {
+        use std::sync::atomic::Ordering;
+        let store = lgj_rowstore_open_handle(256, 0x5EED);
+        let mut mask = 0u64;
+        assert_eq!(unsafe { lgj_mask_create(store, 0, &mut mask) }, LGJ_OK);
+        assert_eq!(lgj_op_eq_classid(store, 0, 3, mask), LGJ_OK);
+
+        let (mut sum, mut carv) = (0i64, 0u32);
+        let before = RESOLUTIONS.load(Ordering::Relaxed);
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum_resolved(store, 0, mask, &mut sum, &mut carv) },
+            LGJ_OK
+        );
+        let after_first = RESOLUTIONS.load(Ordering::Relaxed);
+        assert_eq!(after_first, before + 1, "the first sweep must resolve");
+
+        // Repeat over the SAME population: the memo must serve it.
+        let first_sum = sum;
+        for _ in 0..5 {
+            assert_eq!(
+                unsafe { lgj_reduce_facet_sum_resolved(store, 0, mask, &mut sum, &mut carv) },
+                LGJ_OK
+            );
+            assert_eq!(sum, first_sum);
+        }
+        assert_eq!(
+            RESOLUTIONS.load(Ordering::Relaxed),
+            after_first,
+            "repeat sweeps over an unchanged population must NOT re-resolve"
+        );
+
+        // A different FACET must not be served the cached answer.
+        let n = RESOLUTIONS.load(Ordering::Relaxed);
+        let _ = unsafe { lgj_reduce_facet_sum_resolved(store, 1, mask, &mut sum, &mut carv) };
+        assert!(
+            RESOLUTIONS.load(Ordering::Relaxed) > n,
+            "a different facet must resolve rather than reuse facet 0's answer"
+        );
+
+        // Change the population: the next sweep must resolve again.
+        assert_eq!(lgj_op_eq_classid(store, 0, 4, mask), LGJ_OK);
+        let n = RESOLUTIONS.load(Ordering::Relaxed);
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum_resolved(store, 0, mask, &mut sum, &mut carv) },
+            LGJ_OK
+        );
+        assert!(
+            RESOLUTIONS.load(Ordering::Relaxed) > n,
+            "a rewritten population must invalidate the memo"
+        );
+        assert_ne!(sum, first_sum, "and it really is a different population");
+
+        assert_eq!(lgj_close(mask), LGJ_OK);
+        assert_eq!(lgj_close(store), LGJ_OK);
+    }
+
+    /// Small helper: open a row store and return its handle.
+    fn lgj_rowstore_open_handle(n: u64, seed: u64) -> u64 {
+        let mut h = 0u64;
+        assert_eq!(unsafe { lgj_rowstore_open(n, seed, &mut h) }, LGJ_OK);
+        h
     }
 }
