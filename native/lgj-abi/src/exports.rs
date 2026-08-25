@@ -1063,16 +1063,11 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum_resolved(
                     n,
                     &g.words,
                     |classid| {
-                        store
-                            .carving_of(classid, |cid| {
-                                crate::class_view_provider::class_id_for(cid).map(|c| {
-                                    use lance_graph_contract::class_view::ClassView;
-                                    kernels::carving_to_wire(
-                                        crate::class_view_provider::FixtureClassView
-                                            .cascade_shape(c),
-                                    ) as u8
-                                })
-                            })
+                        // The process-global LAYOUT table. A classid is a global
+                        // address — the same classid means the same class in
+                        // every SoA — so this answer is dataset-independent and
+                        // the table is built once for the process, not per store.
+                        crate::class_view_provider::carving_wire_of(classid)
                             .and_then(|w| kernels::carving_from_wire(u32::from(w)))
                     },
                 ) {
@@ -1104,6 +1099,77 @@ pub unsafe extern "C" fn lgj_reduce_facet_sum_resolved(
             *out_sum = sum;
             *out_carving = kernels::carving_to_wire(carving);
         }
+        LGJ_OK
+    })
+}
+
+/// The whole-row layout probe: for EVERY facet, the set of register groupings
+/// the selected rows carry (ABI minor >= 7, `docs/abi.md` §16).
+///
+/// One crossing covers all 32 facets, which is the point — a caller asking
+/// "is this population layout-aligned?" should not pay 32 crossings, and asking
+/// per facet is how a consumer ends up writing the per-element loop §6 forbids.
+///
+/// Each output byte is a SET: bit `w` set means some selected row resolves to
+/// grouping `w`; bit 3 (`LAYOUT_UNANSWERABLE`) means some row's classid has no
+/// `ClassView` answer. A facet is aligned exactly when its byte has a single bit
+/// set and bit 3 clear — an arithmetic test, not a scan. A facet with no
+/// selected rows reports `0`: the empty set, which is neither aligned nor
+/// unanswerable.
+///
+/// Work is `O(mask_words + popcount × facets)` with one `or` per (row, facet).
+///
+/// # Safety
+///
+/// A null `out` is *handled*, not UB: `NULL_ARGUMENT`. Otherwise `out` must
+/// point at `out_len` writable bytes, and `out_len` must be at least the store's
+/// facet count — checked BEFORE anything is written.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_row_layout_probe(
+    res: u64,
+    mask: u64,
+    out: *mut u8,
+    out_len: u64,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let facets = crate::rowstore::ROW_FACETS as usize;
+        if out_len < facets as u64 {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let (maskr, parent) = match registry::resolve_mask_with_parent(mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) || maskr.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // SAFETY: non-null and long enough, both checked above.
+        let slice = unsafe { std::slice::from_raw_parts_mut(out, facets) };
+        kernels::facet_layout_sets(
+            store.as_bytes(),
+            crate::rowstore::ROW_BYTES as usize,
+            store_entry.n_rows as usize,
+            facets,
+            crate::rowstore::FACET_BYTES as usize,
+            &g.words,
+            crate::class_view_provider::carving_wire_of,
+            slice,
+        );
         LGJ_OK
     })
 }

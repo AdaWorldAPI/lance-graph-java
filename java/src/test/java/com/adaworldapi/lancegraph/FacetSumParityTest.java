@@ -220,6 +220,64 @@ public final class FacetSumParityTest {
             }
         }
 
+        c.section("the whole-row layout probe (abi.md §16): alignment answered by arithmetic,"
+                + " for all 32 facets in ONE crossing");
+        try (RowStore store = RowStore.open(1000, SEED)) {
+            // A single-class selection: every facet's rows share a classid, so every facet must
+            // be aligned, and facet 3's answer must match what facetSum resolves.
+            //
+            // NOTE, and it is the whole point of having this probe: a mask built by
+            // maskOfFacetClass(facet 3, classid 3) constrains FACET 3 only. The other 31 facets
+            // of those same rows carry whatever classids the generator gave them, so the ROW is
+            // not aligned even though the facet is. An earlier version of this test asserted
+            // isFullyAligned() here and failed — the expectation was wrong, not the code, and
+            // that is exactly the confusion a whole-row probe exists to remove.
+            try (Mask single = store.maskOfFacetClass(FacetId.of(3), 3)) {
+                RowLayout l = store.layout(single);
+                c.eq("all 32 facets covered", 32L, (long) l.facetCount());
+                c.that("the facet the mask was BUILT on is aligned", l.isAligned(FacetId.of(3)));
+                c.eq("facet 3's probed grouping equals what facetSum resolves",
+                        store.facetSum(FacetId.of(3), single).carving(),
+                        l.carvingOf(FacetId.of(3)).orElseThrow());
+                c.that("but the ROW is not aligned — the other facets are unconstrained",
+                        !l.isFullyAligned());
+                c.note("aligned facets on a facet-3 single-class selection: "
+                        + l.alignedCount() + "/32");
+            }
+
+            // A mixed-grouping selection: facet 3 must report NOT aligned, and facetSum must
+            // refuse it. The two surfaces must agree about the same population.
+            try (Mask a = store.maskOfFacetClass(FacetId.of(3), 3);
+                    Mask b = store.maskOfFacetClass(FacetId.of(3), 4)) {
+                long[] ra = a.materializeRows();
+                long[] rb = b.materializeRows();
+                long[] mixed = new long[ra.length + rb.length];
+                System.arraycopy(ra, 0, mixed, 0, ra.length);
+                System.arraycopy(rb, 0, mixed, ra.length, rb.length);
+                try (Mask both = store.importRows(mixed)) {
+                    RowLayout l = store.layout(both);
+                    c.that("facet 3 is NOT aligned on a mixed-grouping selection",
+                            !l.isAligned(FacetId.of(3)));
+                    c.that("and its grouping is therefore absent",
+                            l.carvingOf(FacetId.of(3)).isEmpty());
+                    c.that("which is not the same as empty", !l.isEmpty(FacetId.of(3)));
+                    c.throwsUp("facetSum refuses the same population", RuntimeException.class,
+                            () -> store.facetSum(FacetId.of(3), both));
+                }
+            }
+
+            // An empty selection: every facet reports the EMPTY set, which must be
+            // distinguishable from disagreement — otherwise "not aligned" would conflate
+            // "no rows" with "rows that disagree".
+            try (Mask empty = store.importRows()) {
+                RowLayout l = store.layout(empty);
+                c.that("an empty selection reports empty, not misaligned",
+                        l.isEmpty(FacetId.of(0)) && l.isEmpty(FacetId.of(31)));
+                c.that("empty is not aligned either", !l.isAligned(FacetId.of(0)));
+                c.eq("so nothing counts as aligned", 0L, (long) l.alignedCount());
+            }
+        }
+
         c.section("Carving's own invariant: every reading covers exactly the 12-byte register");
         for (Carving carving : Carving.values()) {
             c.eq(carving + " covers 12 bytes", 12L,

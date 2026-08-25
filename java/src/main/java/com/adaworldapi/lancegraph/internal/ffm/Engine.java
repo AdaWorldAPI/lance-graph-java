@@ -210,6 +210,19 @@ public final class Engine {
      * Sum one facet's register under the grouping the POPULATION resolves to (abi.md §15, ABI
      * minor 6), returning {@code [sum, carvingWire]}. Requires ABI minor &gt;= 6.
      */
+    /**
+     * For every facet, the set of groupings its selected rows carry (abi.md §16, ABI minor 7).
+     * Requires ABI minor &gt;= 7.
+     */
+    public static byte[] rowLayoutProbe(long store, long mask, int facets) {
+        Abi.requireMinor(7);
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(facets);
+            Downcalls.rowLayoutProbe(store, mask, out, facets);
+            return out.toArray(ValueLayout.JAVA_BYTE);
+        }
+    }
+
     public static long[] facetSumResolved(long store, int facet, long mask) {
         Abi.requireMinor(6);
         Scratch s = SCRATCH.get();

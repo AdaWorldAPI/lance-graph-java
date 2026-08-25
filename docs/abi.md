@@ -62,7 +62,7 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 23 symbols (minor 6; the "14" this line carried
+- It is **small** — currently 24 symbols (minor 7; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
   minor 2's three additions are argued in §11, minor 3's one addition in
@@ -79,7 +79,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 6    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 7    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -132,6 +132,8 @@ required — a gate that rejected everything would satisfy a rejection-only test
 - **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)
   and `lgj_hop` (one-hop graph traversal, gated by the
   `lance-graph-contract` `ClassView`/`FieldMask` LAW — §13).
+- **Minor 7** (2026-08-25) — `lgj_row_layout_probe` (§16): the whole-row
+  alignment answer, all 32 facets in one crossing. No new status.
 - **Minor 6** (2026-08-25) — `lgj_reduce_facet_sum_resolved` (§15): the same
   sweep, but under the grouping the POPULATION resolves to via
   `ClassView::cascade_shape`, rather than one the caller asserts. One new
@@ -326,7 +328,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (23 symbols)
+## 7. The function surface (24 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -1006,3 +1008,62 @@ answer rather than reading as an empty memo.
 A test-only counter (`RESOLUTIONS`) makes the memo's behaviour observable rather
 than asserted: the first sweep resolves, five repeats over the same population do
 not, a different facet does, and a rewritten population does.
+
+## 16. The whole-row layout probe (ABI minor ≥ 7)
+
+```
+i32 lgj_row_layout_probe(u64 res, u64 mask, u8* out, u64 out_len)
+```
+
+For **every** facet, the SET of register groupings its selected rows carry. One
+crossing covers all 32 — asking per facet would be 32 crossings, and is how a
+consumer drifts into the per-element loop §6 forbids.
+
+### Alignment as arithmetic, not a scan
+
+Each output byte is a 3-bit set (bit `w` = some row resolves to grouping `w`)
+plus bit 3 for "some row's classid has no `ClassView` answer". Then:
+
+```
+aligned(facet)  ⟺  popcount(byte) == 1  &&  byte & UNANSWERABLE == 0
+```
+
+One `or` per (row, facet), no comparison and no early exit, so cost does not
+depend on the data. **An OR-accumulated set is exact where cheaper accumulators
+are not:** a sum of wire values cannot tell `{0,2}` from `{1,1}`, and an XOR
+cannot tell `{1,1}` from `{}`. The set forgets multiplicity, which is precisely
+the information the question does not need.
+
+`0` means the EMPTY set — no row selected — and is deliberately distinguishable
+from disagreement. Conflating them would report "misaligned" for a population
+that simply is not there.
+
+### What it measured, immediately
+
+A mask from `lgj_op_eq_classid(facet 3, …)` constrains **facet 3 only**; the
+other 31 facets of those rows carry whatever classids the generator gave them.
+Measured on the fixture: **1 of 32 facets aligned.** A test asserting
+`isFullyAligned()` there failed, and the expectation was wrong rather than the
+code — which is exactly the confusion a whole-row probe exists to remove.
+
+Note what this says about **placement**: the canon makes `classid` the key's
+prefix precisely so key-ordered placement clusters a class into a range. The
+fixture generates classids uniformly at random instead — measured mean run
+length **1.07**, mean gap ~17 rows. Clustering is worth doing, and measured at
+this stride it is worth ~2× (12.6 vs 25.6 ns/row for the same population size,
+contiguous vs every-16th-row) — not from cache-line count, which is one line per
+row either way at a 512-byte stride, but from stride-predictable prefetch and TLB
+locality.
+
+### A classid is a GLOBAL address
+
+The `classid → grouping` table is process-global (`LazyLock`, 64 KiB, built
+once), not per dataset: the same classid means the same class in every SoA, so
+the resolution is dataset-independent. An earlier version put it on `RowStore`,
+which was wrong in shape rather than output — the answers were right, but the
+placement implied two datasets could disagree about what a classid carves into,
+which the address space does not permit.
+
+And the table captures **layout only**. Meaning, RBAC, ontology category and
+render template are separate resolutions off the same address; none belong in it
+and none can be inferred from it.

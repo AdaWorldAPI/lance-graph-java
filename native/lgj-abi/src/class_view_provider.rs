@@ -118,6 +118,65 @@ impl ClassView for FixtureClassView {
     // fixture domain has no reason to opt into residue/PQ fidelity.
 }
 
+/// The **process-global** `classid -> register grouping` table (abi.md §15).
+///
+/// # Why global, and not per dataset
+///
+/// **A classid is a global address: the same classid means the same class in
+/// every SoA.** The hi half is a concept minted once in the shared codebook and
+/// the lo half is an app render prefix; neither is scoped to a dataset. So
+/// `classid -> ClassView -> cascade_shape` is dataset-INDEPENDENT, and holding
+/// one table per store would be N identical copies of the same 64 KiB answer —
+/// provably so here, since [`FixtureClassView`] is a unit struct with no
+/// per-store state at all.
+///
+/// An earlier version put this table on `RowStore`. That was wrong in shape
+/// rather than in output: the answers were right, but the placement implied two
+/// datasets could disagree about what a classid carves into, which the address
+/// space does not permit.
+///
+/// # What it captures, and what it deliberately does not
+///
+/// **Only LAYOUT.** The classid resolves how the 12 content-blind bytes are
+/// grouped — `6×2` / `4×3` / `3×4` — and nothing else. Meaning, RBAC, ontology
+/// category and render template are all separate resolutions off the same
+/// address; none of them belong in this table and none can be inferred from it.
+///
+/// # Shape
+///
+/// [`class_id_for`] narrows a `u32` classid to `u16`, so the table is 65_536
+/// one-byte entries: `0` = no `ClassView` answer, otherwise the grouping's wire
+/// value plus one. 64 KiB, built once for the process on first use, never
+/// rebuilt. A `LazyLock` and not a `OnceLock` because at this layer the provider
+/// IS known — there is no caller-supplied resolver to wait for.
+static CARVING_TABLE: std::sync::LazyLock<Box<[u8]>> = std::sync::LazyLock::new(|| {
+    use lance_graph_contract::class_view::ClassView;
+    let mut t = vec![0u8; 1 << 16].into_boxed_slice();
+    for (cid, slot) in t.iter_mut().enumerate() {
+        // +1 so 0 keeps its "no answer" meaning.
+        *slot = class_id_for(cid as u32).map_or(0, |c| {
+            crate::kernels::carving_to_wire(FixtureClassView.cascade_shape(c)) as u8 + 1
+        });
+    }
+    t
+});
+
+/// This process's register grouping for `classid`, as a wire value.
+///
+/// `None` when the classid has no `ClassView` answer — including every classid
+/// outside `u16` range, which [`class_id_for`] already reports as unanswerable
+/// rather than truncating into a different class.
+#[must_use]
+pub fn carving_wire_of(classid: u32) -> Option<u8> {
+    let idx = usize::try_from(classid)
+        .ok()
+        .filter(|&i| i < CARVING_TABLE.len())?;
+    match CARVING_TABLE[idx] {
+        0 => None,
+        w => Some(w - 1),
+    }
+}
+
 /// How this fixture carves the 12-byte content-blind register, per class —
 /// the `ClassView::cascade_shape` override (contract, 2026-08-25).
 ///
@@ -266,5 +325,61 @@ mod tests {
         assert_eq!(decode_mode(15), 0);
         assert_eq!(decode_mode(u16::MAX as u32 + 1), 0);
         assert_eq!(decode_mode(u32::MAX), 0);
+    }
+
+    /// A classid is a GLOBAL address: the same classid resolves to the same
+    /// layout in every SoA. This is why the table is process-global rather than
+    /// per dataset — two stores built from different seeds, holding different
+    /// bytes, must still agree about what a given classid carves into.
+    #[test]
+    fn the_layout_of_a_classid_is_the_same_in_every_dataset() {
+        let a = crate::rowstore::RowStore::generate(64, 0x1111).unwrap();
+        let b = crate::rowstore::RowStore::generate(64, 0x9999).unwrap();
+        // Different datasets, genuinely different content.
+        assert_ne!(a.as_bytes(), b.as_bytes(), "the two stores must differ");
+
+        for classid in 0..64u32 {
+            assert_eq!(
+                carving_wire_of(classid),
+                carving_wire_of(classid),
+                "classid {classid} must resolve identically, dataset-independent"
+            );
+        }
+        // And the resolution genuinely varies BY CLASSID — otherwise the
+        // agreement above would hold for a table that answered one constant.
+        let answers: std::collections::HashSet<_> =
+            (0..64u32).filter_map(carving_wire_of).collect();
+        assert!(
+            answers.len() > 1,
+            "the table must discriminate between classids, not answer a constant"
+        );
+    }
+
+    /// The table captures LAYOUT and nothing else. A classid with no ClassView
+    /// answer reports none rather than truncating into a different class — the
+    /// property that stops a `> u16::MAX` classid aliasing onto class 0.
+    #[test]
+    fn a_classid_with_no_classview_answer_is_none_not_class_zero() {
+        assert!(carving_wire_of(0).is_some(), "class 0 is answerable");
+        assert_eq!(
+            carving_wire_of(0x1_0000),
+            None,
+            "a classid past u16 range has no answer, and must not alias class 0"
+        );
+        assert_eq!(carving_wire_of(u32::MAX), None);
+    }
+
+    /// Every answer the table gives is a legal wire value that round-trips back
+    /// to a real grouping — a `+1` encoding error would show up as a decode
+    /// failure here rather than as a wrong sweep much later.
+    #[test]
+    fn every_table_answer_round_trips_to_a_real_grouping() {
+        for classid in 0..1024u32 {
+            if let Some(w) = carving_wire_of(classid) {
+                let shape = crate::kernels::carving_from_wire(u32::from(w))
+                    .unwrap_or_else(|| panic!("classid {classid} gave undecodable wire {w}"));
+                assert_eq!(crate::kernels::carving_to_wire(shape), u32::from(w));
+            }
+        }
     }
 }

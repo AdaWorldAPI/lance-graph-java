@@ -439,6 +439,15 @@ public final class Downcalls {
         private Minor6() {}
     }
 
+    /** The whole-row layout probe (docs/abi.md §16, ABI minor 7). */
+    private static final class Minor7 {
+        static final MethodHandle ROW_LAYOUT_PROBE = mh("lgj_row_layout_probe",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+
+        private Minor7() {}
+    }
+
     /**
      * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
      *
@@ -474,6 +483,21 @@ public final class Downcalls {
         }
         Status.check("lgj_reduce_facet_sum_resolved", st);
         return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * For every facet, the SET of register groupings the selected rows carry — one crossing for
+     * all 32 facets.
+     */
+    public static void rowLayoutProbe(long res, long mask, MemorySegment out, long outLen) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor7.ROW_LAYOUT_PROBE.invokeExact(res, mask, out, outLen);
+        } catch (Throwable t) {
+            throw wrap("lgj_row_layout_probe", t);
+        }
+        Status.check("lgj_row_layout_probe", st);
     }
 
     // ── row store (docs/abi.md §11, ABI minor 2) ─────────────────────────────────────────────
