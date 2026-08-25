@@ -523,6 +523,83 @@ pub fn resolve_population_carving(
     resolved
 }
 
+/// Bit set in a facet's layout byte when some selected row's classid has no
+/// `ClassView` answer at all.
+pub const LAYOUT_UNANSWERABLE: u8 = 0b1000;
+
+/// For each of the row's facets, the SET of register groupings its selected rows
+/// carry — the whole-row alignment probe (abi.md §16).
+///
+/// # The cheap exact test
+///
+/// Per facet this accumulates a 3-bit set: bit `w` is set if some selected row
+/// resolves to grouping `w`, plus [`LAYOUT_UNANSWERABLE`] if some row's classid
+/// has no answer. That is ONE `or` per (row, facet) — no comparison, no
+/// branch on the previous value, no early exit to make the cost data-dependent.
+///
+/// The alignment question then falls out of arithmetic rather than a scan:
+///
+/// ```text
+///   aligned(facet)  ⟺  byte.count_ones() == 1  &&  byte & UNANSWERABLE == 0
+/// ```
+///
+/// An OR-accumulated set is exact where a sum or an XOR is not: summing wire
+/// values cannot tell `{0,2}` from `{1,1}`, and XOR cannot tell `{1,1}` from
+/// `{}`. The set forgets multiplicity, which is precisely the information the
+/// question does not need.
+///
+/// `out` must hold one byte per facet; every entry is overwritten. A facet with
+/// no selected rows reports `0` — the empty set, which is neither aligned nor
+/// unanswerable, and the caller must not read it as either.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "eight is the row geometry (bytes/stride/rows/facets/facet_bytes) plus the mask,               the resolver and the output. A params struct would bundle values that have no               relationship except being needed here, and would hide the fact that every one is               read straight from the store's own constants at the single call site."
+)]
+pub fn facet_layout_sets(
+    bytes: &[u8],
+    row_stride: usize,
+    n_rows: usize,
+    facets: usize,
+    facet_bytes: usize,
+    mask_words: &[u64],
+    wire_of: impl Fn(u32) -> Option<u8>,
+    out: &mut [u8],
+) {
+    assert!(
+        out.len() >= facets,
+        "facet_layout_sets: out.len()={} < facets {facets}",
+        out.len()
+    );
+    for slot in out.iter_mut().take(facets) {
+        *slot = 0;
+    }
+    for (w, &word) in mask_words.iter().enumerate() {
+        let base_row = w * 64;
+        if base_row >= n_rows {
+            break;
+        }
+        let mut bits = word;
+        let valid = n_rows - base_row;
+        if valid < 64 {
+            bits &= (1u64 << valid) - 1;
+        }
+        while bits != 0 {
+            let row = base_row + bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let row_off = row * row_stride;
+            for (f, slot) in out.iter_mut().enumerate().take(facets) {
+                let o = row_off + f * facet_bytes;
+                let classid =
+                    u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+                *slot |= match wire_of(classid) {
+                    Some(x) => 1u8 << x,
+                    None => LAYOUT_UNANSWERABLE,
+                };
+            }
+        }
+    }
+}
+
 /// Sum every group of one facet's 12-byte register, over the rows selected by
 /// `mask_words`. Returns `None` on overflow rather than a wrapped value.
 ///

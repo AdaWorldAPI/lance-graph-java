@@ -125,6 +125,23 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * For every facet, which register grouping this selection's rows carry (abi.md §16) — the
+     * whole-row alignment answer, in ONE crossing.
+     *
+     * <p>Use this to ask "is this population layout-aligned?" before sweeping it, or to discover
+     * which facets a heterogeneous selection can still be swept on. Asking {@link #facetSum} per
+     * facet to find out would be 32 crossings and would fail on the misaligned ones rather than
+     * reporting them.
+     *
+     * @param selection the rows to probe; must belong to this store
+     */
+    public RowLayout layout(Mask selection) {
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("layout()");
+        return new RowLayout(Engine.rowLayoutProbe(handle, selection.handle(), FacetId.COUNT));
+    }
+
+    /**
      * Sum one facet's 12-byte register under the grouping the SELECTION ITSELF resolves to
      * (abi.md §15, ABI minor 6) — the verified sibling of {@link #facetSumAs}.
      *

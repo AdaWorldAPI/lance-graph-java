@@ -436,6 +436,29 @@ conclusion — B ≈ standalone, D > B falsified, C ~30×, the B′ collapse, th
 recovery, the end-to-end E′ win — held identically). That stability of *conclusions* under
 *unstable* absolutes is why the ratios are the result and the raw numbers are the evidence.
 
+## R10 — the same schema in storage, Panama and Valhalla (`R10_SchemaAlignsWithStorage.java`)
+
+The substrate carves its 12 content-blind bytes three ways and resolves which from the
+classid. R10 asks whether Java can hold that schema *honestly* — three descriptions of
+the same bytes that must not disagree.
+
+**Measured** (`R10-observed.txt`):
+
+| as a value class | flat? |
+|---|---|
+| the whole SCHEMA (`Rails6` / `Triplets4` / `Quads3`, 12 B) | `false` — and cannot be, per R4/R6 |
+| one GROUP (`Rail` 2 B / `Triplet` 3 B / `Quad` 4 B) | **`true`, all three** |
+
+And the alignment that makes the second row usable: for every schema, decoding a register
+from **raw storage bytes**, through a **Panama `MemoryLayout`**, and via the **Valhalla
+value class** yields identical values — with each layout describing exactly 12 bytes, and
+the three schemas genuinely reading differently (so the agreement is not trivial).
+
+**The consequence for "bolt the schema into Valhalla":** it bolts on at the GROUP, not at
+the register. `12 = 6×2 = 4×3 = 3×4` means the largest group in any carving is 4 bytes —
+half the flattening budget — while the register is 12 and the facet 16, neither of which
+Java can flatten or needs to. So the schema is expressible on both sides; what crosses is
+the group, and the register stays where it is.
 ## R11 — the physical layout is a schema, and applying it is a descriptor swap (`R11_LayoutIsASchema.java`)
 
 The store today is AoS: 32 facets × 16 B interleaved in a 512-B row, lanes exposed as

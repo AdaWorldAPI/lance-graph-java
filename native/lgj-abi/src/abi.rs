@@ -58,7 +58,7 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 ///
 /// `docs/abi.md` §13). Purely additive: a minor-3 Java loads fine and
 /// simply cannot call either new symbol.
-pub const LGJ_ABI_MINOR: u32 = 6;
+pub const LGJ_ABI_MINOR: u32 = 7;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
