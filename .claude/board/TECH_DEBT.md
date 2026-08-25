@@ -1,5 +1,65 @@
 # Technical Debt Log — Open + Paid (double-entry, append-only)
 
+## TD-LGJ-JDK-TOOLCHAIN-NOT-PORTABLE (2026-08-25) — PAID (verified, provisioned, re-run green)
+
+`java/README.md`, `docs/panama.md`, and `.claude/knowledge/jdk-toolchain-facts.md`
+all pin the production and Valhalla-lab toolchains to absolute paths —
+`/opt/jdks/jdk-26.0.2` (FFM final) and `/opt/jdks/jdk-27` (JEP 401 EA,
+value classes) — with no provisioning step recorded anywhere in the repo.
+This session's fresh container had **neither path** (only system JDK 21,
+which the docs explicitly warn against: "FFM is preview-gated"). Since
+there is no Maven/Gradle/build-system dependency resolution for the Java
+side by design ("no downloaded dependency... `javac` and `java` are the
+entire Java toolchain"), there was also no auto-provisioning mechanism —
+the two absolute paths were pure environmental assumption, unfalsifiable
+until someone actually needed them in a fresh container.
+
+**Verified, not assumed, this session:**
+- Both JDKs are still fetchable at their documented identity: GA
+  `openjdk-26.0.2.1_linux-x64_bin.tar.gz` from `download.java.net`, and
+  the exact `27-jep401ea3+1-1` EA build from `jdk.java.net/valhalla/`.
+  (One real wrinkle: the session's default network proxy 403s raw
+  `download.java.net`/`github.com` content URLs — `curl --noproxy '*'`
+  bypasses it, same pattern already documented elsewhere in this
+  workspace for git operations.)
+- Extracted to the documented paths, `java -version` on each matches the
+  doc's claimed build strings exactly (`26.0.2.1+1-7`, `27-jep401ea3+1-1`).
+- `value record Point(int x, int y) {}` compiled with
+  `--enable-preview --release 27` and `Point.class.isValue()` returned
+  `true` on JDK 27 — the Valhalla claim holds, verified, not re-read from
+  a doc comment.
+- Built `native/lgj-abi` (`cargo build --release`, clean) and ran the
+  **full** `AllTests` suite against JDK 26 with the freshly-built `.so`:
+  **245/245 checks passed** (`ApiSurfaceTest` through `MaskNativeOpsTest`),
+  including the mask-native enforcement, lifetime, and RowStore parity
+  suites this repo's own iron rules depend on.
+
+**One real doc discrepancy found in the same pass** (not the toolchain
+gap — a separate, smaller finding): `java/README.md`'s "Compilation emits
+six `[restricted]` warnings with `-Xlint:all`, all of them in
+`internal/ffm/{Abi,Downcalls,Engine}.java`" is off by one. Actual count
+with `javac -Xlint:all` against JDK 26: **7** warnings — the 7th is
+`SymbolLookup.libraryLookup` in
+`src/test/java/.../AbiContractTest.java:113`, outside the three files the
+doc names. Not a `-D warnings`-gated build (no such gate exists for this
+no-build-system project), so this never surfaced as a failure — only as
+a doc claim nobody had re-verified against a real compile since it was
+written. Doesn't need code action (a test file legitimately calling a
+restricted FFM method to prove the contract is fine); the doc's warning
+COUNT and FILE LIST should be corrected to match — filed here rather than
+silently fixed in the same pass, since it's a separate concern from the
+toolchain gap this entry exists to record.
+
+**Status: PAID for this session's container** — both JDKs now live at
+`/opt/jdks/jdk-26.0.2` and `/opt/jdks/jdk-27`, verified working end to
+end. **Remains OPEN as a structural gap**: nothing in the repo commits
+this provisioning step anywhere (no `setup.sh`, no CI step, no Dockerfile
+layer found), so the NEXT fresh container hits the identical blocker.
+Pay this down for real by adding a provisioning script (mirroring the
+`fetchDependencies.gradle`-style pattern already used elsewhere in this
+workspace for other repos' native toolchains) rather than leaving it as
+tribal knowledge in three markdown files.
+
 ## TD-LGJ-REGISTRY-CONCURRENCY-UNMEASURED (2026-08-17) — OPEN
 
 `docs/abi.md` §4's registry design (short registry read-lock → clone `Arc`

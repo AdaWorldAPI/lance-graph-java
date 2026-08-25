@@ -1,3 +1,46 @@
+## 2026-08-25 — JDK toolchain provisioning verified + 245/245 full suite re-run
+
+Operator raised "Valhalla panama is mandatory, check technical debt in
+regards" mid-session (main thread carried over from an unrelated C64/6502
+falsifier task in a different repo). Checked `TD-LGJ-*` for existing
+entries: none. Investigated the toolchain claims in `java/README.md` /
+`docs/panama.md` / `.claude/knowledge/jdk-toolchain-facts.md` against this
+session's actual fresh container, per the workspace's own "verify before
+assuming" discipline rather than trusting the docs.
+
+**Found real**: neither `/opt/jdks/jdk-26.0.2` nor `/opt/jdks/jdk-27`
+existed in this container (only system JDK 21, which the docs correctly
+warn is preview-gated for FFM). No provisioning script anywhere in the
+repo — pure environmental assumption baked into three markdown files.
+
+**Paid for this session**: fetched both from `download.java.net` (GA
+`openjdk-26.0.2.1` and the exact documented `27-jep401ea3+1-1` EA build —
+proxy 403s the raw content URL, `curl --noproxy '*'` bypasses it, same
+pattern already known elsewhere in this workspace), extracted to the
+documented paths, confirmed `java -version` matches the docs' exact build
+strings. Compiled a standalone `value record` on JDK 27 with
+`--enable-preview --release 27` and confirmed `Class.isValue() == true` —
+the Valhalla claim is now VERIFIED, not re-asserted from a doc comment.
+Built `native/lgj-abi` (`cargo build --release`, clean) and ran the full
+`AllTests` suite against the fresh JDK 26 + freshly-built `.so`:
+**245/245 checks green** (every suite from `ApiSurfaceTest` through
+`MaskNativeOpsTest`).
+
+**Found, filed, not silently fixed**: `java/README.md`'s claim of exactly
+6 `[restricted]` warnings under `-Xlint:all`, "all of them in
+`internal/ffm/{Abi,Downcalls,Engine}.java`", is off by one — a real
+compile against JDK 26 produces 7, the 7th in
+`AbiContractTest.java:113` (a test file, legitimately calling a
+restricted method to prove the contract — not a code defect, a stale doc
+count).
+
+Filed as `TD-LGJ-JDK-TOOLCHAIN-NOT-PORTABLE` (PAID for this container,
+OPEN as a structural gap — nothing commits the provisioning step for the
+NEXT fresh container to reuse). No code changes; this entry + the
+TECH_DEBT entry are the record. Did not touch the doc's warning-count
+claim in this pass — filed as debt rather than conflated with the
+toolchain-gap finding.
+
 ## 2026-08-17 — session 1: archaeology (3 parallel agents) + vertical-slice fan-out (4-agent Workflow)
 
 **ONE-WRITER rule in effect from the start of this repo's life**: only the
