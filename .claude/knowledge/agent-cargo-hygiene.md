@@ -63,3 +63,54 @@ pass," check the report for evidence it actually ran cargo — if it did, and
 this doc predates its spawn, that is a hygiene violation to flag, not a
 bonus. The orchestrator re-verifies centrally regardless of what the agent
 claims.
+
+---
+
+## Extension 2026-08-26 — the session ceiling and the build profile
+
+Two measured facts that make the rule above binding rather than advisory, and one
+consequence.
+
+### The reported disk is not the ceiling
+
+The environment reports ~250 GB free. The **real limit is ~38 GB per session,
+shared across every branch and worktree**. Plan against 38. This is why the
+no-worktree clause above is load-bearing and not merely tidy: a worktree does not
+get its own budget, it consumes the same one.
+
+### Reclaim `target/debug/`, not just `target/`
+
+`target/` alone is not enough — `target/debug/` is where the weight sits and must
+go with it. Old branches accumulate their own trees; prune them **on a schedule**,
+not when the session dies.
+
+### `debug = 0` — measured
+
+| profile | disk | wall clock |
+|---|---|---|
+| default dev (`debug = 2`) | 14–18 GB | 18–40 min |
+| `debug = 0` | 3–4 GB | 6–9 min |
+
+Roughly 4× the disk and 3× the time, for debuginfo that a compile-check pass never
+reads. Pin it:
+
+```toml
+[profile.dev]
+debug = 0
+```
+
+Raise it deliberately and locally when someone is actually attaching a debugger,
+and lower it again in the same session.
+
+### Consequence: one build per batch
+
+The orchestrator builds **once, after a batch of workers reports** — not once per
+worker. At the default profile, two workers each triggering a build breach the
+38 GB ceiling on the second one, and the session dies with the work unreported.
+
+### Falsifier (mechanical)
+
+```sh
+grep -rn "debug = 2" .          # outside a dated, documented, local exception → block
+du -sh target target/debug      # before dispatching a batch, not after
+```
