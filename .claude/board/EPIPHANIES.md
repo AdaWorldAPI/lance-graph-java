@@ -4,6 +4,106 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-26 — E-ONE-SUBSTRATE-FIVE-GLOVES-GHIDRA-IS-THE-GLOVE-NOT-THE-MODEL-1
+
+**Status:** DOCTRINE — [OPERATOR-FRAMED]. The "what is it FOR" that the
+r2il/r2conc/ogar-loco arc has been building toward, named so it does not
+dilute across sessions. Cross-refs: this repo's
+`E-LGJ-GHIDRAS-SEAM-IS-AN-INTERFACE-AND-ITS-VOCABULARY-CANNOT-FLATTEN-1`
+(R12, PR #34); lance-graph `r2il-machine-semantic-contract-v1.md` §7.8
+(V4 = V3 + executable content; the zipper isomorphism; three-tier JIT).
+**Confidence:** High on the framing and on R12's measured seam; the
+throughput figure is a single-CPU lab measurement (see below).
+
+### The operation, and the five faces of it
+
+Every product framing the operator named is the SAME three steps:
+
+```
+lower arbitrary code → R2IL/p-code   (INTAKE: r2sleigh lift, once, C++ allowed)
+address it in ogar-loco               (classid + lane ordinal; zipper: address IS program)
+execute zero-copy through the mask     (RUNTIME: r2conc, pure Rust, N-lane sweep)
+```
+
+They are one substrate with a policy/render GLOVE on top; only the glove
+differs:
+
+- **"Bring your own code" Foundry-aspiring substrate** — glove = ingest +
+  ontology UI.
+- **RE / security-analyst platform** — glove = the analyst UI (Java).
+- **Zero-trust sandbox** (whitelist-only execution; every binary
+  pattern-scanned for malware before it runs; autonomous alerting) —
+  glove = a POLICY MASK. Whitelisting is a mask AND; malware detection is
+  a masked pattern-match over the lifted R2IL BEFORE `step`; alerting is
+  the alpha plane firing on an anomaly. The §7.8 hexagon-proposes /
+  table-verifies machinery, pointed at "is this a known-bad shape" instead
+  of "which op is this." Defensive by construction.
+- **The C64 dream** — lower a game (Giana Sisters) into ogar-loco; glove =
+  a2ui-paint `Skin::Tile` over the game's addressed state (Mario-editor
+  flavor).
+- **Stone-age Java bare-metal** (TinkerPop, EDI) — glove = NONE; Java
+  stops carrying objects and addresses lanes.
+
+The zero-trust face is the proof it is one substrate: the security product
+is the cognitive substrate wearing a policy glove. Nothing new is built.
+
+### "Ghidra as Java" resolves against R12, and the answer is brutal
+
+R12 measured it: **Ghidra's own p-code vocabulary cannot flatten** —
+payloads 0/2, ordinals 3/3. A 2-input `PcodeOp` is five heap objects. So
+"Ghidra as Java" does NOT mean porting Ghidra's object model to Valhalla
+value classes. It means the inversion the stack keeps re-deriving:
+
+> **Java STEERS** (analyst UI, whitelist policy, alerting, the Mario
+> editor). **Rust DECODES + EXECUTES** (r2sleigh lift + r2conc). **The
+> seam carries ORDINALS, never objects.**
+
+That is W5 already specced, the lance-graph-java mask-native law, and the
+zipper isomorphism — three independent derivations of one seam. Ghidra's
+Java is the glove; Ghidra's decompiler object graph is exactly what we
+throw away. (r2sleigh already reimplements the downstream arms in Rust:
+r2ssa = heritage, r2dec = decompiler, r2types = type inference, r2sym +
+r2conc = emulation. What remains of Ghidra at runtime is ONE arm: `libsla`
+decode. §7.8's hexagon is that arm's replacement path — learn the byte→op
+map, exact-table as authority, libsla as the 0.4% fallback while muscle
+memory grows.)
+
+### The throughput, and the one thing that IS banked about it
+
+**What is banked** (R7, committed, `R7_BillionOpsZeroAlloc.java` +
+`R7-observed.txt`): 10^9 group projections allocate **exactly 960 B**,
+byte-identical across all three runs — fixed scaffolding, not a per-op
+cost (a 1 B/op survivor would have shown a gigabyte). That is the
+ordinal-seam payoff stated safely: **zero per-op allocation**, addressing
+lanes instead of carrying objects (R5's hydrating path at the same op
+shape is 32–104 B/row = 32–104 GB at this scale).
+
+**What is NOT banked, and must not be pinned:** a throughput number. R7's
+own runs span **1.76–3.48 s (287–567 M ops/s), a 2× spread — too wide to
+pin**, and R7 says so in as many words. The operator's spoken "~2 s /
+2.1 ns" lands inside that spread but is a point in a noisy cloud, not a
+result. And R7's `sweep` is pure in-JVM `MemorySegment.get` — **no FFI,
+no ndarray call** — so it cannot support an "into ndarray" claim at all.
+
+(Corrected 2026-08-26 after a codex P2 on PR #36 caught the first draft
+banking the 2.1 ns figure and attributing it to a Panama→ndarray path.
+The doctrine is unchanged — R12's flatten measurement is the load-bearing
+evidence, and zero-alloc is the safe throughput-adjacent claim. If a real
+ndarray-through-Panama throughput is wanted as evidence, it needs its own
+committed reproducer; it does not exist yet.)
+
+### The one invariant to fix before any glove is built
+
+The zero-trust glove lowers UNTRUSTED, possibly hostile binaries. That
+turns r2conc's existing loud-refusal discipline (`Unsupported`,
+`PcodeRelativeBranch`, `OutOfBounds`) from a correctness boundary into a
+SECURITY boundary. The invariant, stated now so a future session cannot
+wire it backwards: **the malware-scan mask runs on the lifted R2IL BEFORE
+`step`; the sandbox executes only `lifted ∩ whitelist`; a lifted op never
+reaches a real effect without passing the policy mask first.** Scan-then-
+execute, never execute-then-scan.
+
+
 ## 2026-08-25 — E-LGJ-GHIDRAS-SEAM-IS-AN-INTERFACE-AND-ITS-VOCABULARY-CANNOT-FLATTEN-1
 
 **Status:** MEASURED — R12 + the Ghidra source trace. No code swapped yet.
