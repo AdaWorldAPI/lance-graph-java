@@ -68,15 +68,29 @@ decode. §7.8's hexagon is that arm's replacement path — learn the byte→op
 map, exact-table as authority, libsla as the 0.4% fallback while muscle
 memory grows.)
 
-### The throughput number, and why it is the payoff not a footnote
+### The throughput, and the one thing that IS banked about it
 
-~1 billion ops in ~2 s ≈ **2.1 ns/op** (operator-measured, 3-day
-ndarray-through-Java run; the valhalla-lab CPU is a 2.10 GHz Xeon, so this
-is a few cycles per op — IN JAVA, through Panama into ndarray). That
-throughput exists ONLY because Java stopped carrying objects and started
-addressing lanes — R12's verdict paying off empirically. "No-friction
-low-code Java" is the measured consequence of the ordinal seam, not a
-slogan. Cite the CPU with the number; do not round it to "1 cycle".
+**What is banked** (R7, committed, `R7_BillionOpsZeroAlloc.java` +
+`R7-observed.txt`): 10^9 group projections allocate **exactly 960 B**,
+byte-identical across all three runs — fixed scaffolding, not a per-op
+cost (a 1 B/op survivor would have shown a gigabyte). That is the
+ordinal-seam payoff stated safely: **zero per-op allocation**, addressing
+lanes instead of carrying objects (R5's hydrating path at the same op
+shape is 32–104 B/row = 32–104 GB at this scale).
+
+**What is NOT banked, and must not be pinned:** a throughput number. R7's
+own runs span **1.76–3.48 s (287–567 M ops/s), a 2× spread — too wide to
+pin**, and R7 says so in as many words. The operator's spoken "~2 s /
+2.1 ns" lands inside that spread but is a point in a noisy cloud, not a
+result. And R7's `sweep` is pure in-JVM `MemorySegment.get` — **no FFI,
+no ndarray call** — so it cannot support an "into ndarray" claim at all.
+
+(Corrected 2026-08-26 after a codex P2 on PR #36 caught the first draft
+banking the 2.1 ns figure and attributing it to a Panama→ndarray path.
+The doctrine is unchanged — R12's flatten measurement is the load-bearing
+evidence, and zero-alloc is the safe throughput-adjacent claim. If a real
+ndarray-through-Panama throughput is wanted as evidence, it needs its own
+committed reproducer; it does not exist yet.)
 
 ### The one invariant to fix before any glove is built
 
