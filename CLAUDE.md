@@ -110,6 +110,67 @@ per-owner `advance(owner)` RPCs are exactly the deleted shape.
 `BatchWriter::cast()` = staging into a batch image, NOT command/ack
 messaging.
 
+## The simd.rs isomorphism — ENFORCEMENT LAYER (operator-ruled, 2026-08-27)
+
+The repo's whole shape is `ndarray`'s own SIMD architecture repeated one
+level up, and every layer rule below is enforced by a named gate, not by
+discipline:
+
+```
+ndarray                          lance-graph-java
+simd.rs      (facade)      ←→    Java (View / Mask / RowStore / consumers)
+cfg dispatch (polyfill)    ←→    Valhalla + Panama (internal/ffm)
+simd_{amx,avx512,avx2,           Rust: lgj-abi kernels → ndarray::simd
+  neon,wasm,scalar}.rs           (the pattern NESTS — lgj's bottom is
+             (backends)           ndarray's top)
+```
+
+Measured grounding (2026-08-27, in-tree): `simd.rs` is 37 functions and
+ZERO shipping instructions — every raw intrinsic in it sits inside
+`#[cfg(test)]` as the wrapper's oracle; `simd_avx512.rs` alone carries 488.
+`simd_scalar.rs` is a BACKEND, below the facade — the fallback is never
+inline in `simd.rs`.
+
+**E1 — Java never grows a compute path.** A Java-side loop over rows,
+facets, or partial results is an inline scalar fallback in the facade —
+the shape ndarray forbids by architecture. Java hands the question through
+Panama and receives the projection; the decomposition of an answer (how
+many parts, in what order, summed how) is itself a moving part and never
+crosses. Enforced by: GraphHopTest's G2 no-per-row-engine check + the
+reflective allowlist; the three-strikes provenance is
+`FacetMatchView.cardinality` (Java popcount loop → 32 composed counts
+summed in Java → the proposed buffer-popcount symbol — each one layer up,
+all three wrong; ABI minor 9 is the correct shape).
+
+**E2 — Java scalar code is licensed in exactly one place: as a TEST
+ORACLE.** Same license `simd.rs` gives raw intrinsics under `#[cfg(test)]`.
+GraphHopTest / parity-suite scalar recomputes stay; any scalar path in
+`src/main` is a violation regardless of how it is doc-commented ("saves a
+crossing" is the recorded tell, not a defence — R8 measured bulk crossings
+as costing nothing).
+
+**E3 — the geometry has ONE spelling, owned by the polyfill.** The facade
+names sizes and offsets from `internal/ffm/Layouts` (`ROW_BYTES`,
+`FACET_BYTES`, `FACET_PAYLOAD_OFFSET`, `FACET_PAYLOAD_HI32_OFFSET` — all
+DERIVED from `ROW_LAYOUT`/`ROW_FACET`, proven by `SELF_CHECK` at
+class-init); it never hand-writes them. Same rule minor 8 established for
+carvings: one source and two derivations, never three spellings. Rust's
+mirror constant is `rowstore::FACET_PAYLOAD_HI32_OFFSET`.
+
+**E4 — Vector API is permanently a lab arm.** It would be a backend INSIDE
+Java, and Java has no backends. `valhalla-lab`/`bench` may measure it; it
+never ships in `src/main`.
+
+**E5 — new capability lands backend-first** (the STOP rule below, restated
+as this frame's corollary): the facade only ever gains a NAME for something
+a backend already does. A facade method that cannot be one delegation is
+the signal the substrate is missing a word.
+
+**E6 — consumers import only the facade.** `ApiSurfaceTest` is this repo's
+`simd-savant`: no `java.lang.foreign.*`, `java.lang.invoke.*`, or
+`internal.*` in any public signature — the exact analog of "all SIMD from
+`ndarray::simd`, never `simd_{arch}`, never raw intrinsics".
+
 ## Missing-capability STOP rule
 
 A consumer or facade that needs a capability the substrate lacks does

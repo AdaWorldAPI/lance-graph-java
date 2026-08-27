@@ -1,6 +1,7 @@
 package com.adaworldapi.lancegraph;
 
 import com.adaworldapi.lancegraph.internal.ffm.Engine;
+import com.adaworldapi.lancegraph.internal.ffm.Layouts;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -324,8 +325,12 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new Mask(this, dst);
     }
 
-    private static final long ROW_BYTES = 512;
-    private static final long FACET_BYTES = 16;
+    // The row geometry, by NAME — the membrane's layout (Layouts.ROW_LAYOUT /
+    // ROW_FACET) is the single source; these are not literals and cannot drift
+    // from what SELF_CHECK proves. See the simd.rs isomorphism, root CLAUDE.md:
+    // the facade names the geometry, the polyfill owns it.
+    private static final long ROW_BYTES = Layouts.ROW_BYTES;
+    private static final long FACET_BYTES = Layouts.FACET_BYTES;
 
     /**
      * The raw lane-0 window (docs/abi.md §11), resolved once via {@code lgj_lane_describe} (ABI
@@ -392,7 +397,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public long payloadLow64At(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_LONG_UNALIGNED, rowOffset(row, facet) + 4);
+        return rawLane().get(
+                ValueLayout.JAVA_LONG_UNALIGNED,
+                rowOffset(row, facet) + Layouts.FACET_PAYLOAD_OFFSET);
     }
 
     /**
@@ -408,7 +415,7 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public int payloadHi32At(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet) + 12);
+        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet) + Layouts.FACET_PAYLOAD_HI32_OFFSET);
     }
 
     /**

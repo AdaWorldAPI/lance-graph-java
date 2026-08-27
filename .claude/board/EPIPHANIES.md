@@ -4,6 +4,51 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-27 — E-JAVA-IS-SIMD-RS-VALHALLA-PANAMA-IS-THE-POLYFILL-1
+
+**Status:** DOCTRINE — [OPERATOR-FRAMED]. Pinned as the ENFORCEMENT LAYER in
+root `CLAUDE.md` (rules E1–E6), same commit.
+**Confidence:** High — the grounding is measured in-tree, not argued.
+
+The operator's frame, verbatim intent: *"look at ndarray. Java is like
+simd.rs. Valhalla/Panama is the polyfill. Rust is like
+simd_{AMX,avx512,avx2,neon,wasm}.rs."*
+
+Verified against the actual tree before pinning: `ndarray/src/simd.rs` is
+**37 functions and zero shipping instructions** — every raw intrinsic in the
+file sits inside `#[cfg(test)]`, where `_mm256_unpacklo_epi32` appears only
+as the oracle a wrapper is checked against. `simd_avx512.rs` alone carries
+**488** intrinsics. And the detail that seals it: `simd_scalar.rs` is a
+**backend, below the facade** — the fallback is never written inline in
+`simd.rs`. The facade is pure vocabulary; the backends are pure machinery;
+the dispatch is free at compile time.
+
+**Why this is a doctrine and not an analogy.** Every violation this session
+found reads as a breach of the isomorphism, at the layer it names:
+
+- `FacetMatchView.cardinality`'s Java popcount loop = an inline scalar
+  fallback in `simd.rs` (three strikes: the loop, then 32 composed counts
+  summed in Java, then a proposed buffer-popcount symbol — each still Java
+  holding a moving part; ABI minor 9 is the lawful shape).
+- J2's hand-written `ROW_BYTES = 512` beside the declared `ROW_LAYOUT` =
+  the facade carrying a second spelling of a backend constant (fixed this
+  commit: `Layouts` derives, `RowStore` names).
+- The Vector API question resolves permanently: a backend inside Java, and
+  Java has no backends — lab arm forever.
+
+**The polyfill reading is precise, not poetic.** Valhalla's A/B types
+compile as ordinary records pre-JEP-401 exactly the way `simd.rs` code runs
+on the scalar backend off-x86: one source, zero cost where the platform
+provides it, still CORRECT where it does not. Panama likewise —
+`JAVA_INT_UNALIGNED` works everywhere and JITs to a mov where it can.
+Degradation without a second source is the definition of a polyfill.
+
+**The stack nests.** lgj's bottom is ndarray's top: `lgj_hop` →
+`kernels.rs` → `ndarray::simd` → `simd_avx512.rs` is facade → polyfill →
+backend twice over, self-similar. Cross-refs: root `CLAUDE.md` E1–E6;
+`E-BINDING-A-REAL-PROVIDER-MEASURES-THE-FIXTURE-1` (the ClassView half of
+the same session); minor-9 arc entry in `LATEST_STATE.md`.
+
 ## 2026-08-27 — E-BINDING-A-REAL-PROVIDER-MEASURES-THE-FIXTURE-1
 
 **Status:** FINDING — measured, pinned by a test rather than asserted.

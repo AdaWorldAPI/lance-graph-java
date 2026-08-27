@@ -280,6 +280,38 @@ public final class Layouts {
      */
     public static final ValueLayout.OfInt FACET_MATCH_ELEM = ValueLayout.JAVA_INT;
 
+    // ── the row geometry, DERIVED — never a second spelling ─────────────────────────────────
+    //
+    // These four numbers used to exist twice: declared here as layouts, and hand-written again as
+    // private constants + literal `+ 4` / `+ 12` offsets in RowStore's accessors, with nothing
+    // binding the two spellings (SELF_CHECK proves the LAYOUT is 512 bytes; it proves nothing
+    // about arithmetic written elsewhere). Same drift class as the three hand-written Carving
+    // copies ABI minor 8 collapsed into one served table — and the same fix: ONE source (the
+    // layout), everywhere else a name. The simd.rs isomorphism (root CLAUDE.md) states the rule:
+    // the polyfill layer owns the geometry; the facade only names it.
+
+    /** Bytes per row — {@link #ROW_LAYOUT}{@code .byteSize()}, not a literal. */
+    public static final long ROW_BYTES = ROW_LAYOUT.byteSize();
+
+    /** Bytes per facet — {@link #ROW_FACET}{@code .byteSize()}, not a literal. */
+    public static final long FACET_BYTES = ROW_FACET.byteSize();
+
+    /**
+     * Byte offset of the 12-byte payload within a facet — where the structured-edge target's low
+     * 64 bits begin (docs/abi.md §12). Derived from the layout's own field position.
+     */
+    public static final long FACET_PAYLOAD_OFFSET =
+            ROW_FACET.byteOffset(PathElement.groupElement("payload"));
+
+    /**
+     * Byte offset of the payload's high {@code u32} within a facet — {@code 0} there marks a
+     * structured edge (docs/abi.md §12; mirrors Rust's {@code FACET_PAYLOAD_HI32_OFFSET}). The
+     * high word sits after the low 64 bits, and the {@code u64}'s width comes from its layout,
+     * not a literal 8.
+     */
+    public static final long FACET_PAYLOAD_HI32_OFFSET =
+            FACET_PAYLOAD_OFFSET + ValueLayout.JAVA_LONG.byteSize();
+
     /**
      * Compile-time-ish self check: the byte sizes the ABI document states in prose, checked against
      * the sizes these layouts actually derive. If a layout is edited wrongly this fails at class

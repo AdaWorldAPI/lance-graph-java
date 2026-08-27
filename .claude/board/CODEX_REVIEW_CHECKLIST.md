@@ -89,7 +89,15 @@
 - [ ] `/opt/jdks/jdk-26.0.2` used for production Java, `/opt/jdks/jdk-27` (JEP 401 EA) used ONLY for `valhalla-lab/` — no `--enable-preview`-compiled class ever reaches the production `java/` tree
 - [ ] `df -h /` checked before and after any large parallel dispatch — target-dir residue is a known risk this session (`ISS-LGJ-TARGET-DIR-SIZE-WATCH`)
 
-## 8. PR hygiene
+## 8. The simd.rs isomorphism (root CLAUDE.md E1–E6 — added 2026-08-27, from three same-day strikes)
+
+- [ ] No Java loop over rows, facets, or partial results in `src/main` — a Java-side reduction, however small, is an inline scalar fallback in the facade (E1). The tell to grep for: a doc comment defending Java-side compute on crossing count ("saves a crossing") — R8 measured bulk crossings as free, and that defence appeared verbatim on the violation
+- [ ] Java scalar recomputes appear ONLY in test suites as oracles (E2) — the license `simd.rs` gives raw intrinsics under `#[cfg(test)]`, and nowhere else
+- [ ] No hand-written row-geometry literal (`512`, `16`, `+ 4`, `+ 12`) in the facade — sizes and offsets come from `internal/ffm/Layouts`' DERIVED constants (E3); a second spelling of the layout is the carving-triplication defect minor 8 killed, reborn
+- [ ] No Vector API in `src/main` (E4 — a backend inside Java; lab arms only)
+- [ ] A new facade method is ONE delegation — anything more means the substrate is missing a word and the change starts backend-first (E5, the STOP rule)
+
+## 9. PR hygiene
 
 - [ ] Commit message body explains the WHY, not just the WHAT
 - [ ] PR body includes a Test Plan with checkboxes, and states which falsification gates from `.claude/plans/lgj-vertical-slice-v1.md` were actually run (not just "should pass")

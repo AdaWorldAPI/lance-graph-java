@@ -1,3 +1,23 @@
+## 2026-08-27 — the simd.rs isomorphism pinned as the ENFORCEMENT LAYER; J2 closed
+
+- **Doctrine pinned** (root `CLAUDE.md`, rules E1–E6; board entry
+  `E-JAVA-IS-SIMD-RS-VALHALLA-PANAMA-IS-THE-POLYFILL-1`): Java ↔ `simd.rs`
+  (facade, vocabulary only), Valhalla+Panama ↔ the cfg-dispatch polyfill,
+  Rust ↔ `simd_{arch}.rs` (all machinery). Grounded by measurement, not
+  analogy: 37 facade functions / 0 shipping instructions vs 488 intrinsics
+  in one backend; `simd_scalar` a backend BELOW the facade; facade
+  intrinsics only under `#[cfg(test)]` as oracles.
+- **J2 closed under E3.** `RowStore`'s hand-written `ROW_BYTES = 512` /
+  `FACET_BYTES = 16` and the literal `+ 4` / `+ 12` payload offsets are
+  gone; `internal/ffm/Layouts` now DERIVES `ROW_BYTES` / `FACET_BYTES` /
+  `FACET_PAYLOAD_OFFSET` / `FACET_PAYLOAD_HI32_OFFSET` from
+  `ROW_LAYOUT`/`ROW_FACET` (`byteOffset(groupElement("payload"))`, the
+  u64's own `byteSize()` — no literal survives), and the facade names them.
+  One source, proven by the existing `SELF_CHECK`; the enforcement is the
+  DELETION of the second spelling, not a tautological test.
+- Gates: Java 304 core unchanged; consumer suites unchanged (no signature
+  moved); Rust untouched by this commit beyond none.
+
 ## 2026-08-27 — ABI minor 9: the reduction moved to where the data is, and the placement rule is now ABI
 
 Operator ruling, verbatim intent: *"java hands decorative where() through
