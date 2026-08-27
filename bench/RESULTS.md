@@ -263,6 +263,77 @@ Three findings, in decreasing order of confidence:
    `facetMatchesInto(classId, …)` reuse form is the named follow-up if the small-row gap ever
    matters — filed, not assumed to.
 
+## G — the hop: native `lgj_hop` vs the two preserved scalar oracles
+
+The F-PARITY harness (spec §12) and §3.8's pre-registered promotion trigger, run for the first
+time. Three arms over `RowStore.openWithEdges`, swept on **both** axes §3.8 asks for — two row
+counts × two frontier densities. All three arms are cross-checked to agree on the destination set
+in `@Setup`, with an anti-vacuity guard that refuses a fixture whose hop reaches nothing.
+
+Own CSV: `results/jmh-results-G.csv` (this run did NOT merge into the A–F tables — different
+fixture, different axes).
+
+| arm | 1 % / 4096 | 1 % / 65536 | 25 % / 4096 | 25 % / 65536 |
+|---|---|---|---|---|
+| `java_scalar_classidScan` | **8.5 µs** | **150.6 µs** | **204.0 µs** | **7 173.6 µs** |
+| `java_scalar_facetMatches` | 394.9 µs | 7 142.3 µs | 433.8 µs | 10 071.5 µs |
+| `native_hop` | 479.0 µs | 24 798.3 µs | 521.2 µs | 23 633.9 µs |
+
+### The native arm is the slowest at every configuration — and the shape says why
+
+Not a small margin: **2.6× to 165×** slower than the best scalar arm. But the ratio is the less
+interesting half. Look at how `native_hop` responds to the two axes:
+
+- **Flat in frontier density.** 479 → 521 µs at 4096 rows; 24 798 → 23 634 µs at 65 536 — a 25×
+  bigger frontier costs *nothing*, and at the larger size the denser run is nominally faster.
+- **Linear in population.** 4096 → 65 536 rows (16×) takes 479 → 24 798 µs (~52×).
+
+A hop whose cost tracks the population it *ignores* rather than the frontier it *starts from* is
+doing full-population work per call. The kernel confirms it — `exports.rs:1589-1599`:
+
+```rust
+for facet in 0..ROW_FACETS {                        // 32 facets
+    if (effective >> facet) & 1 == 0 { continue }
+    kernels::simd_rowstore_classid_mask(bytes, …, n, …)   // n = ALL rows
+    for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()) { … }
+}
+```
+
+The classid mask is built across the **whole** population, once per participating facet — 32
+full-width sweeps per hop — and only then intersected with `src`. The decode/scatter half is
+correctly frontier-bounded; the sweep that precedes it is not. At 65 536 rows that is ~2.1 M
+strided classid reads per call before a single edge is decoded.
+
+**This is what the falsifier was pre-registered to find.** §3.8's rule — *"Promotion/demotion of
+the placement follows that measurement — never taste"* — now has its measurement, and it points at
+a specific, local property of the kernel rather than at the architecture.
+
+### What this does NOT say
+
+- **It is not a verdict on mask-native execution.** The architectural claims are pinned elsewhere
+  and are unaffected: `GraphHopTest`'s G3 gate pins *allocation* flat against frontier size, and
+  the no-row-id guarantees are structural. What is measured here is throughput placement, which is
+  exactly the axis §3.8 says a measurement decides.
+- **It is not a clean isolation of the sweep.** `native_hop` also pays one `Engine.createMask` +
+  close per call, which the scalar arms have no analogue for. That co-factor was not isolated. It
+  is very unlikely to be the story (a mask allocation cannot plausibly account for 470 µs at 4096
+  rows, and it would not scale with `rows` the way the data does), but it was not ruled out and is
+  named rather than waved away.
+- **The absolute native numbers are noisy.** ±12 844 on 24 798 µs is 52 % relative error on a
+  shared 4-vCPU container. The *ordering* is robust — native is slowest in all four configs, by at
+  least 2.6× — but do not quote the native absolutes to two significant figures.
+- **One machine, one run.** Same environment caveat as the rest of this file.
+
+### The obvious remedy is deliberately NOT in this commit
+
+`src_snapshot` is known before the loop, so the sweep could be bounded to the words where `src`
+actually has bits, or skipped entirely for a facet whose intersection is empty. That is a kernel
+change, and W8's scope for F-PARITY is *"seeds the HARNESS only"* (§12) against a component §3.8
+declares non-gating. Landing a kernel rewrite inside a bench commit would widen the PR past what
+the measurement authorises. Filed as its own item.
+
+---
+
 ## Verdict — where does execution belong?
 
 On the evidence, **not where the architecture currently puts it, for count-only queries.** Stated

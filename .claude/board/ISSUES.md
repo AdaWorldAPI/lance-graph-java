@@ -1,5 +1,53 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — OPEN
+
+**Found.** By running bench Component G — the F-PARITY harness — for the
+first time. `lgj_hop` is the slowest of three arms at every configuration in
+the §3.8-mandated sweep (2 row counts × 2 frontier densities), by 2.6× to
+165× against the best scalar oracle.
+
+**Root cause, localized.** `exports.rs:1589-1599` builds the classid mask
+across the WHOLE population, once per participating facet — 32 full-width
+sweeps per hop — and only then intersects with `src`:
+
+```rust
+for facet in 0..ROW_FACETS {
+    if (effective >> facet) & 1 == 0 { continue }
+    kernels::simd_rowstore_classid_mask(bytes, …, n, …)   // n = ALL rows
+    for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()) { … }
+}
+```
+
+The decode/scatter half IS frontier-bounded; the sweep preceding it is not.
+
+**The measurement's shape is the evidence, not just its ranking.** Native cost
+is flat in frontier density (479 → 521 µs at 4096 rows; 24 798 → 23 634 µs at
+65 536 — a 25× larger frontier costs nothing) and ~linear in population
+(16× the rows → ~52× the time). A hop whose cost tracks the population it
+ignores rather than the frontier it starts from is doing full-population work.
+
+**Remedy shape (NOT implemented here).** `src_snapshot` is known before the
+loop, so the sweep can be bounded to the words where `src` has bits, or
+skipped for a facet whose intersection is empty. That is a kernel change and
+W8's F-PARITY scope is "seeds the HARNESS only" (§12) on a component §3.8
+declares non-gating — landing a kernel rewrite in a bench commit would widen
+the PR past what the measurement authorises.
+
+**Not a verdict on mask-native execution.** Allocation independence is pinned
+separately and is unaffected (`GraphHopTest` G3, flat 10-vs-500 rows); the
+no-row-id guarantees are structural. This is the throughput-placement axis
+§3.8 says a measurement decides — and it now has one.
+
+**Caveats carried, not buried.** The per-call `Engine.createMask` + close has
+no scalar analogue and was NOT isolated (implausible as the story at 470 µs on
+4096 rows, and it would not scale with `rows`; named anyway). Native absolutes
+are noisy — ±12 844 on 24 798 µs — on a shared 4-vCPU container; the ordering
+is robust, the absolutes are not. One machine, one run.
+
+Data: `bench/results/jmh-results-G.csv`; narrative: `bench/RESULTS.md` § G.
+
+
 ## ISS-LGJ-STACK-TAIL-STRANDED-MINOR-8 (2026-08-25) — RESOLVED same day
 
 **Found.** PR #32 (ABI minor 8) was opened against
