@@ -1,5 +1,57 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-ARC-INVENTORY-STOPPED-AT-32 (2026-08-27) — RESOLVED
+
+**Found.** While landing PR #42's own arc entry, per the board README's
+rule (`PR_ARC_INVENTORY.md` — "every PR, at open").
+
+**Measured, and the first count was wrong.** The entry as first filed said
+"entries run `#1..#20`, then `#32`" and "nineteen PRs". Enumerating rather
+than eyeballing the range gives a different and less tidy answer:
+
+- entries present: `#1`–`#12`, `#14`, `#16`, `#18`, `#20`, `#32`;
+- **missing: `#13`, `#22`–`#31`, `#33`–`#41` — twenty PRs**, not nineteen,
+  and the gap starts at `#13`, well inside the range the first count read
+  as complete;
+- `#15`, `#17`, `#19`, `#21` are also absent and are **correctly** absent —
+  each is itself an arc-entry-only PR, exempt under the termination clause;
+- `#32`'s entry read `(draft, opened 2026-08-25)` with no merge sha, so the
+  newest entry in the file was also stale.
+
+The first count was a range subtraction over a file that has holes. Stated
+here rather than silently corrected, because "I checked" and "I enumerated"
+are different claims and only the second one was ever load-bearing.
+
+**Why it mattered.** `LATEST_STATE.md` answers *what exists*; the arc
+answers *why*. As it stood, a future session read this repo as going from
+ABI minor 8 straight to a ClassView provider — the whole hop arc (the
+32-sweep root cause, the gather rewrite, the measured absence of a
+crossover, the memoisation and its cold regression) absent from the record
+that exists to carry exactly that.
+
+**Resolved.** All twenty entries written, plus `#32`'s header corrected to
+name its merge and the fact that it reached `main` only via `#33`. Method,
+which was the whole point: each entry drafted from **that PR's own body and
+diff** — five parallel agents, four PRs each, none permitted to work from a
+later session's recall. Every backfilled entry ends its **Confidence:**
+bullet with `Backfilled 2026-08-27 from the PR body and diff, not written at
+merge time`, so a reader can tell at a glance which entries were written at
+merge time and which were reconstructed; several say plainly which of their
+claims are the PR body's own and were not re-verified.
+
+**What the backfill itself turned up** (each recorded in the entry it
+belongs to, not only here): #25's PR body asserts "no code, no reproducer
+changes" and its own diff contradicts it — a second commit landed on the
+branch after the body was written; #39 left its `lgj_hop` doc comment
+describing the pre-change design, caught one PR later by #40; #34's banked
+evidence file did not identify its own JDK, corrected same-day by #35; and
+#41 is merged on `main` while its own title reads `[DO NOT MERGE AS-IS]`,
+which the entry records as unresolved disposition rather than an
+endorsement.
+
+**Standing rule, unchanged and now the live one:** the entry goes in at
+open, in the PR's own commit. The backfill is the repair, not the process.
+
 ## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — RESOLVED
 
 **Found.** By running bench Component G — the F-PARITY harness — for the
