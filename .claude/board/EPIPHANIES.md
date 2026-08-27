@@ -4,6 +4,46 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-27 — E-EXP-KIA-A2-64K-CONVERGENCE-TAIL-DOMINATES-1
+
+**Status:** MEASURED — in-tree, reproducible, this run banked verbatim at
+`.claude/board/exp-kia-a2-64k-fresh-run.txt`.
+**Confidence:** High for this host/harness; explicitly NOT the operator's
+out-of-tree 125ms/233ms weather prior (different workload, per
+`mask-native-navigation-correction-v1.md` §8.3 — that gap stays open).
+
+Fresh `lance-graph-supervisor/examples/measure_wal_curve` release run
+(lance-graph@1d7bc1b1), answering "measure the 64k execution end first"
+before any `BatchWriter`/kanban seam design: the EXP-KIA-A2-64K arm's
+**compute** phase parallelizes as documented (21.8ms seq → 6.68ms @
+workers=8, 3.27x, matching the plan's own "~3.2-3.5x on 4 cores" prior
+exactly) — but compute is the SMALL part of a cycle. Per-cycle steady-state
+total (build/population excluded, sequential vs best-parallel):
+
+```
+workers=1: think 21.81 + cast 21.52 + collect 10.06 + wal 14.62 + apply 17.73 = 85.74 ms
+workers=8: think  6.68 + cast 20.83 + collect  9.45 + wal 15.62 + apply 15.87 = 68.44 ms
+```
+
+**The cast/collect/wal/apply tail is FLAT across every worker count
+(1/2/4/8/16) — it does not shrink when compute parallelizes** — and it is
+~64-65ms of every cycle regardless: ~90% of the workers=8 total, ~10%
+compute. Sequential-vs-parallel sealed-cycle digests MATCH at every worker
+count (correctness holds; this is a WHERE-does-the-time-go finding, not a
+correctness one).
+
+Consequence for the seam question root `CLAUDE.md` names ("64K COMPUTE WAS
+PARALLEL … not yet the production loop"): parallelizing compute alone
+recovers at most ~15ms of an ~85ms cycle in this harness. The convergence
+boundary this repo's own maxims already flag as sequential-by-design
+(ONE COMPUTATION IS NOT ONE LANCE WRITE; the SOLE native writer) is where
+the time actually is — any seam design that only speeds up compute is
+optimizing the part that was never the bottleneck on this measurement.
+Cross-ref `CLAUDE.md`'s compute-model maxims and the GridLake block
+(deterministic-landing-identity gate) — this measurement is evidence FOR
+prioritizing that gate's resolution over a parallel-compute seam, not
+against parallel compute itself.
+
 ## 2026-08-27 — E-JAVA-IS-SIMD-RS-VALHALLA-PANAMA-IS-THE-POLYFILL-1
 
 **Status:** DOCTRINE — [OPERATOR-FRAMED]. Pinned as the ENFORCEMENT LAYER in
