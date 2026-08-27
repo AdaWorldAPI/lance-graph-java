@@ -1,6 +1,6 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
-## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — RESOLVED IN PART, same day
+## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — RESOLVED
 
 **Found.** By running bench Component G — the F-PARITY harness — for the
 first time. `lgj_hop` is the slowest of three arms at every configuration in
@@ -68,6 +68,40 @@ point in the measured space. The gather rewrite is none of those things.
 Landing them together would have made a regression in either impossible to
 attribute.
 
+**RESOLVED, same day, second pass.** The remaining structural half is gone:
+`lgj_hop` no longer sweeps at all. It gathers — touching only the rows `src`
+names, reading each one's participating facets in place out of that row's own
+512 bytes.
+
+**The crossover this issue predicted does not exist.**
+`examples/hop_gather_vs_sweep.rs` measured both shapes over five populations
+(1 024 … 262 144) × twelve densities — 60 configurations, byte-identical
+output asserted at every one, plus an anti-vacuity empty-hop guard. **Gather
+wins all 60**, from 2 754× at 0.01 % density to **1.73× at 100 %**.
+
+The prediction was that a dense frontier would favour the sweep's sequential
+vectorised access. Wrong, and the mechanism is the correction: a sweep
+MATERIALISES an `n`-element per-row intermediate that each row reads exactly
+once, so it is never amortised — at full density it does everything the gather
+does PLUS allocate, zero, write and re-read `n` u32s. Strictly more work at
+every density. The reasoning had been about access PATTERN and missed that one
+shape simply does MORE.
+
+Consequence for the design: **no threshold, no dispatch, no heuristic gate.**
+A crossover would have required one, with the two-sided evidence such a gate
+demands; its absence makes the change unconditional and much simpler.
+
+End to end through Component G, the independent instrument: native_hop
+24 798 → 34.4 µs at 1 %/65 536 (**720×**), and the ordering inverted — native
+is now FASTEST at every configuration, 2.0×–13× ahead of the best scalar arm,
+having started this arc slowest at every configuration.
+
+**Still open, and named rather than hidden:** the one shape that could favour
+a precomputed per-row mask is REUSE — memoising it across many hops on the
+same `(store, classid)`. That is a caching design with its own invalidation
+questions and is deliberately not this function's.
+
+Raw probe output: `.claude/board/hop-gather-vs-sweep-crossover.txt`.
 Data: `bench/results/jmh-results-G.csv`; narrative: `bench/RESULTS.md` § G.
 
 
