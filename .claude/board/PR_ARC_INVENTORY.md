@@ -8,6 +8,68 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #44 — R1→minor 10: mask algebra restored, the reduction repatriated, the doctrine pinned, the columnar store landed (merged 2026-08-27, merge — 5 commits, head `bd6f666`)
+
+- **Added, as one arc** (the PR body predates its own last three commits —
+  it says "R2 measured, not landed", which commit 5 then landed; this entry
+  is the current record):
+  1. **R1** (`0385269`) — `lgj_hop` selects with `src ∧ class_f ∧ struct_f`,
+     word-parallel; the walk only EMITS. F2 closed: the structured-edge gate
+     was an `if` in EVERY prior version incl. #22's — it is the same strided
+     primitive at `+12`, one call site, zero new kernels.
+     `facet_bits`/`facet_cache` deleted (a stored projection). Byte-identical
+     (pinned 10/19/29), and honestly a 19× regression on AoS — the layout
+     named as the defect, per R11's prior 9.2× pricing.
+  2. **§13 de-staled** (`ba377b3`) — abi.md described the pre-R1
+     composition; the #39-shaped prose-lag caught by adversarial re-read.
+  3. **Minor 9** (`c3ecf37`) — `lgj_rowstore_facet_match_count`: the
+     facet-match reduction computed where the data is, after THREE Java-side
+     shapes of it (segment popcount loop; 32 composed counts summed in
+     Java; a proposed buffer-popcount symbol). Two independent oracles;
+     both compat directions vs a real minor-8 library. Exposed en route:
+     root-invoked release builds were silently REFUSED (toolchain floor,
+     error hidden by tail-piping) — earlier R1 Java runs had loaded a
+     pre-R1 `.so`; harmless (no observable change) and caught by the
+     minor-9 gate itself.
+  4. **Doctrine** (`824996d`) — the simd.rs isomorphism as root CLAUDE.md's
+     ENFORCEMENT LAYER E1–E6 (Java=facade/37-fns-0-instructions,
+     Valhalla+Panama=polyfill, Rust=backends/488-intrinsics; scalar is a
+     backend BELOW the facade; facade intrinsics only as cfg(test) oracles).
+     J2 closed: `Layouts` derives the geometry, the facade names it.
+     CODEX_REVIEW_CHECKLIST §8 added (the "saves a crossing" tell).
+  5. **Minor 10** (`bd6f666`) — `lgj_rowstore_open_columnar`: facet-major
+     over the (row × facet) plane, same 512n bytes/draws/content (pinned,
+     bytes-differ anti-vacuity). Lane table 33→97 (lo64/hi32 lanes join
+     classid) so EVERY field is descriptor-served; Java proven LAYOUT-BLIND
+     (accessors read only via descriptors; `rowOffset` + last facade
+     geometry constants deleted; disable-run red at row 1 facet 0 —
+     the first address divergence — AoS green). Register-sweep family
+     refuses facet-major with new `UNSUPPORTED_LAYOUT` (−18), two-sided.
+- **Locked:** HOP EXECUTES AS MASK × CLASSVIEW → MASK, at every layer with
+  a named gate; a layout is a SCHEMA (constructor + descriptors, never a
+  resource kind); carving groups ≤ 4 B and 64-alignment of 512/regions/
+  blocks pinned as tests (`carving_groups_fit_the_flattening_budget…`) —
+  the substrate half of R4/R10's Valhalla measurements.
+- **Measured, banked on the board:** AoS mask algebra 19× WORSE than the
+  old sweep (`hop-mask-algebra-vs-columnar.txt` — the finding that forced
+  minor 10); through the REAL ABI, columnar hop **4.7×/5.9×/3.8×** over AoS
+  at classid/2-hop/full arms, equivalence asserted before timing
+  (`columnar-store-abi-bench.txt`).
+- **Deferred, named:** the fused single-plane pass (~10× further, per the
+  lab arm); the register-sweep family on facet-major (an honest −18, not a
+  gap); Vector API permanently lab (E4).
+- **Docs:** abi.md §13 rewrite, §18 new, symbol count 25→26, status −18,
+  minor 9+10 history; root CLAUDE.md E1–E6.
+- **Gates:** Rust 138/139 (both feature configs) · clippy `-D warnings` +
+  fmt · Java **314 core** (ColumnarStoreTest 10 new) **+ 143 consumer** ·
+  runtime-confirmed `abi 0.10` · OldAbiCompatTest both directions vs REAL
+  minor-8 AND minor-9 libraries built from prior commits in worktrees
+  (path deps resolve relative to the worktree — it must sit beside the
+  sibling repos, not in /tmp).
+- **Confidence:** high — every claim above is a pinned test, a banked
+  measurement, or a disable-run observed red-then-green; the one narrative
+  caveat is that the PR BODY describes only commit 1's state.
+
 ## PR #42 — lgj-abi: the REAL OGAR ClassView provider, bound behind a feature (merged 2026-08-27, `507cc93`)
 
 - **Added:** `ogar-classview` feature on `native/lgj-abi` binding
