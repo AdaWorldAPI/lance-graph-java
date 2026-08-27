@@ -1230,6 +1230,70 @@ pub unsafe extern "C" fn lgj_row_facet_match(
     })
 }
 
+/// How many `(row, facet)` slots of the store carry `needle` as classid —
+/// the reduction over [`lgj_row_facet_match`]'s answer, computed WHERE THE
+/// DATA IS (ABI minor >= 9, `docs/abi.md` §11).
+///
+/// One crossing in, one `u64` back. The decomposition (32 facet predicates,
+/// popcount each, sum) happens entirely on this side of the membrane: Java
+/// neither iterates facets nor sums partial counts — it does not even learn
+/// that the answer HAS parts. Selection is the same strided-equality mask the
+/// classid ops use ([`kernels::simd_rowstore_u32_eq_mask`]); the reduction is
+/// the sanctioned `ndarray::simd` popcount. No scalar path exists.
+///
+/// Cannot overflow: at most `n_rows * 32` slots, and `n_rows` is far below
+/// `u64::MAX / 32` for any resolvable store.
+///
+/// # Safety
+///
+/// `out_count` must be null or a valid, writable `u64`. Null is rejected with
+/// `LGJ_ERR_NULL_ARGUMENT`; written only on success.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_rowstore_facet_match_count(
+    res: u64,
+    needle: u32,
+    out_count: *mut u64,
+) -> i32 {
+    guard(|| {
+        if out_count.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let n_rows = store_entry.n_rows;
+        let n = match usize::try_from(n_rows) {
+            Ok(n) => n,
+            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+        };
+        let n_words = mask_words_for(n_rows) as usize;
+        let bytes = store.as_bytes();
+
+        // Σ_f popcount(class_f) — mask ops only. The eq kernel guarantees
+        // trailing bits zero, so the popcount needs no tail masking.
+        let mut scratch = vec![0u64; n_words];
+        let mut total = 0u64;
+        for facet in 0..crate::rowstore::ROW_FACETS {
+            kernels::simd_rowstore_u32_eq_mask(
+                bytes,
+                facet as usize * crate::rowstore::FACET_BYTES as usize,
+                n,
+                needle,
+                &mut scratch,
+            );
+            total += kernels::simd_popcount(&scratch);
+        }
+        // SAFETY: non-null, checked above; written only on success.
+        unsafe { *out_count = total };
+        LGJ_OK
+    })
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // The fused plan — N predicates, ONE crossing
 // ───────────────────────────────────────────────────────────────────────────
@@ -2801,6 +2865,67 @@ mod tests {
             13,
             "the provider is not answering empty to everything"
         );
+    }
+
+    /// The minor-9 count against TWO independent oracles: the buffer-popcount
+    /// of `lgj_row_facet_match` (the very reduction Java used to do), and a
+    /// scalar recompute from the public per-row accessor. All three paths
+    /// share no code beyond the store itself.
+    #[test]
+    fn facet_match_count_agrees_with_the_buffer_and_the_scalar_oracle() {
+        let n = 2000u64;
+        let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let entry = registry::resolve_kind(store, LGJ_RESOURCE_ROWSTORE).unwrap();
+        let rs = entry.rowstore().unwrap();
+
+        for needle in [0u32, 7, 15] {
+            let mut count = 0u64;
+            assert_eq!(
+                unsafe { lgj_rowstore_facet_match_count(store, needle, &mut count) },
+                LGJ_OK
+            );
+
+            // Oracle 1: the buffer popcount.
+            let mut buf = vec![0u32; n as usize];
+            assert_eq!(
+                unsafe { lgj_row_facet_match(store, needle, buf.as_mut_ptr(), n) },
+                LGJ_OK
+            );
+            let buffer_total: u64 = buf.iter().map(|w| u64::from(w.count_ones())).sum();
+            assert_eq!(count, buffer_total, "needle {needle}: buffer oracle");
+
+            // Oracle 2: scalar recompute, no kernel involved.
+            let mut scalar_total = 0u64;
+            for row in 0..n {
+                for facet in 0..crate::rowstore::ROW_FACETS {
+                    if rs.classid_at(row, facet) == needle {
+                        scalar_total += 1;
+                    }
+                }
+            }
+            assert_eq!(count, scalar_total, "needle {needle}: scalar oracle");
+
+            // Anti-vacuity: a needle in the generated 0..16 range matches a
+            // non-trivial, non-total slot count.
+            assert!(count > 0 && count < n * 32, "needle {needle}: {count}");
+        }
+
+        // A needle outside the generator's classid range matches NOTHING —
+        // the can-it-stay-silent half.
+        let mut absent = u64::MAX;
+        assert_eq!(
+            unsafe { lgj_rowstore_facet_match_count(store, 999, &mut absent) },
+            LGJ_OK
+        );
+        assert_eq!(absent, 0);
+
+        // Null out-param is rejected, nothing written.
+        assert_eq!(
+            unsafe { lgj_rowstore_facet_match_count(store, 0, std::ptr::null_mut()) },
+            LGJ_ERR_NULL_ARGUMENT
+        );
+
+        lgj_close(store);
     }
 
     #[test]

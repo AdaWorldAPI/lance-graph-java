@@ -25,11 +25,13 @@ public final class FacetMatchView {
     private final RowStore owner;
     private final MemorySegment data;
     private final long rowCount;
+    private final int classId;
 
-    FacetMatchView(RowStore owner, MemorySegment data, long rowCount) {
+    FacetMatchView(RowStore owner, MemorySegment data, long rowCount, int classId) {
         this.owner = owner;
         this.data = data;
         this.rowCount = rowCount;
+        this.classId = classId;
     }
 
     /**
@@ -69,20 +71,21 @@ public final class FacetMatchView {
     }
 
     /**
-     * The total number of set bits across every row's bitset.
+     * The total number of {@code (row, facet)} slots carrying the queried classid — ONE native
+     * crossing ({@code lgj_rowstore_facet_match_count}, abi.md §11, ABI minor 9), one number back.
+     * Java neither iterates facets nor sums partials; it does not learn that the answer HAS parts.
      *
-     * <p>Deliberately Java-side: this is a bulk reduction over a result that already crossed the
-     * membrane once (the single {@code lgj_row_facet_match} call behind
-     * {@link RowStore#facetMatches}), so a second crossing just to reduce it would undo the point
-     * of having fetched the whole thing in bulk.
+     * <p>Two earlier versions of this method are the mask-native violation in miniature, each one
+     * layer up from the last. The first looped the fetched segment and popcounted in Java,
+     * doc-commented "deliberately Java-side" to save a crossing — the reduction on the wrong side
+     * of the membrane, defended on crossing count. The second composed 32 per-facet
+     * {@code maskOfFacetClass(...).count()} calls and summed in Java — every operation native, but
+     * the DECOMPOSITION (32 facets, a sum) still executing in Java, which is still Java holding a
+     * moving part. Java hands the question through Panama; Rust does the mask ops, only.
      */
     public long cardinality() {
         requireUsable("cardinality()");
-        long total = 0;
-        for (long row = 0; row < rowCount; row++) {
-            total += Integer.bitCount(data.getAtIndex(ValueLayout.JAVA_INT, row));
-        }
-        return total;
+        return owner.facetMatchCount(classId);
     }
 
     private void requireUsable(String what) {

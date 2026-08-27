@@ -448,6 +448,15 @@ public final class Downcalls {
         private Minor7() {}
     }
 
+    /** ABI minor 9 symbols (minor 8 added manifest data, no symbol). Lazy per the minor-2..7 rule. */
+    private static final class Minor9 {
+        static final MethodHandle ROWSTORE_FACET_MATCH_COUNT = mh("lgj_rowstore_facet_match_count",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private Minor9() {}
+    }
+
     /**
      * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
      *
@@ -498,6 +507,22 @@ public final class Downcalls {
             throw wrap("lgj_row_layout_probe", t);
         }
         Status.check("lgj_row_layout_probe", st);
+    }
+
+    /**
+     * Total {@code (row, facet)} slots carrying {@code classId} — the reduction over
+     * {@code lgj_row_facet_match}'s answer, computed natively (abi.md §11, minor 9). One
+     * crossing, one {@code u64} out-param.
+     */
+    public static void rowstoreFacetMatchCount(long res, int classId, MemorySegment outCount) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor9.ROWSTORE_FACET_MATCH_COUNT.invokeExact(res, classId, outCount);
+        } catch (Throwable t) {
+            throw wrap("lgj_rowstore_facet_match_count", t);
+        }
+        Status.check("lgj_rowstore_facet_match_count", st);
     }
 
     // ── row store (docs/abi.md §11, ABI minor 2) ─────────────────────────────────────────────

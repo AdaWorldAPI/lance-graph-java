@@ -232,7 +232,17 @@ public final class RowStore implements NativeResource, AutoCloseable {
         requireOpen("facetMatches()");
         MemorySegment out = arena.allocate(ValueLayout.JAVA_INT, rowCount);
         Engine.rowFacetMatch(handle, classId, out, rowCount);
-        return new FacetMatchView(this, out, rowCount);
+        return new FacetMatchView(this, out, rowCount, classId);
+    }
+
+    /**
+     * Package-private bridge for {@link FacetMatchView#cardinality()}: the native slot count for
+     * {@code classId}, one crossing. Not public API — the public surface for this answer is the
+     * view, so the question and its projection stay together.
+     */
+    long facetMatchCount(int classId) {
+        requireOpen("facetMatchCount()");
+        return Engine.rowstoreFacetMatchCount(handle, classId);
     }
 
     /**

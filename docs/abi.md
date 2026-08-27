@@ -62,7 +62,9 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 24 symbols (unchanged at minor 8, which adds
+- It is **small** — currently 25 symbols (minor 9's one addition is argued
+  in §11: a reduction Java was performing on the wrong side of the membrane,
+  moved to where the data is; 24 at minor 8, which adds
   manifest FIELDS and no symbol; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
@@ -140,6 +142,14 @@ required — a gate that rejected everything would satisfy a rejection-only test
 
 ### Minor version history
 
+- **Minor 9** (2026-08-27) — `lgj_rowstore_facet_match_count` (§11): the
+  total `(row, facet)` slot count for a classid, computed natively. The
+  operator's placement rule made explicit as ABI: Java hands the question
+  through Panama and receives ONE number; the decomposition (32 facet
+  predicates, popcount, sum) never crosses. Exists because the reduction was
+  found executing in Java twice — first as a segment loop, then as 32
+  composed mask counts summed Java-side — each lawful-looking, each still
+  Java holding a moving part. No new status.
 - **Minor 2** (2026-08-17) — the SoA row store (§11).
 - **Minor 3** (2026-08-18) — the edge-bearing row store (§12).
 - **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)

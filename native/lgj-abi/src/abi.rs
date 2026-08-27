@@ -69,7 +69,7 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// require only the base 104-byte prefix rather than the full layout — without
 /// that, every future manifest field would be a hard incompatibility with every
 /// older artifact.
-pub const LGJ_ABI_MINOR: u32 = 8;
+pub const LGJ_ABI_MINOR: u32 = 9;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///

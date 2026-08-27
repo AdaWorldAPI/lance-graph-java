@@ -1,3 +1,44 @@
+## 2026-08-27 — ABI minor 9: the reduction moved to where the data is, and the placement rule is now ABI
+
+Operator ruling, verbatim intent: *"java hands decorative where() through
+Panama; Rust is doing mask ops, ONLY"* — and, on the first fix attempt,
+*"java doesn't even know mask count."* Both corrections were needed, because
+the violation survived one layer up from where it was first repaired.
+
+- **The violation, three shapes of it.** `FacetMatchView.cardinality()` (1)
+  popcounted a fetched segment in a Java loop, doc-commented "deliberately
+  Java-side" to save a crossing; (2) after the first correction, composed 32
+  per-facet `maskOfFacetClass(...).count()` calls and summed in Java — every
+  OPERATION native, but the DECOMPOSITION (32 facets, a sum) still executing
+  in Java. Java knowing "32" is Java holding a moving part. (3) The fix I
+  first PROPOSED — "add a popcount symbol over the buffer" — was the same
+  disease: asking how to reduce a buffer Java should never hold.
+- **Minor 9, one symbol:** `lgj_rowstore_facet_match_count(res, needle,
+  out_count)` — Σ_f popcount(class_f), computed natively with the same
+  strided-equality mask the classid ops use plus the sanctioned popcount. One
+  crossing, one u64 back; Java does not learn that the answer has parts.
+  `cardinality()` is now a single delegation. Falsifier runs the count against
+  TWO independent oracles (the `lgj_row_facet_match` buffer popcount — the
+  very reduction Java used to do — and a scalar recompute), plus absent-needle
+  zero and null-out rejection. 135/135 both feature configs.
+- **Both gate directions proven against a REAL minor-8 library** (built from
+  `main` @ c6127c5 in a worktree): `cardinality` throws `AbiMismatchException`
+  naming minor 9 — never a bare missing symbol, never a silent fallback to a
+  Java-side loop. 8/8 compat checks. (Worktree lesson: path deps resolve
+  relative to the worktree, so it must sit beside the sibling repos, not in
+  /tmp.)
+- **The stale-`.so` iron rule fired for real, and caught MY OWN gap.** The
+  root-invoked `cargo build --release --manifest-path ...` was silently
+  REFUSED (repo root resolves the default toolchain, below the 1.97 floor;
+  the MSRV error was hidden by tail-piping) — so the R1 Java runs earlier
+  today loaded a PRE-R1 `.so`. Harmless there only because R1 changes no
+  observable behaviour; the minor-9 `requireMinor` gate is what surfaced it,
+  exactly as #26/#27 designed. Correct build: from inside `native/lgj-abi`
+  (pinned toolchain) with `CARGO_TARGET_DIR` pointed at the root target Java
+  loads.
+- **docs/abi.md**: 25 symbols; minor-9 history entry stating the placement
+  rule as ABI, not preference.
+
 ## 2026-08-27 — R1: the hop's selection is mask algebra again, and the layout is now the measured blocker
 
 Operator ruling: *"there's no gathering — gathering is a serialization of what

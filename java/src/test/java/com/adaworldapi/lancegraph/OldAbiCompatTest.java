@@ -123,6 +123,20 @@ public final class OldAbiCompatTest {
                     s.facetSum(FacetId.of(0), m);
                 }
             });
+
+            // Minor 9 — the native facet-match count (minors 7 and 8 have no
+            // Java-reachable NEW symbol to gate: 7's probe is exercised by its
+            // own suite and 8 added manifest data only). The reduction Java
+            // used to run itself; against an older library the gate must name
+            // minor 9, never fall back to a Java-side loop.
+            gate(c, loaded, 9, "FacetMatchView.cardinality (native count)", () -> {
+                try (RowStore s = RowStore.open(64, 0x1234L)) {
+                    long total = s.facetMatches(3).cardinality();
+                    if (total > 64L * 32L) {
+                        throw new IllegalStateException("impossible count " + total);
+                    }
+                }
+            });
         } else {
             c.note("minors 4 and 5 need a minor-2 row store to build a mask on; skipped here"
                     + " because this library predates it");
