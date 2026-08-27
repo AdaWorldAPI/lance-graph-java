@@ -2689,7 +2689,12 @@ mod tests {
 
     // ── hop (ABI minor ≥ 4) ─────────────────────────────────────────────────
 
+    /// The FIXTURE's pinned answer. Gated OFF under `ogar-classview`: with a
+    /// real provider bound, edge classid 0 is UNREGISTERED, so participation
+    /// narrows to nothing and 19/29 is no longer the truth. The contrasting
+    /// fact is pinned by `hop_under_the_real_provider_narrows_by_class`.
     #[test]
+    #[cfg(not(feature = "ogar-classview"))]
     fn hop_matches_the_pinned_rowstore_regression_10_19_29() {
         let n = 2000u64;
         let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
@@ -2719,6 +2724,67 @@ mod tests {
         lgj_close(dst1);
         lgj_close(src);
         lgj_close(store);
+    }
+
+    /// The CONTRAST to `hop_matches_the_pinned_rowstore_regression_10_19_29`.
+    ///
+    /// Same store, same seeds, same call — a different answer, because
+    /// participation is now a per-class fact instead of a constant. Two
+    /// halves, and both are needed: the hop must yield EMPTY (narrowing is
+    /// real), and the provider must still answer non-empty for a classid
+    /// that IS in the vocabulary (the emptiness is the store's classid
+    /// domain, not a provider that answers empty to everything).
+    ///
+    /// DISABLE: return `FieldMask::FULL` from the `ogar-classview` arm of
+    /// `edge_participation` and the first half fails — 19 rows come back
+    /// where the real provider says none should.
+    #[test]
+    #[cfg(feature = "ogar-classview")]
+    fn hop_under_the_real_provider_narrows_by_class() {
+        let n = 2000u64;
+        let seed_rows: Vec<u64> = (0..10u64).map(|i| i * 37 + 5).collect();
+
+        // (a) classid 0 is unregistered -> participates in nothing -> EMPTY.
+        let store0 = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let src0 = mask(store0, LGJ_MASK_INIT_EMPTY);
+        // dst starts ALL, so EMPTY proves an overwrite rather than a default.
+        let dst0 = mask(store0, LGJ_MASK_INIT_ALL);
+        set_rows(src0, &seed_rows);
+        assert_eq!(lgj_hop(store0, 0, 0xFFFF_FFFF, 0, src0, dst0), LGJ_OK);
+        assert_eq!(
+            count(dst0),
+            0,
+            "an unregistered edge classid must traverse nothing (the fixture \
+             answered 19 here)"
+        );
+        lgj_close(dst0);
+        lgj_close(src0);
+        lgj_close(store0);
+
+        // (b) ...and emptiness here is the STORE's doing, not a dead
+        // provider. `RowStore::generate*` draws classids from `0..16`
+        // (`ROWSTORE_CLASS_CARDINALITY`), while every classid registered in
+        // `ogar_vocab` is >= 0x0100 — the two domains are DISJOINT, so under
+        // a real provider a generated store hops nothing for ANY classid in
+        // its own domain. That is the honest state of the seam: the fixture
+        // ROWS are what remain to be replaced with Lance-loaded SoA rows.
+        //
+        // Two-sided: the same provider DOES admit facets for a classid that
+        // is actually in the vocabulary, so the emptiness above is a
+        // property of the store's classid domain and not of a provider that
+        // answers empty to everything.
+        for c in 0..crate::rowstore::ROWSTORE_CLASS_CARDINALITY as u32 {
+            assert_eq!(
+                crate::class_view_provider::edge_participation(c).count(),
+                0,
+                "classid {c} is in the store's domain but not the vocabulary"
+            );
+        }
+        assert_eq!(
+            crate::class_view_provider::edge_participation(0x0103).count(),
+            13,
+            "the provider is not answering empty to everything"
+        );
     }
 
     #[test]

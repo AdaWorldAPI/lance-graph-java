@@ -4,6 +4,43 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-27 — E-BINDING-A-REAL-PROVIDER-MEASURES-THE-FIXTURE-1
+
+**Status:** FINDING — measured, pinned by a test rather than asserted.
+**Confidence:** High. Both halves are numbers, and the disable-run is
+red-then-green on five tests.
+
+Binding the real `ClassView` provider (`OgarClassView`) behind
+`--features ogar-classview` did not make the hop *better*. It made the hop
+*empty* — and that emptiness is the most useful thing the wiring produced.
+
+The provider itself is correct and discriminating: 98 registered classes,
+**12 distinct** participation masks where the fixture answered one. But the
+generated row store's classid domain is `0..16`
+(`ROWSTORE_CLASS_CARDINALITY`) while every vocabulary classid is `>= 0x0100`
+— **disjoint**. So a generated store under a real provider traverses nothing,
+for every classid in its own domain.
+
+**The generalizable part.** A fixture with a plausible answer for every input
+(`FieldMask::FULL`) is indistinguishable from a bound provider until you bind
+one. `FULL` is the answer that never disagrees, which is exactly why it
+cannot be falsified in place. The measurement that mattered was not "does
+the provider work" — it was **binding it and reading what the rest of the
+system then failed to do**. The seam was declared closed-enough for two
+waves because nothing in the suite could tell the two providers apart.
+
+**Consequence, stated rather than fixed here:** the remaining fixture is the
+row CONTENT, not the layout or the kernels. Replacing `RowStore::generate`
+with Lance-loaded SoA rows is what makes the bound provider observable
+end-to-end; until then the feature is a correct provider over rows it has no
+classes for.
+
+**Discipline note.** Two fixture-semantics tests had to be gated OFF under
+the feature. Neither was deleted: each got a paired ON twin asserting the
+CONTRASTING fact on the same inputs (all-32 vs none; 19/29 vs empty), so the
+gate reads as evidence of a changed answer rather than as a suppressed
+failure.
+
 ## 2026-08-26 — E-ONE-SUBSTRATE-FIVE-GLOVES-GHIDRA-IS-THE-GLOVE-NOT-THE-MODEL-1
 
 **Status:** DOCTRINE — [OPERATOR-FRAMED]. The "what is it FOR" that the
