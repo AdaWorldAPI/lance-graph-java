@@ -1,0 +1,7 @@
+lgj_hop through the REAL ABI — AoS vs facet-major columnar (minor 10)
+same content both layouts, equivalence asserted before timing
+lgj_hop through the ABI, n_rows=65536, all 32 facets, median of 7
+      arm     |src|       aos_us  columnar_us  speedup
+  classid      3933      48504.4      10426.6     4.7x
+     hop2      6943      48227.5       8200.8     5.9x
+      all     65536      53601.1      14031.9     3.8x

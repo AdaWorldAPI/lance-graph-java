@@ -69,6 +69,9 @@ public enum Status {
      * case no single reading is correct for these rows, so neither output is written.
      */
     UNRESOLVED_CARVING(-17, "the selected rows do not resolve to a single register grouping"),
+    UNSUPPORTED_LAYOUT(-18, "this operation needs a byte arrangement the store's layout does not"
+            + " provide (the 12-byte-register sweeps are row-major operations; a facet-major"
+            + " store splits the register into per-field regions)"),
 
     /**
      * Not tabulated in docs/abi.md §3 (reported as a doc gap) but required by §9: a panic is caught

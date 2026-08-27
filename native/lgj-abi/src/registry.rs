@@ -383,9 +383,35 @@ pub fn open_rowstore_with_edges(
     edge_gate_mask: u64,
     edge_radius: u32,
 ) -> Result<u64, i32> {
-    let store =
-        RowStore::generate_with_edges(n_rows, seed, edge_classid, edge_gate_mask, edge_radius)
-            .ok_or(LGJ_ERR_LENGTH_OVERFLOW)?;
+    open_rowstore_with_edges_in(
+        n_rows,
+        seed,
+        edge_classid,
+        edge_gate_mask,
+        edge_radius,
+        crate::rowstore::RowLayout::AosRows,
+    )
+}
+
+/// [`open_rowstore_with_edges`] under an explicit layout (minor 10's columnar
+/// constructor routes here with [`crate::rowstore::RowLayout::FacetMajor`]).
+pub fn open_rowstore_with_edges_in(
+    n_rows: u64,
+    seed: u64,
+    edge_classid: u32,
+    edge_gate_mask: u64,
+    edge_radius: u32,
+    layout: crate::rowstore::RowLayout,
+) -> Result<u64, i32> {
+    let store = RowStore::generate_with_edges_in(
+        n_rows,
+        seed,
+        edge_classid,
+        edge_gate_mask,
+        edge_radius,
+        layout,
+    )
+    .ok_or(LGJ_ERR_LENGTH_OVERFLOW)?;
     insert(ResourceEntry {
         kind: LGJ_RESOURCE_ROWSTORE,
         epoch: next_epoch(),

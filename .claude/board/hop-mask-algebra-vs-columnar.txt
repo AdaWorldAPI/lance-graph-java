@@ -1,0 +1,22 @@
+hop shapes — sweep vs gather vs mask-algebra (AoS) vs columnar (row x facet plane)
+release, x86-64-v4, shared 4-vCPU container, median of 7 reps
+edge_classid=0 gate=0x0 radius=25, effective=all 32 facets
+equivalence asserted at EVERY configuration: all four shapes byte-identical
+
+== n_rows = 65536 ==
+  frontier   density     sweep_us    gather_us      mask_us     colmn_us
+         6     0.01%       5146.9          1.0      41599.5        901.5
+        32     0.05%       2504.7          1.8      43757.2       1017.0
+        65     0.10%       2655.8          2.3      41782.9       1143.9
+       163     0.25%       2739.8          5.3      51184.1       1200.6
+       327     0.50%       2245.1         14.3      49686.0       1127.7
+       655     1.00%       3034.4         27.7      49667.3       1066.3
+      1310     2.00%       2766.2         62.2      49274.8       1088.2
+      3276     5.00%       2710.6        380.9      50909.4       1178.9
+      6553    10.00%       3659.7        759.9      49367.0       1229.6
+     16384    25.00%       2969.2       1659.3      48603.8       1366.7
+     32768    50.00%       3349.5       2365.8      49887.2       1626.8
+     65536   100.00%       5251.8       3879.5      51328.5       2270.9
+
+
+[exited with code 0]

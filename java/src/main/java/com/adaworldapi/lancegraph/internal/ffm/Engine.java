@@ -261,6 +261,36 @@ public final class Engine {
         Downcalls.rowFacetMatch(store, classId, out, outLenElems);
     }
 
+    /**
+     * Total {@code (row, facet)} slots of {@code store} carrying {@code classId} — the reduction
+     * over {@link #rowFacetMatch}'s answer, computed where the data is (docs/abi.md §11).
+     * Requires ABI minor &gt;= 9. One crossing; Java receives ONE number and learns nothing about
+     * how the answer decomposes.
+     */
+    /**
+     * Open a facet-major columnar row store (abi.md §18). Requires ABI minor &ge; 10. Same
+     * logical content as {@link #openRowStoreWithEdges}; only the byte arrangement differs, and
+     * ONLY Rust knows it — every Java read goes through served lane descriptors.
+     */
+    public static long openRowStoreColumnar(long nRows, long seed, int edgeClassid,
+            long edgeGateMask, int edgeRadius) {
+        Abi.requireMinor(10);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG);
+            Downcalls.rowstoreOpenColumnar(nRows, seed, edgeClassid, edgeGateMask, edgeRadius, out);
+            return out.get(ValueLayout.JAVA_LONG, 0);
+        }
+    }
+
+    public static long rowstoreFacetMatchCount(long store, int classId) {
+        Abi.requireMinor(9);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG);
+            Downcalls.rowstoreFacetMatchCount(store, classId, out);
+            return out.get(ValueLayout.JAVA_LONG, 0);
+        }
+    }
+
     // ── mask complement + hop (docs/abi.md §13, ABI minor ≥ 4) ─────────────────────────────
     //
     // Same requireMinor-before-any-downcall discipline as the row store section above: a Java
