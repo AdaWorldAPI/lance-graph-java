@@ -116,32 +116,150 @@ fn hop_gather(store: &RowStore, src: &[u64], effective: u32, n_words: usize) -> 
     out
 }
 
-/// MEMOISED — the shipped shape. `facet_bits` is one 32-bit MASK per row, so
-/// the participation test is an AND. Passing the mask in lets the caller time
-/// the WARM case; `RowStore::facet_bits` builds and caches it on first ask.
-fn hop_memoised(
+/// MASK ALGEBRA — the shipped shape (R1). Selection is
+/// `src ∧ class_f ∧ struct_f`, word-parallel; both predicates are the SAME
+/// strided-equality primitive at two offsets into the facet. Nothing decides
+/// per row whether a row takes part — the walk only EMITS from the result.
+fn hop_mask_algebra(store: &RowStore, src: &[u64], effective: u32, n_words: usize) -> Vec<u64> {
+    let bytes = store.as_bytes();
+    let n = store.n_rows as usize;
+    let mut out = vec![0u64; n_words];
+    let mut selected = vec![0u64; n_words];
+    let mut structured = vec![0u64; n_words];
+
+    for facet in 0..lgj_abi::rowstore::ROW_FACETS {
+        if (effective >> facet) & 1 == 0 {
+            continue;
+        }
+        let off = facet as usize * lgj_abi::rowstore::FACET_BYTES as usize;
+        kernels::simd_rowstore_u32_eq_mask(bytes, off, n, EDGE_CLASSID, &mut selected);
+        kernels::simd_mask_and_assign(&mut selected, src);
+        kernels::simd_rowstore_u32_eq_mask(
+            bytes,
+            off + lgj_abi::rowstore::FACET_PAYLOAD_HI32_OFFSET as usize,
+            n,
+            0,
+            &mut structured,
+        );
+        kernels::simd_mask_and_assign(&mut selected, &structured);
+
+        for (w, &sw) in selected.iter().enumerate() {
+            let mut bits = sw;
+            while bits != 0 {
+                let bit = bits.trailing_zeros();
+                bits &= bits - 1;
+                let row = (w as u64) * 64 + u64::from(bit);
+                if row >= store.n_rows {
+                    continue;
+                }
+                decode_into(bytes, store.n_rows, row, facet, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// COLUMNAR — R2 as a lab measurement (R11's precedent: measure the layout
+/// before changing the store).
+///
+/// Same bytes, different ORDER. A row's 512 bytes are three fields × 32
+/// facets; laying them out field-major makes the whole `(row × facet)` plane
+/// one contiguous canvas per field. Then every predicate is ONE pass over a
+/// contiguous `u32` column — no stride at all — instead of 32 strided passes
+/// per predicate.
+///
+/// Built once here because a columnar STORE would build it at generation.
+/// The build is timed separately; it is not per-hop work.
+struct Columnar {
+    classid: Vec<u32>, // [row * 32 + facet]
+    hi32: Vec<u32>,
+    lo64: Vec<u64>,
+}
+
+impl Columnar {
+    fn of(store: &RowStore) -> Self {
+        let n = store.n_rows as usize;
+        let f = ROW_FACETS as usize;
+        let bytes = store.as_bytes();
+        let mut classid = vec![0u32; n * f];
+        let mut hi32 = vec![0u32; n * f];
+        let mut lo64 = vec![0u64; n * f];
+        for row in 0..n {
+            for facet in 0..f {
+                let b = row * ROW_BYTES as usize + facet * FACET_BYTES as usize;
+                let i = row * f + facet;
+                classid[i] = u32::from_le_bytes(bytes[b..b + 4].try_into().unwrap());
+                lo64[i] = u64::from_le_bytes(bytes[b + 4..b + 12].try_into().unwrap());
+                hi32[i] = u32::from_le_bytes(bytes[b + 12..b + 16].try_into().unwrap());
+            }
+        }
+        Self {
+            classid,
+            hi32,
+            lo64,
+        }
+    }
+}
+
+/// The hop over the `(row × facet)` bit-plane. Four mask operands, three ANDs,
+/// one walk of the RESULT — and not one of the operands is built by looking at
+/// which rows were selected.
+fn hop_columnar(
+    col: &Columnar,
     store: &RowStore,
     src: &[u64],
     effective: u32,
     n_words: usize,
-    facet_bits: &[u32],
 ) -> Vec<u64> {
-    let bytes = store.as_bytes();
+    let n_rows = store.n_rows;
+    let slots = col.classid.len(); // n_rows * 32
+    let slot_words = slots.div_ceil(64);
+
+    let mut selected = vec![0u64; slot_words];
+    let mut structured = vec![0u64; slot_words];
+
+    // class — ONE contiguous pass over the whole plane.
+    kernels::simd_eq_u32_to_mask(&col.classid, EDGE_CLASSID, &mut selected);
+    // struct — ONE more.
+    kernels::simd_eq_u32_to_mask(&col.hi32, 0, &mut structured);
+    kernels::simd_mask_and_assign(&mut selected, &structured);
+
+    // participation — PERIODIC, so the operand is one repeated word rather
+    // than a buffer: 64 slots per word = exactly 2 rows at 32 facets.
+    let part_word = (effective as u64) | ((effective as u64) << 32);
+    // src, expanded 1 row-bit -> 32 slot-bits. Word w covers rows 2w, 2w+1.
+    for (w, sel) in selected.iter_mut().enumerate() {
+        let r0 = 2 * w as u64;
+        let r1 = r0 + 1;
+        let lo = if r0 < n_rows && (src[(r0 / 64) as usize] >> (r0 % 64)) & 1 == 1 {
+            0xFFFF_FFFFu64
+        } else {
+            0
+        };
+        let hi = if r1 < n_rows && (src[(r1 / 64) as usize] >> (r1 % 64)) & 1 == 1 {
+            0xFFFF_FFFF_0000_0000u64
+        } else {
+            0
+        };
+        *sel &= part_word & (lo | hi);
+    }
+
+    // Emit. Every set bit is a (row, facet) edge slot that already satisfied
+    // every predicate; the walk decides nothing.
     let mut out = vec![0u64; n_words];
-    for (w, &sw) in src.iter().enumerate() {
+    for (w, &sw) in selected.iter().enumerate() {
         let mut bits = sw;
         while bits != 0 {
             let bit = bits.trailing_zeros();
             bits &= bits - 1;
-            let row = (w as u64) * 64 + u64::from(bit);
-            if row >= store.n_rows {
+            let slot = w * 64 + bit as usize;
+            if slot >= slots {
                 continue;
             }
-            let mut fb = facet_bits[row as usize] & effective;
-            while fb != 0 {
-                let facet = fb.trailing_zeros();
-                fb &= fb - 1;
-                decode_into(bytes, store.n_rows, row, facet, &mut out);
+            let target = col.lo64[slot];
+            if target < n_rows {
+                let t = target as usize;
+                out[t / 64] |= 1u64 << (t % 64);
             }
         }
     }
@@ -183,7 +301,7 @@ fn time_us(mut f: impl FnMut()) -> f64 {
 fn main() {
     let effective: u32 = 0xFFFF_FFFF; // all 32 facets participate
     println!(
-        "gather-vs-sweep crossover — spread frontier, edge_classid={EDGE_CLASSID}, \
+        "hop shapes — spread frontier, edge_classid={EDGE_CLASSID}, \
          gate=0x{GATE_MASK:x}, radius={RADIUS}, reps={REPS} (median)\n"
     );
 
@@ -191,11 +309,12 @@ fn main() {
         let store = RowStore::generate_with_edges(n_rows, SEED, EDGE_CLASSID, GATE_MASK, RADIUS)
             .expect("fixture generation");
         let n_words = (n_rows as usize).div_ceil(64);
+        let col = Columnar::of(&store);
 
         println!("== n_rows = {n_rows} ==");
         println!(
             "{:>10} {:>9} {:>12} {:>12} {:>12} {:>12}",
-            "frontier", "density", "sweep_us", "gather_us", "memo_cold", "memo_warm"
+            "frontier", "density", "sweep_us", "gather_us", "mask_us", "colmn_us"
         );
 
         for &pct in &[
@@ -222,32 +341,27 @@ fn main() {
                 std::hint::black_box(hop_gather(&store, &src, effective, n_words));
             });
 
-            let fb = store.facet_bits(EDGE_CLASSID);
-            let memo_warm = time_us(|| {
-                std::hint::black_box(hop_memoised(&store, &src, effective, n_words, &fb));
-            });
-            // COLD: the O(n) mask build plus one hop -- what the FIRST hop on
-            // a fresh (store, classid) actually pays. Timed by building the
-            // mask from scratch each rep rather than reading the cache.
-            let memo_cold = time_us(|| {
-                let mut built = vec![0u32; store.n_rows as usize];
-                lgj_abi::kernels::simd_rowstore_facet_match(
-                    &store.bytes_arc(),
-                    store.n_rows as usize,
-                    EDGE_CLASSID,
-                    &mut built,
-                );
-                std::hint::black_box(hop_memoised(&store, &src, effective, n_words, &built));
+            let mask = time_us(|| {
+                std::hint::black_box(hop_mask_algebra(&store, &src, effective, n_words));
             });
             assert_eq!(
-                hop_memoised(&store, &src, effective, n_words, &fb),
+                hop_mask_algebra(&store, &src, effective, n_words),
                 a,
-                "memoised disagrees at n_rows={n_rows} pct={pct}"
+                "mask algebra disagrees at n_rows={n_rows} pct={pct}"
+            );
+
+            let colmn = time_us(|| {
+                std::hint::black_box(hop_columnar(&col, &store, &src, effective, n_words));
+            });
+            assert_eq!(
+                hop_columnar(&col, &store, &src, effective, n_words),
+                a,
+                "columnar disagrees at n_rows={n_rows} pct={pct}"
             );
 
             println!(
                 "{:>10} {:>8.2}% {:>12.1} {:>12.1} {:>12.1} {:>12.1}",
-                count, pct, sweep, gather, memo_cold, memo_warm
+                count, pct, sweep, gather, mask, colmn
             );
         }
         println!();

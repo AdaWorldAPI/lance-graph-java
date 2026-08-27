@@ -1,5 +1,38 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-HOP-LAYOUT-BLOCKS-THE-ALGEBRA (2026-08-27) — OPEN
+
+**Found.** By landing R1 (selection as mask algebra) and measuring it.
+
+**Measured.** 65 536 rows, all densities: the lawful shape costs
+**~40 600 µs** where the shipped one-pass sweep costs ~2 100 µs — a **19×
+regression** — because 32 facets × 2 predicates is 64 whole-population passes
+at **stride 512**, ~2 GB of memory traffic to read 512 KB of classids. Scaling
+is worse than linear (1 024 rows → 144 µs; 65 536 rows → 40 632 µs, 282× for
+64× the rows), the signature of cache and TLB failing together.
+
+**Root cause is the layout, not the algebra** — and it was priced before this
+arc started. R11 (#31) measured AoS 512-stride at 12–13 ns/row against an SoA
+facet lane at ~1.3 ns/row (**9.2×**) and found the layout already *data* at
+every boundary except the store's constructor, with the kernels already
+stride-parameterized. PR #40 then banked the opposite as a law — *"a scalar
+gather beats a vectorised sweep; the win is in not doing the work"* — a
+measurement taken inside the defect and generalised as a property of the
+operation. That claim is superseded; see the storno on #40's arc entry.
+
+**The fix is measured, not proposed.** A columnar `(row × facet)` plane —
+same bytes, field-major — runs the identical algebra at **902–2 271 µs**,
+~40× the AoS mask shape and 2.3–5.7× the sweep it replaces, with cost tracking
+the canvas rather than the frontier (2.5× across a 10 000× density range).
+Banked: `.claude/board/hop-mask-algebra-vs-columnar.txt`.
+
+**Open because the STORE is still AoS.** The probe builds the plane from the
+AoS buffer; a columnar store builds it at generation, which is the ABI-side
+change (an additive constructor plus lane descriptors, per R11) and is not
+landed here. Until it is, `lgj_hop` on `main` is lawful and slow, and that
+trade is deliberate: the currency is correct and the physical layer is the
+named blocker, rather than the currency being spent to hide a layout defect.
+
 ## ISS-LGJ-ARC-INVENTORY-STOPPED-AT-32 (2026-08-27) — RESOLVED
 
 **Found.** While landing PR #42's own arc entry, per the board README's

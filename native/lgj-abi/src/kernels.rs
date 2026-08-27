@@ -118,15 +118,28 @@ pub fn simd_popcount(words: &[u64]) -> u64 {
     ndarray::simd::popcount_batch_u64(words)
 }
 
-/// Row mask over one facet-classid lane of a 512-byte row store:
-/// `out_words[row-th bit] = (classid of facet at first_offset in row == needle)`.
+/// THE strided per-row equality primitive over the row store:
+/// `out_words[row-th bit] = (LE u32 at first_offset + row * 512 == needle)`.
+///
+/// `first_offset` is an arbitrary byte offset into the row, so this ONE
+/// function answers every per-row `u32` predicate the store has. Both of the
+/// hop's predicates are calls to it, twelve bytes apart:
+///
+/// | predicate | `first_offset` | `needle` |
+/// |---|---|---|
+/// | facet `f` carries class `E` | `f * 16 + 0` | `E` |
+/// | facet `f` is a structured edge | `f * 16 + 12` | `0` |
+///
+/// That the structured-edge gate needs no new kernel is the point — it was an
+/// `if` inside a row walk in every version of `lgj_hop` up to and including
+/// the first mask-shaped one (PR #22), and it was always this call.
 ///
 /// Routes through `ndarray::simd::eq_u32_strided_to_mask` — the strided
-/// AoS-facet scan (LE `u32` at `first_offset + row * 512`). The primitive
-/// owns bounds checking (overflow-checked, panics rather than reading out of
-/// bounds) and the trailing-bits-zero guarantee.
+/// AoS-facet scan. The primitive owns bounds checking (overflow-checked,
+/// panics rather than reading out of bounds) and the trailing-bits-zero
+/// guarantee.
 #[inline]
-pub fn simd_rowstore_classid_mask(
+pub fn simd_rowstore_u32_eq_mask(
     bytes: &[u8],
     first_offset: usize,
     n_rows: usize,
@@ -141,6 +154,21 @@ pub fn simd_rowstore_classid_mask(
         needle,
         out_words,
     );
+}
+
+/// The classid reading of [`simd_rowstore_u32_eq_mask`] — `first_offset` is a
+/// facet's base, so the `u32` compared is that facet's leading classid.
+/// Kept as a named wrapper because `lgj_op_eq_classid` means *classid*
+/// specifically, and a call site that says so is worth one line of delegation.
+#[inline]
+pub fn simd_rowstore_classid_mask(
+    bytes: &[u8],
+    first_offset: usize,
+    n_rows: usize,
+    needle: u32,
+    out_words: &mut [u64],
+) {
+    simd_rowstore_u32_eq_mask(bytes, first_offset, n_rows, needle, out_words);
 }
 
 /// Per-row facet-match: `out[row]` gets bit `f` set iff facet `f`'s classid

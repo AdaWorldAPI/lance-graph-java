@@ -1580,14 +1580,10 @@ pub extern "C" fn lgj_hop(
             None => return LGJ_ERR_WRONG_RESOURCE_KIND,
         };
         let n_rows = store_entry.n_rows;
-        // The gather never materialises an `n`-element buffer, so `n` itself
-        // is no longer needed — but the OVERFLOW GUARD still is: row indices
-        // are cast to `usize` below, and a store whose row count does not fit
-        // must be refused here rather than wrapping at the cast. Kept as an
-        // explicit check rather than an `_n` binding so the intent survives.
-        if usize::try_from(n_rows).is_err() {
-            return LGJ_ERR_LENGTH_OVERFLOW;
-        }
+        let n = match usize::try_from(n_rows) {
+            Ok(n) => n,
+            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+        };
         let n_words = mask_words_for(n_rows) as usize;
 
         // Effective participation (spec §3.1/§3.4): the caller's facet_mask
@@ -1613,57 +1609,77 @@ pub extern "C" fn lgj_hop(
         let mut out = vec![0u64; n_words];
         let bytes = rowstore.as_bytes();
 
-        // AND OVER MASKS, on a memoised per-facet mask.
+        // SELECTION IS MASK ALGEBRA.
         //
-        // `facet_bits(classid)[row]` is a 32-bit MASK of which facets of that
-        // row carry the edge class, so the participation test is one AND --
-        // `facet_bits[row] & effective` -- and not 32 byte compares. Built
-        // once per (store, classid) through the sanctioned `ndarray::simd`
-        // kernel and shared by refcount thereafter; the store is immutable, so
-        // it never needs invalidation.
+        //   selected_f = src ∧ class_f ∧ struct_f
+        //   dst        = ⋁_{f ∈ participation} scatter(selected_f)
         //
-        // This is the shape the substrate's own currency asks for, and it took
-        // three tries to get here honestly:
+        // Both predicates are the SAME strided-equality primitive
+        // (`simd_rowstore_u32_eq_mask`) at two offsets into the facet — the
+        // classid at +0, the structured-edge gate at +12 — and the two ANDs
+        // are word-parallel over 64 rows at a time. No row is examined to
+        // decide whether it participates; participation is computed for the
+        // whole population and intersected.
         //
-        //   1. 32 full-width classid sweeps per hop -- mask-shaped, but the
-        //      AND was computed over the whole population EVERY hop. 24.8 ms.
-        //   2. gather: skip the mask entirely, read each src row's facets
-        //      inline. 34 us -- 720x faster, and measured to beat a sweep at
-        //      every density (no crossover exists), but it traded the algebra
-        //      away: the classid predicate stopped being a mask at all.
-        //   3. this: keep the mask, pay for it ONCE. The AND is what the
-        //      earlier sweeps were doing; memoising is what makes it cheap.
+        // Three shapes preceded this one and each traded the algebra for
+        // arithmetic:
         //
-        // Only the scatter stays outside mask algebra, and irreducibly so: the
-        // destination index is DECODED from the row's payload, so it is a
-        // data-dependent scatter, not a set operation.
-        let facet_bits = rowstore.facet_bits(edge_classid);
-        let effective_facets = effective as u32;
-        for (w, &sw) in src_snapshot.iter().enumerate() {
-            let mut bits = sw;
-            while bits != 0 {
-                let bit = bits.trailing_zeros();
-                bits &= bits - 1;
-                let row = (w as u64) * ROWS_PER_WORD + bit as u64;
-                // Defensive: a conformant mask's tail is always zero, so this
-                // is unreachable for a well-formed src_mask -- but guards
-                // against a deliberately corrupted snapshot rather than
-                // letting the byte-offset math below run past the buffer.
-                if row >= n_rows {
-                    continue;
-                }
-                let mut fb = facet_bits[row as usize] & effective_facets;
-                while fb != 0 {
-                    let facet = fb.trailing_zeros();
-                    fb &= fb - 1;
+        //   1. PR #22 — mask-shaped selection (`src_word & classid_word`),
+        //      but the structured-edge gate was an `if` inside the walk and
+        //      the classid sweep ran once PER FACET over a 512-strided store.
+        //   2. PR #40 — deleted the classid mask outright and compared per
+        //      row inside a `trailing_zeros` walk of `src`. Faster, and the
+        //      predicate stopped being a mask at all.
+        //   3. PR #41 — restored an AND, but SCALAR and per-row, over a
+        //      memoised `facet_bits` buffer: the op survived as a symbol
+        //      while the algebra did not, and the memo stored a projection
+        //      of bytes already resident.
+        //
+        // What remains a walk is the SCATTER alone, and only because the
+        // destination row index is DECODED from the selected row's payload —
+        // it is the operand of a permutation, not a decision about which rows
+        // take part. Making that a semiring product (`dst = src ⊗ A`) is the
+        // next rung and needs an adjacency operand this ABI does not carry.
+        let mut selected = vec![0u64; n_words];
+        let mut structured = vec![0u64; n_words];
+
+        for facet in 0..crate::rowstore::ROW_FACETS {
+            if (effective >> facet) & 1 == 0 {
+                continue;
+            }
+            let facet_off = facet as usize * crate::rowstore::FACET_BYTES as usize;
+
+            // class_f — which rows carry this class in THIS facet.
+            kernels::simd_rowstore_u32_eq_mask(bytes, facet_off, n, edge_classid, &mut selected);
+            // ∧ src — narrow to the frontier.
+            kernels::simd_mask_and_assign(&mut selected, &src_snapshot);
+            // struct_f — payload_hi32 == 0 marks a structured edge.
+            kernels::simd_rowstore_u32_eq_mask(
+                bytes,
+                facet_off + crate::rowstore::FACET_PAYLOAD_HI32_OFFSET as usize,
+                n,
+                0,
+                &mut structured,
+            );
+            // ∧ — the gate that used to be an `if`.
+            kernels::simd_mask_and_assign(&mut selected, &structured);
+
+            // Emit from the SELECTED set. Every row reached here has already
+            // satisfied all three predicates; the walk decides nothing.
+            for (w, &sw) in selected.iter().enumerate() {
+                let mut bits = sw;
+                while bits != 0 {
+                    let bit = bits.trailing_zeros();
+                    bits &= bits - 1;
+                    let row = (w as u64) * ROWS_PER_WORD + bit as u64;
+                    // Defensive: a conformant mask's tail is always zero, so
+                    // this is unreachable for a well-formed src_mask.
+                    if row >= n_rows {
+                        continue;
+                    }
                     let base = (row * crate::rowstore::ROW_BYTES
                         + u64::from(facet) * crate::rowstore::FACET_BYTES)
                         as usize;
-                    let payload_hi32 =
-                        u32::from_le_bytes(bytes[base + 12..base + 16].try_into().unwrap());
-                    if payload_hi32 != 0 {
-                        continue; // not a structured edge (gate failed at generation)
-                    }
                     // Bounds check on u64, BEFORE any `as usize` cast
                     // (council S3-6, normative ordering).
                     let target = u64::from_le_bytes(bytes[base + 4..base + 12].try_into().unwrap());

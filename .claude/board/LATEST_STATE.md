@@ -1,3 +1,58 @@
+## 2026-08-27 — R1: the hop's selection is mask algebra again, and the layout is now the measured blocker
+
+Operator ruling: *"there's no gathering — gathering is a serialization of what
+is already there to begin with."* Correct, and the audit that followed found
+the walk was not the only place the algebra had leaked.
+
+- **R1 shipped, byte-identical.** `lgj_hop` selects with
+  `src ∧ class_f ∧ struct_f`, word-parallel. **134/134** including the pinned
+  10/19/29 regression — which is the proof the answer did not move — and
+  447/447 Java unchanged.
+- **F2, which no PR in the arc had caught:** `payload_hi32 != 0` was an `if`
+  inside the row walk in EVERY version, PR #22's clean one included. It is a
+  per-row equality against zero, i.e. the same strided primitive as the classid
+  match, twelve bytes further into the facet. Closed for **one call site and
+  zero new kernels** — `simd_rowstore_u32_eq_mask` takes an arbitrary offset,
+  so `first_offset = f*16 + 0` is the class and `f*16 + 12` is the gate.
+- **`facet_bits` / `facet_cache` / `FACET_CACHE_SLOTS` deleted.** Under the
+  operator's format-string reading of the 4+12 facet (`classid -F payload`,
+  PowerShell `"{0} {1}" -F $1,$2`) the memo was caching the interpolated
+  string. The projection is applied at read, never stored.
+- **R1 alone is a 19× REGRESSION, and that is the finding.** 65 536 rows:
+  one-pass sweep 2 126 µs → mask algebra **40 632 µs**, flat in density. 32
+  facets × 2 predicates = **64 full passes at stride 512** ≈ 2 GB of traffic to
+  read 512 KB. At 1 024 rows it is 144 µs; 64× the rows costs 282× the time —
+  cache and TLB collapsing together. The algebra is right; the LAYOUT is the
+  defect, exactly as R11 (#31) priced it at 9.2× before this arc began.
+- **R2 measured as a lab arm (R11 precedent, zero ABI change).** The canvas is
+  the **(row × facet) plane**, not the row: same 512 bytes reordered
+  field-major, so `class` and `struct` are ONE contiguous pass each with no
+  stride, participation is a PERIODIC operand (64 slots per word = exactly 2
+  rows × 32 facets, so it is one repeated `u64`, not a buffer), and `src`
+  expands 1 row-bit → 32 slot-bits by splat.
+
+| 65 536 rows | 0.01 % | 1 % | 25 % | 100 % |
+|---|---|---|---|---|
+| sweep (shipped pre-R1) | 5 147 | 3 034 | 2 969 | 5 252 |
+| gather (#40, the serialization) | 1.0 | 27.7 | 1 659 | 3 880 |
+| mask algebra, AoS (R1) | 41 600 | 49 667 | 48 604 | 51 329 |
+| **columnar plane (R2 probe)** | **902** | **1 066** | **1 367** | **2 271** |
+
+  Columnar is **~40×** the AoS mask shape, **2.3–5.7×** the one-pass sweep, and
+  beats the gather outright at 100 %. Its cost tracks the CANVAS, not the
+  frontier — 2.5× across a 10 000× density range — which is the signature the
+  mask-native invariant asks for. Equivalence asserted at all 12 configurations
+  per population: all four shapes byte-identical. Raw output banked at
+  `.claude/board/hop-mask-algebra-vs-columnar.txt`.
+- **Honest boundary:** at a sparse frontier the gather is still faster in
+  absolute terms, because any whole-plane operation is O(population) and a walk
+  is O(frontier). That is not a defect to fix — it is the trade the doctrine
+  makes deliberately, and it is why the columnar number (flat in density)
+  matters more than the sparse-density comparison.
+- **Not done:** the columnar store itself. The probe builds the plane from the
+  AoS store; a columnar STORE builds it at generation. That is the ABI-side
+  change and it is measured-but-unlanded.
+
 ## 2026-08-27 — the REAL ClassView provider is bound, and it measures the fixture's reach
 
 The `ClassView` provider seam (§4-NG3, "a real ontology/cache provider is a
