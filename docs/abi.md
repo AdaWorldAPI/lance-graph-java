@@ -756,15 +756,36 @@ against `n_rows` as a `u64` BEFORE any `t as usize` cast — the ordering is
 part of the contract, not an implementation detail, so an out-of-range
 `u64` target can never reach an indexing operation.
 
-**Kernel composition.** The classid-match sub-step for each participating
-facet routes through the EXISTING sanctioned primitive
-(`kernels::simd_rowstore_classid_mask`, `ndarray::simd::eq_u32_strided_to_mask`
-— the same kernel `lgj_op_eq_classid` uses, §11) into a scratch word
-buffer that is REUSED across every participating facet, never reallocated
-per facet. Only the resulting set-bit walk + payload decode + scatter is
-scalar: there is no `ndarray::simd` primitive for gather-decode-scatter,
-and duplicating the classid compare in scalar Rust would be exactly the
-polyfill bypass §8 forbids.
+**Kernel composition.** Selection is mask algebra —
+`src ∧ class_f ∧ struct_f` per participating facet, accumulated into `dst`:
+
+| operand | how it is produced |
+|---|---|
+| `class_f` | facet `f` carries the edge class |
+| `struct_f` | facet `f`'s `payload_hi32 == 0`, i.e. a structured edge |
+| `src` | the caller's frontier, snapshotted under a read lock |
+
+Both predicates are the SAME sanctioned primitive at two offsets into the
+16-byte facet — `kernels::simd_rowstore_u32_eq_mask`,
+`ndarray::simd::eq_u32_strided_to_mask` (the kernel `lgj_op_eq_classid` also
+uses, §11) — with `first_offset = f*16 + 0, needle = classid` for the class
+and `first_offset = f*16 + 12, needle = 0` for the gate. The ANDs are
+`ndarray::simd::mask_and_assign`, word-parallel over 64 rows at a time. Two
+scratch word buffers are REUSED across every participating facet, never
+reallocated per facet.
+
+**No row is examined to decide whether it participates.** Only the
+resulting set-bit walk + payload decode + scatter is scalar, and only
+because the destination row index is DECODED from the selected row's
+payload: that is the operand of a permutation, not a decision about
+membership. There is no `ndarray::simd` primitive for decode-scatter, and
+duplicating either predicate in scalar Rust would be exactly the polyfill
+bypass §8 forbids.
+
+> The structured-edge gate was an `if` inside the row walk until 2026-08-27
+> — in every earlier shape of this function, including the first mask-shaped
+> one. It was always this call; the kernel already took an arbitrary
+> `first_offset`.
 
 ### Bulk-rule conformance (§6, applied)
 
