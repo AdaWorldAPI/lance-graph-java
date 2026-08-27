@@ -37,6 +37,7 @@ Output: `results/jmh-run.txt` (full log, including every warm-up iteration) and
 | **D** | *(in C)* | the Vector API arm — same segment, zero copy |
 | **E** | `E_FusionAndPlanning` | fused (1 crossing) vs unfused (N crossings), swept over predicate count |
 | **F** | *(in E)* | what does building the fluent chain cost, with no crossing at all? |
+| **G** | `G_HopExecutionBoundary` | native `lgj_hop` vs the two preserved scalar hop oracles, swept over row count × frontier density (the F-PARITY harness, spec §3.8/§12) |
 
 C and D live in one class on purpose: the question is a comparison, and separate classes would let
 a difference in setup masquerade as a difference in execution. E and F likewise share a fixture.

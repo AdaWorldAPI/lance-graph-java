@@ -88,10 +88,38 @@ Neither is `wave-ghidra-g1-g2`.
 | 🧊 | `wave-consumer-trades.md`, `wave-consumer-bricks.md` | **DO NOT DISPATCH** — operator ruling 2026-08-17, "calcified, not executed, until called." Note the *deliverables* (D-LGJ-W5 trades/bricks) shipped anyway via PR #11/#12; the wave files are the un-dispatched expansion. |
 | 🧊 | `wave-consumer-graph.md` | DONE 2026-08-18, ⊘ superseded in part by the D-LGJ-W8 correction. |
 
-**The real critical path to Ghidra/R2IL consumption is upstream, not here:**
-`ruff_r2il` **PR2** (drill-down proposer, gated on PR1 corpus numbers) then
-**PR3** (classid mint in `ogar_codebook`, item O5, gated on PR2). Both
-unmerged as of 2026-08-25.
+**The real critical path to Ghidra/R2IL consumption is upstream, not here.**
+
+> **⊘ CORRECTION 2026-08-27 — this paragraph was wrong twice, and the file
+> that exists to stop stale cross-repo claims had become one.** It read:
+> *"`ruff_r2il` PR2 (drill-down proposer, gated on PR1 corpus numbers) then
+> PR3 (classid mint in `ogar_codebook`, item O5, gated on PR2). Both unmerged
+> as of 2026-08-25."* Measured against the repo:
+>
+> 1. **PR1 / O1 is DONE and committed** — `ruff` `.claude/harvest/r2il/CORPUS-PROFILE-RESULT.md`:
+>    100.00 % inline fit (`dst+src0+src1`), 0.00 % needing Vec routing, on all
+>    four corpus binaries (`stress_test`, `stress_test_opt`, `/bin/ls`,
+>    `/usr/bin/env`).
+> 2. **PR2 is DONE and measured** — `ORACLE-RESULT.md`: the round-trip
+>    reconstruction oracle, **zero mismatches over 35,946 matched op sites**
+>    (`:120`).
+> 3. **PR2 was never a "drill-down proposer".** That phrase appears nowhere in
+>    the r2il plans; the PR2 gate deliverable is the round-trip oracle
+>    (`.claude/plans/r2il-roundtrip-oracle-spec-v1.md:1`). The nearest real
+>    "drill proposer" is `ruff_python_spo`'s, a different crate and a
+>    different arm.
+>
+> Append-only: the wrong text is quoted above rather than deleted, because the
+> failure mode — a checklist confidently asserting another repo's state — is
+> the exact one this file was created to prevent.
+
+**Actual open item:** **O6** — the attribute-gap / schema-widening decision the
+oracle run opened (`ORACLE-RESULT.md`: `MemorySpace` dominates the gap;
+unresolved is whether to widen the schema for it, and the shipped
+`minimal_pass_one` convention's own coverage). O6 scopes **O5/PR3**, the
+`ogar_codebook` classid mint that lance-graph owns. Until PR3 lands, the facet
+is an opaque key and must not be persisted as a durable address
+(`STAGED-CODEGEN-GUIDE.md:34`, placeholder `PROVISIONAL_R2IL_VARNODE = 0x0000`).
 
 ## 5. What this repo does NOT yet contain — measured, not assumed
 
@@ -123,10 +151,21 @@ interfaces, no Ghidra core fork required) and the vocabulary is *measured*
 - [x] Core vertical slice (D-LGJ-A…AUDIT) — DONE
 - [x] SoA substrate W1–W7 — DONE
 - [x] Mask-native sweep, ABI minors 5–8 — DONE
-- [ ] **D-LGJ-W8 FALSIFIERS** ← the real remainder of the ~90% wave
-- [ ] **D-LGJ-W8 POLICY** ← the real remainder of the ~90% wave
+- [x] **D-LGJ-W8 FALSIFIERS** — F-HYDR was already shipped as `GraphHopTest`'s
+      G3 gate (384-byte floor, flat 10-vs-500 rows); F-PARITY's harness
+      (bench Component G) landed 2026-08-27 **and was measured**. The other
+      six `F-*` are pre-registered for the COMPUTE wave, not W8 — §12's own
+      "W8 carries only those marked [W8]" marks exactly two.
+- [x] **D-LGJ-W8 POLICY** — discharged at the **A3 freeze (PR #20)**, not last:
+      §3.9 says the artifacts land "BEFORE workers", and all of them exist
+      dated 2026-08-18 (root `CLAUDE.md` incl. §13's compute additions,
+      `EPIPHANIES.md:683` storno, the `STATUS_BOARD` row, `LATEST_STATE`,
+      `PR_ARC_INVENTORY`). The ladder's `… → FALSIFIERS → POLICY` ordering is
+      misleading and the board carried it as "remaining" for nine days.
 - [x] ~~wave-ghidra-g1-g2~~ — **SUPERSEDED, never dispatch** (ruff PR #94)
-- [ ] `ruff_r2il` PR2 → PR3 (upstream, the actual Ghidra/R2IL critical path)
+- [x] `ruff_r2il` PR1/O1 (corpus profile) — DONE, measured
+- [x] `ruff_r2il` PR2 (round-trip oracle) — DONE, zero mismatches / 35,946 sites
+- [ ] `ruff_r2il` **O6** (MemorySpace schema-widening decision) → **O5/PR3** (`ogar_codebook` mint)
 - [ ] `wave-ogar-machine-pm1` — blocked behind PR2+PR3 + operator go
 - [ ] Any r2il/r2conc binding in this repo — **not started**
 
