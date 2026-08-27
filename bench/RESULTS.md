@@ -308,6 +308,54 @@ strided classid reads per call before a single edge is decoded.
 the placement follows that measurement — never taste"* — now has its measurement, and it points at
 a specific, local property of the kernel rather than at the architecture.
 
+### FIXED — one pass instead of 32, re-measured
+
+The remedy the section above deferred landed immediately after, once the
+measurement justified it. `lgj_hop` no longer loops `for facet in 0..32 {
+sweep(all n rows) }`; it calls `simd_rowstore_facet_match` **once**, which
+answers all 32 facets per row in a single `MultiLaneColumn` pass, and then
+walks **src's set rows** rather than every row × facet.
+
+No new kernel: `simd_rowstore_facet_match` already existed and is the same
+sanctioned `ndarray::simd` surface (abi.md §8) — it was simply being consumed
+the wrong way round.
+
+| arm | 1 % / 4096 | 1 % / 65536 | 25 % / 4096 | 25 % / 65536 |
+|---|---|---|---|---|
+| `native_hop` **before** | 479.0 µs | 24 798.3 µs | 521.2 µs | 23 633.9 µs |
+| `native_hop` **after** | **374.7 µs** | **7 120.3 µs** | **375.8 µs** | **8 076.9 µs** |
+| speed-up | 1.28× | **3.48×** | 1.39× | **2.93×** |
+
+**The two scalar arms are the control, and they matter here.** They are
+untouched code, so if the second run had merely landed on a faster host they
+would have moved too. Measured: `classidScan` 150.6 → 164.2 µs and
+`facetMatches` 7 142.3 → 7 698.8 µs at 1 %/65 536 — within ~9 %, and slightly
+*slower*, so the native gain is real and if anything understated. (The JMH
+banner does report a different CPU string between runs — 2.10 GHz vs 2.80 GHz
+— which is exactly why the control arms are quoted rather than trusted to be
+the same box.)
+
+Behaviour is unchanged, not merely believed to be: lgj-abi 134/134, AllTests
+304, GraphHopTest 66 **including G3 at the identical 384-byte floor**,
+TradesParity 12, TradesAllocation 3, BricksAuth 62.
+
+### Still slower than the best scalar arm — the honest remaining gap
+
+At 1 % / 65 536, native is 7 120 µs against `classidScan`'s 164 µs: **43×**.
+The catastrophic term is gone; a structural one is not.
+
+`simd_rowstore_facet_match` still sweeps the **whole population**. At a 1 %
+frontier the scalar arm touches 655 rows × 32 facets ≈ 21 k reads, while the
+native arm answers all 65 536 rows before intersecting with `src`. The decode
+half is now frontier-bounded; the compare half is not.
+
+The next rung is a genuinely different shape — gather per src row (read that
+row's 512 bytes, answer its 32 facets, move on) — which is O(frontier) rather
+than O(population). It is NOT obviously better: at a dense frontier the full
+sweep's sequential access should beat a scattered gather, so there is a real
+density crossover and it should be **measured, not assumed**. Component G is
+now the instrument that can find it, which is the point of having built it.
+
 ### What this does NOT say
 
 - **It is not a verdict on mask-native execution.** The architectural claims are pinned elsewhere

@@ -1,6 +1,6 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
-## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — OPEN
+## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — RESOLVED IN PART, same day
 
 **Found.** By running bench Component G — the F-PARITY harness — for the
 first time. `lgj_hop` is the slowest of three arms at every configuration in
@@ -44,6 +44,29 @@ no scalar analogue and was NOT isolated (implausible as the story at 470 µs on
 4096 rows, and it would not scale with `rows`; named anyway). Native absolutes
 are noisy — ±12 844 on 24 798 µs — on a shared 4-vCPU container; the ordering
 is robust, the absolutes are not. One machine, one run.
+
+**Resolved in part, same day.** `lgj_hop` now calls
+`simd_rowstore_facet_match` ONCE — all 32 facets per row in a single
+`MultiLaneColumn` pass — and walks src's set rows instead of every row ×
+facet. No new kernel; that function already existed and is the same
+sanctioned `ndarray::simd` surface, it was just being consumed the wrong way
+round. Measured **1.28×–3.48×**, largest at scale (24 798 → 7 120 µs at
+1 %/65 536). The untouched scalar arms are the control and moved <9 %, so the
+gain is not a faster host.
+
+**What remains OPEN, and it is structural.** `simd_rowstore_facet_match`
+still sweeps the whole population, so at a 1 % frontier native is still 43×
+the best scalar arm (7 120 µs vs 164 µs): the DECODE half is now
+frontier-bounded, the COMPARE half is not. The next rung — gather per src row
+— is O(frontier) but is NOT obviously better, because a dense frontier should
+favour the sweep's sequential access. That crossover is a measurement, not a
+judgement call, and Component G is the instrument for it.
+
+**Why this was not one bigger change.** The one-pass fix is bounded, needs no
+new kernel, has no density crossover, and is strictly less work at every
+point in the measured space. The gather rewrite is none of those things.
+Landing them together would have made a regression in either impossible to
+attribute.
 
 Data: `bench/results/jmh-results-G.csv`; narrative: `bench/RESULTS.md` § G.
 
