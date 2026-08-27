@@ -264,7 +264,10 @@ mod integration_tests {
         let mut info = LgjResourceInfo::default();
         assert_eq!(call::resource_info(s, &mut info), LGJ_OK);
         assert_eq!(info.kind, LGJ_RESOURCE_ROWSTORE);
-        assert_eq!(info.lane_count, 33);
+        // 33 → 97 at minor 10: 32 payload-lo64 + 32 payload-hi32 lanes joined
+        // the served schema so a consumer can read EVERY field through a
+        // descriptor instead of hand-computing offsets (E3, both layouts).
+        assert_eq!(info.lane_count, 97);
         assert_eq!(info.n_rows, n);
 
         // Raw lane: contiguous U8, exactly n*512 bytes.
@@ -284,8 +287,13 @@ mod integration_tests {
         assert_eq!(d.stride_bytes, 512);
         assert_eq!(d.byte_len, (n - 1) * 512 + 4);
         assert_eq!(d.flags & LGJ_FLAG_CONTIGUOUS, 0);
-        // Lane 34 does not exist (1 raw + 32 facets = ids 0..=32).
-        assert_eq!(call::lane_describe(s, 34, &mut d), LGJ_ERR_INVALID_LANE);
+        // Lane 34 is now facet 1's payload-lo64 lane (minor 10 grew the
+        // served table to 97: raw + classid + lo64 + hi32). Re-pinned as
+        // contrast: it EXISTS with U64 kind, and the first id past the table
+        // (97) is the one that must reject.
+        assert_eq!(call::lane_describe(s, 34, &mut d), LGJ_OK);
+        assert_eq!(d.elem_kind, LgjElemKind::U64 as u32);
+        assert_eq!(call::lane_describe(s, 97, &mut d), LGJ_ERR_INVALID_LANE);
 
         // classid predicate on facet 7 → an ordinary mask, counted natively…
         let m = mask(s, LGJ_MASK_INIT_EMPTY);

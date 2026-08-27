@@ -1,6 +1,6 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
-## ISS-LGJ-HOP-LAYOUT-BLOCKS-THE-ALGEBRA (2026-08-27) — OPEN
+## ISS-LGJ-HOP-LAYOUT-BLOCKS-THE-ALGEBRA (2026-08-27) — RESOLVED (same day; ABI minor 10)
 
 **Found.** By landing R1 (selection as mask algebra) and measuring it.
 
@@ -26,12 +26,21 @@ same bytes, field-major — runs the identical algebra at **902–2 271 µs**,
 the canvas rather than the frontier (2.5× across a 10 000× density range).
 Banked: `.claude/board/hop-mask-algebra-vs-columnar.txt`.
 
-**Open because the STORE is still AoS.** The probe builds the plane from the
-AoS buffer; a columnar store builds it at generation, which is the ABI-side
-change (an additive constructor plus lane descriptors, per R11) and is not
-landed here. Until it is, `lgj_hop` on `main` is lawful and slow, and that
-trade is deliberate: the currency is correct and the physical layer is the
-named blocker, rather than the currency being spent to hide a layout defect.
+**RESOLVED — ABI minor 10 landed the columnar store**, exactly the shape
+R11 priced: an additive constructor (`lgj_rowstore_open_columnar`, facet-
+major: contiguous per-facet classid/lo64/hi32 blocks, same 512n bytes, same
+draws) plus lane descriptors (33 → 97 lanes so every field is served).
+Measured THROUGH THE ABI at 65 536 rows: hop **3.3–4.8×** over AoS at every
+frontier arm, byte-identical answers, the pinned 10 → 19 → 29 on both
+layouts. The register-sweep family refuses facet-major with the new
+`UNSUPPORTED_LAYOUT` (-18) — a row-major operation stays honest about being
+one — pinned two-sided (same calls succeed on AoS). Java is proven
+LAYOUT-BLIND: its accessors read through served descriptors, and the
+disable-run (stride hard-coded 512) fails the columnar store at the first
+row where the layouts' addresses diverge. Remaining headroom, named not
+hidden: the lab's single-plane pass measured a further ~10× beyond the
+per-facet columnar sweep — a fused whole-region kernel is the next rung,
+not this one.
 
 ## ISS-LGJ-ARC-INVENTORY-STOPPED-AT-32 (2026-08-27) — RESOLVED
 

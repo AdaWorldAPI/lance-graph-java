@@ -267,6 +267,21 @@ public final class Engine {
      * Requires ABI minor &gt;= 9. One crossing; Java receives ONE number and learns nothing about
      * how the answer decomposes.
      */
+    /**
+     * Open a facet-major columnar row store (abi.md §18). Requires ABI minor &ge; 10. Same
+     * logical content as {@link #openRowStoreWithEdges}; only the byte arrangement differs, and
+     * ONLY Rust knows it — every Java read goes through served lane descriptors.
+     */
+    public static long openRowStoreColumnar(long nRows, long seed, int edgeClassid,
+            long edgeGateMask, int edgeRadius) {
+        Abi.requireMinor(10);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG);
+            Downcalls.rowstoreOpenColumnar(nRows, seed, edgeClassid, edgeGateMask, edgeRadius, out);
+            return out.get(ValueLayout.JAVA_LONG, 0);
+        }
+    }
+
     public static long rowstoreFacetMatchCount(long store, int classId) {
         Abi.requireMinor(9);
         try (Arena a = Arena.ofConfined()) {

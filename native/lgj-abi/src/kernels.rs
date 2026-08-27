@@ -142,6 +142,7 @@ pub fn simd_popcount(words: &[u64]) -> u64 {
 pub fn simd_rowstore_u32_eq_mask(
     bytes: &[u8],
     first_offset: usize,
+    stride_bytes: usize,
     n_rows: usize,
     needle: u32,
     out_words: &mut [u64],
@@ -149,7 +150,7 @@ pub fn simd_rowstore_u32_eq_mask(
     ndarray::simd::eq_u32_strided_to_mask(
         bytes,
         first_offset,
-        crate::rowstore::ROW_BYTES as usize,
+        stride_bytes,
         n_rows,
         needle,
         out_words,
@@ -164,11 +165,12 @@ pub fn simd_rowstore_u32_eq_mask(
 pub fn simd_rowstore_classid_mask(
     bytes: &[u8],
     first_offset: usize,
+    stride_bytes: usize,
     n_rows: usize,
     needle: u32,
     out_words: &mut [u64],
 ) {
-    simd_rowstore_u32_eq_mask(bytes, first_offset, n_rows, needle, out_words);
+    simd_rowstore_u32_eq_mask(bytes, first_offset, stride_bytes, n_rows, needle, out_words);
 }
 
 /// Per-row facet-match: `out[row]` gets bit `f` set iff facet `f`'s classid
@@ -858,6 +860,7 @@ mod tests {
                         simd_rowstore_classid_mask(
                             &bytes,
                             first_offset,
+                            crate::rowstore::ROW_BYTES as usize,
                             n as usize,
                             needle,
                             &mut a,

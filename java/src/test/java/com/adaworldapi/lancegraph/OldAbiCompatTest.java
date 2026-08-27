@@ -137,6 +137,17 @@ public final class OldAbiCompatTest {
                     }
                 }
             });
+
+            // Minor 10 — the facet-major columnar constructor. Against an
+            // older library the gate must name minor 10; with it, the store
+            // must answer through the same facade as AoS.
+            gate(c, loaded, 10, "RowStore.openColumnar", () -> {
+                try (RowStore s = RowStore.openColumnar(64, 0x1234L)) {
+                    if (!s.isOpen()) {
+                        throw new IllegalStateException("columnar store did not open");
+                    }
+                }
+            });
         } else {
             c.note("minors 4 and 5 need a minor-2 row store to build a mask on; skipped here"
                     + " because this library predates it");

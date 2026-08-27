@@ -62,7 +62,8 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 25 symbols (minor 9's one addition is argued
+- It is **small** — currently 26 symbols (minor 10's one addition — the
+  columnar constructor — is argued in §18; 25 at minor 9, whose one addition is argued
   in §11: a reduction Java was performing on the wrong side of the membrane,
   moved to where the data is; 24 at minor 8, which adds
   manifest FIELDS and no symbol; the "14" this line carried
@@ -142,6 +143,17 @@ required — a gate that rejected everything would satisfy a rejection-only test
 
 ### Minor version history
 
+- **Minor 10** (2026-08-27) — `lgj_rowstore_open_columnar` (§18): the
+  facet-major columnar store. A layout is a SCHEMA over the same 512 bytes
+  per row (R11), so it is a CONSTRUCTOR, not a resource kind: every mask,
+  hop and count op takes the handle unchanged and answers identically
+  (pinned: the 10 → 19 → 29 hop on both layouts, byte-identical facet-match
+  buffers). The lane table grows 33 → 97 (payload lo64 + hi32 lanes join
+  classid), so a consumer reads EVERY field through a served descriptor —
+  which is what lets Java stay layout-blind. New status `-18`
+  (`UNSUPPORTED_LAYOUT`) for the register-sweep family on a facet-major
+  store. Measured through this ABI at 65 536 rows, all 32 facets:
+  hop 3.3–4.8× over AoS at every frontier arm.
 - **Minor 9** (2026-08-27) — `lgj_rowstore_facet_match_count` (§11): the
   total `(row, facet)` slot count for a classid, computed natively. The
   operator's placement rule made explicit as ABI: Java hands the question
@@ -196,6 +208,7 @@ are no error strings across the membrane and no `errno` dependence.
 | `-14` | `UNSUPPORTED_DECODE_MODE` | `lgj_hop` called with a `decode_mode` this build does not yet implement (§13, ABI minor ≥ 4) |
 | `-15` | `UNSUPPORTED_CARVING` | `lgj_reduce_facet_sum` called with a `carving` outside `0..=2` (§14, ABI minor ≥ 5) |
 | `-17` | `UNRESOLVED_CARVING` | `lgj_reduce_facet_sum_resolved`'s population does not resolve to one grouping — mixed classes, an unanswerable classid, or empty (§15, ABI minor ≥ 6) |
+| `-18` | `UNSUPPORTED_LAYOUT` | the operation needs a byte arrangement this store's layout does not provide — the 12-byte-register sweeps (§14/§15) and the whole-row probe (§16) are row-major operations, and a facet-major store (§18) splits the register into per-field regions. A deferral stated as a status, never a silently wrong sum (ABI minor ≥ 10) |
 | `-16` | `SUM_OVERFLOW` | `lgj_reduce_facet_sum`'s accumulator exceeded `i64`; `out_sum` is NOT written (§14, ABI minor ≥ 5) |
 
 `INVALID_HANDLE` is deliberately the response to *use-after-close*, not a crash.
@@ -1205,3 +1218,56 @@ those artifacts actually used, in one clearly-named compatibility shim
 (`CarvingTable.PRE_MINOR_8`) rather than back in the enum — so exactly one place
 in the build carries a literal encoding, and its name says it is history rather
 than the current answer.
+
+## 18. The facet-major columnar store (ABI minor ≥ 10)
+
+**A layout is a schema over the same content** (R11's finding, executed):
+`lgj_rowstore_open_columnar(n_rows, seed, edge_classid, edge_gate_mask,
+edge_radius, out_resource)` opens a store whose LOGICAL content is
+byte-for-byte the AoS constructors' (same generator, same draws), arranged
+field-major over the `(row × facet)` plane:
+
+```text
+[0    .. 128n)  classid  facet f at        f*4n, stride 4, contiguous
+[128n .. 384n)  lo64     facet f at 128n + f*8n, stride 8, contiguous
+[384n .. 512n)  hi32     facet f at 384n + f*4n, stride 4, contiguous
+```
+
+Still 512 bytes per row; still one buffer; still the same resource kind —
+every mask, hop and count symbol accepts the handle unchanged and must
+answer identically (pinned by the cross-layout equivalence tests, including
+the 10 → 19 → 29 hop regression on BOTH layouts). What changes is only that
+every single-field sweep becomes CONTIGUOUS, which is what the mask
+algebra's cost model wants: measured through this ABI, the hop runs
+**3.3–4.8×** faster than AoS at every frontier arm (65 536 rows, all 32
+facets, equivalence asserted before timing).
+
+**The lane table is how consumers survive the change.** Minor 10 grows it
+from 33 to 97 lanes — `1 + f` classid (as before), `33 + f` payload-lo64
+(`U64`), `65 + f` payload-hi32 (`U32`) — and the descriptors carry the
+layout's own offsets and strides (AoS: stride 512; facet-major: stride 4/8,
+contiguous). A consumer that reads through descriptors is layout-blind by
+construction; the Java facade now holds NO spelling of the row geometry at
+all (disable-verified: hard-coding stride 512 in its accessors fails the
+columnar store at the first row where the layouts' addresses diverge, and
+only there).
+
+**What refuses, and why that is honest.** The register-sweep family —
+`lgj_reduce_facet_sum` (§14), `lgj_reduce_facet_sum_resolved` (§15),
+`lgj_row_layout_probe` (§16) — reads the 12-byte payload as ONE contiguous
+register. A facet-major store deliberately splits that register into
+per-field regions, so these return `UNSUPPORTED_LAYOUT` (`-18`) rather than
+gathering it back together per row (which would be the serialization this
+ABI exists to forbid) or summing scrambled bytes (which would be worse).
+The gate discriminates by layout: the same calls succeed on AoS, pinned
+two-sided.
+
+**Alignment, stated honestly** (matching §11's own statement): the base
+pointer is `u8`-aligned (`Arc<[u8]>`), and every region base and per-facet
+block offset is a multiple of 64 for any `n_rows` (128, 384 and the block
+factors against `n` all carry the factor; pinned by test). The kernels use
+unaligned loads either way. The carvings' own contract is untouched: every
+`CascadeShape` group is ≤ 4 bytes — half the JEP 401 flattening budget —
+and `512 = 8 × 64` keeps the row stride cache-line-quantised (both pinned
+in `rowstore.rs`, the substrate half of what R4/R10 measured from the
+Valhalla side).

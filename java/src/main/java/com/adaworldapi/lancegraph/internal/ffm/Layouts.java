@@ -290,6 +290,15 @@ public final class Layouts {
     // layout), everywhere else a name. The simd.rs isomorphism (root CLAUDE.md) states the rule:
     // the polyfill layer owns the geometry; the facade only names it.
 
+    /** Lane id of the raw whole-buffer lane (abi.md §11). */
+    public static final int LANE_RAW = 0;
+    /** Facet {@code f}'s classid lane id is {@code LANE_FACET_BASE + f} (abi.md §11). */
+    public static final int LANE_FACET_BASE = 1;
+    /** Facet {@code f}'s payload-low64 lane id is {@code LANE_LO64_BASE + f} (abi.md §18). */
+    public static final int LANE_LO64_BASE = 33;
+    /** Facet {@code f}'s payload-hi32 lane id is {@code LANE_HI32_BASE + f} (abi.md §18). */
+    public static final int LANE_HI32_BASE = 65;
+
     /** Bytes per row — {@link #ROW_LAYOUT}{@code .byteSize()}, not a literal. */
     public static final long ROW_BYTES = ROW_LAYOUT.byteSize();
 

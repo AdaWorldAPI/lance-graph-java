@@ -132,11 +132,19 @@ fn hop_mask_algebra(store: &RowStore, src: &[u64], effective: u32, n_words: usiz
             continue;
         }
         let off = facet as usize * lgj_abi::rowstore::FACET_BYTES as usize;
-        kernels::simd_rowstore_u32_eq_mask(bytes, off, n, EDGE_CLASSID, &mut selected);
+        kernels::simd_rowstore_u32_eq_mask(
+            bytes,
+            off,
+            ROW_BYTES as usize,
+            n,
+            EDGE_CLASSID,
+            &mut selected,
+        );
         kernels::simd_mask_and_assign(&mut selected, src);
         kernels::simd_rowstore_u32_eq_mask(
             bytes,
             off + lgj_abi::rowstore::FACET_PAYLOAD_HI32_OFFSET as usize,
+            ROW_BYTES as usize,
             n,
             0,
             &mut structured,

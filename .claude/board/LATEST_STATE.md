@@ -1,3 +1,42 @@
+## 2026-08-27 — ABI minor 10: the columnar store LANDS, and Java is proven layout-blind
+
+The R2 that #44 measured as a lab arm is now the substrate change R11
+predicted it would be: **an additive constructor plus lane descriptors.**
+
+- **`lgj_rowstore_open_columnar`** — facet-major over the `(row × facet)`
+  plane: classid / lo64 / hi32 regions, each 32 contiguous per-facet blocks;
+  same 512n bytes, same generator draws, same logical content (pinned:
+  `layouts_hold_identical_logical_content`, with an anti-vacuity guard that
+  the BYTES differ). A layout is a schema, not a resource kind — every
+  mask/hop/count symbol takes the handle unchanged.
+- **Measured through the ABI** (65 536 rows, all 32 facets, equivalence
+  asserted before timing): hop **4.8× / 4.6× / 3.3×** over AoS at the
+  classid-frontier / 2-hop-frontier / full-population arms. The lab's fused
+  single-plane pass has a further ~10× in it — named as the next rung.
+- **The lane table is the mechanism** (33 → 97): payload lo64/hi32 lanes
+  join classid, every descriptor carrying its layout's own offset+stride.
+  Java's per-row accessors now read ONLY through served descriptors —
+  `rowOffset` and the facade's last geometry constants are DELETED — and the
+  disable-run proves it two-sided: stride hard-coded to 512 fails the
+  columnar store at row 1 facet 0 (the first address divergence) while AoS
+  stays green. E3 is now structural on both sides of the membrane.
+- **Honest refusal:** the register-sweep family (`facetSumAs`/`facetSum`/
+  layout probe) returns the new `UNSUPPORTED_LAYOUT` (-18) on facet-major —
+  the 12-byte register is deliberately split there, and gathering it back
+  per row would be the serialization this repo just spent a day removing.
+  Pinned two-sided; AoS unaffected.
+- **The operator's stated facts, pinned as tests, not trusted:** every
+  carving group (6×2 / 4×3 / 3×4) is ≤ 4 bytes — half the JEP 401
+  flattening budget R4/R10 measured from the Valhalla side — and 512 plus
+  every columnar region/block offset is 64-aligned for any n
+  (`carving_groups_fit_the_flattening_budget_and_the_layout_is_64_aligned`).
+- Gates: Rust **138/138** both feature configs, clippy `-D warnings` + fmt;
+  Java **314 core** (ColumnarStoreTest 10 new) **+ 143 consumer**; compat
+  proven BOTH directions against a real minor-9 library built from the
+  previous commit (minor-10 gate names the minor, never a missing symbol);
+  runtime-confirmed `abi 0.10`. `docs/abi.md` §18, symbol count 26,
+  status −18.
+
 ## 2026-08-27 — the simd.rs isomorphism pinned as the ENFORCEMENT LAYER; J2 closed
 
 - **Doctrine pinned** (root `CLAUDE.md`, rules E1–E6; board entry

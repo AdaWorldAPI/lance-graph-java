@@ -457,6 +457,16 @@ public final class Downcalls {
         private Minor9() {}
     }
 
+    /** ABI minor 10 symbols. Lazy per the minor-2..9 rule. */
+    private static final class Minor10 {
+        static final MethodHandle ROWSTORE_OPEN_COLUMNAR = mh("lgj_rowstore_open_columnar",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private Minor10() {}
+    }
+
     /**
      * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
      *
@@ -507,6 +517,23 @@ public final class Downcalls {
             throw wrap("lgj_row_layout_probe", t);
         }
         Status.check("lgj_row_layout_probe", st);
+    }
+
+    /**
+     * Open a facet-major COLUMNAR row store (abi.md §18, minor 10) — same logical content as the
+     * AoS constructors, every single-field sweep contiguous. One crossing.
+     */
+    public static void rowstoreOpenColumnar(long nRows, long seed, int edgeClassid,
+            long edgeGateMask, int edgeRadius, MemorySegment outResource) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor10.ROWSTORE_OPEN_COLUMNAR.invokeExact(
+                    nRows, seed, edgeClassid, edgeGateMask, edgeRadius, outResource);
+        } catch (Throwable t) {
+            throw wrap("lgj_rowstore_open_columnar", t);
+        }
+        Status.check("lgj_rowstore_open_columnar", st);
     }
 
     /**

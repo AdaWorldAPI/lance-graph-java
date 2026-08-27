@@ -69,7 +69,7 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// require only the base 104-byte prefix rather than the full layout — without
 /// that, every future manifest field would be a hard incompatibility with every
 /// older artifact.
-pub const LGJ_ABI_MINOR: u32 = 9;
+pub const LGJ_ABI_MINOR: u32 = 10;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -153,10 +153,21 @@ pub const LGJ_ERR_SUM_OVERFLOW: i32 = -16;
 /// ABI minor 6.
 pub const LGJ_ERR_UNRESOLVED_CARVING: i32 = -17;
 
+/// The operation needs a byte arrangement this store's [`RowLayout`] does not
+/// provide — today: the 12-byte-register sweeps (`lgj_reduce_facet_sum`,
+/// `lgj_reduce_facet_sum_resolved`) and the whole-row `lgj_row_layout_probe`
+/// on a FACET-MAJOR store, whose payload register is deliberately split into
+/// per-field regions. A DEFERRAL stated as a status, never a silent wrong
+/// answer: the caller learns the layout is the reason, and the register-sweep
+/// family stays honest about being row-major operations. ABI minor 10.
+///
+/// [`RowLayout`]: crate::rowstore::RowLayout
+pub const LGJ_ERR_UNSUPPORTED_LAYOUT: i32 = -18;
+
 /// A panic was caught at the membrane and converted to a status (§9).
 ///
 /// Not in `abi.md`'s table, and deliberately *outside* the allocated
-/// `-1..=-17` block so it can never be confused with a specified condition.
+/// `-1..=-18` block so it can never be confused with a specified condition.
 /// A caller seeing this has found a bug in this crate; it is reported rather
 /// than allowed to unwind into JVM frames, which would be UB.
 pub const LGJ_ERR_PANIC: i32 = -99;

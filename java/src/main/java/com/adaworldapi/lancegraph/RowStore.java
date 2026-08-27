@@ -90,6 +90,28 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new RowStore(h, Engine.rowCount(h));
     }
 
+    /**
+     * Open a facet-major COLUMNAR store (docs/abi.md §18; ABI minor &ge; 10): the SAME logical
+     * content as {@link #openWithEdges} — same generator, same draws, same pinned hop counts —
+     * arranged so every single-field native sweep is contiguous. Java cannot tell the layouts
+     * apart except by speed: every read on this class goes through the lane descriptors the
+     * membrane serves, never through hand-computed offsets, so the answers are layout-blind by
+     * construction (root CLAUDE.md, E3).
+     */
+    public static RowStore openColumnar(long nRows, long seed, int edgeClassid,
+                                        long edgeGateMask, int edgeRadius) {
+        if (nRows < 0) {
+            throw new IllegalArgumentException("nRows must be >= 0, was " + nRows);
+        }
+        long h = Engine.openRowStoreColumnar(nRows, seed, edgeClassid, edgeGateMask, edgeRadius);
+        return new RowStore(h, Engine.rowCount(h));
+    }
+
+    /** {@link #openColumnar} with no structured edges (edge classid outside the 0..16 range). */
+    public static RowStore openColumnar(long nRows, long seed) {
+        return openColumnar(nRows, seed, 16, 0x0L, 1);
+    }
+
     /** How many rows this resource holds. */
     @Override
     public long rowCount() {
@@ -325,46 +347,37 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new Mask(this, dst);
     }
 
-    // The row geometry, by NAME — the membrane's layout (Layouts.ROW_LAYOUT /
-    // ROW_FACET) is the single source; these are not literals and cannot drift
-    // from what SELF_CHECK proves. See the simd.rs isomorphism, root CLAUDE.md:
-    // the facade names the geometry, the polyfill owns it.
-    private static final long ROW_BYTES = Layouts.ROW_BYTES;
-    private static final long FACET_BYTES = Layouts.FACET_BYTES;
 
     /**
-     * The raw lane-0 window (docs/abi.md §11), resolved once via {@code lgj_lane_describe} (ABI
-     * minor &ge; 1 — already required by every {@code RowStore}) and cached: this is a
-     * <strong>lifecycle</strong> crossing, per abi.md §6, not a bulk one, and every read through
-     * {@link #classidAt}/{@link #payloadLow64At}/{@link #payloadHi32At} afterward is an
-     * in-process segment read with no further crossing at all — exports.rs's own doctrine, applied:
-     * "if Java wants one row it reads the MemorySegment in-process, with no crossing at all."
+     * Lazily-resolved lane windows, keyed by ABI lane id (docs/abi.md §11/§18) — the SERVED
+     * geometry. Each resolve is one lifecycle crossing ({@code lgj_lane_describe}); every read
+     * after it is an in-process segment access at {@code row * strideBytes}, which is correct
+     * under EITHER layout because the stride comes from the descriptor, never from Java. This is
+     * root CLAUDE.md E3 carried to its end: after minor 10 no Java code computes a row-store
+     * offset from a constant — the membrane answers, Java reads.
      */
-    private MemorySegment rawLane;
+    private final Engine.LaneWindow[] lanes = new Engine.LaneWindow[3 * FacetId.COUNT + 1];
 
-    private MemorySegment rawLane() {
+    private Engine.LaneWindow lane(int laneId) {
         requireOpen("row read");
-        if (rawLane == null) {
-            rawLane = Engine.describeLane(handle, 0).segment();
+        Engine.LaneWindow w = lanes[laneId];
+        if (w == null) {
+            w = Engine.describeLane(handle, laneId);
+            lanes[laneId] = w;
         }
-        return rawLane;
+        return w;
     }
 
-    private long rowOffset(long row, FacetId facet) {
-        // No requireOpen() here -- rawLane() (evaluated first, as the receiver, in every one of
-        // this method's three callers) already owns that check. Pure arithmetic, touches nothing,
-        // needs no guard of its own; duplicating it here would be a second lock on a door only one
-        // key opens.
-        java.util.Objects.requireNonNull(facet, "facet");
+    private long checkedRow(long row) {
         if (row < 0 || row >= rowCount) {
             throw new IndexOutOfBoundsException(
                     "row " + row + " is out of range [0, " + rowCount + ")");
         }
-        return row * ROW_BYTES + facet.index() * FACET_BYTES;
+        return row;
     }
 
     /**
-     * The classid at {@code (row, facet)} — a zero-copy, in-process read (see {@link #rawLane()}'s
+     * The classid at {@code (row, facet)} — a zero-copy, in-process read through the SERVED classid lane (see {@code lane(int)}'s
      * doc for why this never crosses the membrane after the first call on this store).
      *
      * <p>This is the per-row escape hatch the bulk predicates exist alongside, not a replacement
@@ -379,7 +392,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public int classidAt(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet));
+        java.util.Objects.requireNonNull(facet, "facet");
+        Engine.LaneWindow w = lane(Layouts.LANE_FACET_BASE + facet.index());
+        return w.segment().get(ValueLayout.JAVA_INT_UNALIGNED, checkedRow(row) * w.strideBytes());
     }
 
     /**
@@ -397,9 +412,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public long payloadLow64At(long row, FacetId facet) {
-        return rawLane().get(
-                ValueLayout.JAVA_LONG_UNALIGNED,
-                rowOffset(row, facet) + Layouts.FACET_PAYLOAD_OFFSET);
+        java.util.Objects.requireNonNull(facet, "facet");
+        Engine.LaneWindow w = lane(Layouts.LANE_LO64_BASE + facet.index());
+        return w.segment().get(ValueLayout.JAVA_LONG_UNALIGNED, checkedRow(row) * w.strideBytes());
     }
 
     /**
@@ -415,7 +430,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public int payloadHi32At(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet) + Layouts.FACET_PAYLOAD_HI32_OFFSET);
+        java.util.Objects.requireNonNull(facet, "facet");
+        Engine.LaneWindow w = lane(Layouts.LANE_HI32_BASE + facet.index());
+        return w.segment().get(ValueLayout.JAVA_INT_UNALIGNED, checkedRow(row) * w.strideBytes());
     }
 
     /**
