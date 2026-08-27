@@ -1522,13 +1522,39 @@ fn resolve_rowstore_and_hop_masks(
 /// `n_rows` as a `u64` BEFORE any `as usize` cast, so an out-of-range
 /// `u64` target can never reach an indexing operation.
 ///
-/// **Kernel composition.** The classid-match sub-step for each
-/// participating facet routes through the EXISTING sanctioned primitive
-/// ([`kernels::simd_rowstore_classid_mask`], the same kernel
-/// [`lgj_op_eq_classid`] uses) into a scratch word buffer that is REUSED
-/// across every participating facet, never reallocated per facet. Only
-/// the resulting set-bit walk + payload decode + scatter is scalar —
-/// there is no `ndarray::simd` primitive for gather-decode-scatter.
+/// **Shape: gather, not sweep.** The hop reads ONLY the rows `src`
+/// names. For each such row it walks its participating facets in place
+/// out of that row's own 512 bytes — classid compare, payload decode and
+/// scatter together, one row's cache lines at a time.
+///
+/// It did not always. Two earlier shapes swept the WHOLE population and
+/// then intersected with `src`: first one full-width
+/// `simd_rowstore_classid_mask` pass PER FACET (32 passes), then one
+/// `simd_rowstore_facet_match` pass answering all 32 at once. Both were
+/// replaced on measurement, not taste
+/// (`ISS-LGJ-HOP-SWEEPS-FULL-POPULATION`).
+///
+/// The crossover a sweep would need in order to win does not exist.
+/// `examples/hop_gather_vs_sweep.rs` measured both shapes over four
+/// populations (1 024 … 262 144) × twelve frontier densities, asserting
+/// byte-identical output at every point: gather wins EVERY configuration,
+/// by 2 612× at the sparsest and still **1.7×** at 100 % density. The
+/// mechanism is why it holds even when every row is in the frontier — a
+/// sweep MATERIALISES an `n`-element per-row intermediate that each row
+/// reads exactly once, so the cost is never amortised, while the gather
+/// computes the same answer inline. A sweep is strictly more work at
+/// every density, not merely more work at sparse ones.
+///
+/// Consequence worth stating plainly: this scalar gather beats a
+/// vectorised `ndarray::simd` sweep. The win is in NOT DOING THE WORK,
+/// not in the vector width — so no SIMD primitive is called here, and
+/// none is missing. (`simd_rowstore_facet_match` remains the kernel
+/// behind [`lgj_row_facet_match`]; it is not orphaned.)
+///
+/// The one shape that could still favour a precomputed mask is REUSE —
+/// memoising the per-row answer across many hops on the same
+/// `(store, classid)`. That is a caching design with its own
+/// invalidation questions, and is deliberately not this function's.
 ///
 /// `docs/abi.md` §13 is the full normative statement.
 #[no_mangle]
@@ -1554,10 +1580,14 @@ pub extern "C" fn lgj_hop(
             None => return LGJ_ERR_WRONG_RESOURCE_KIND,
         };
         let n_rows = store_entry.n_rows;
-        let n = match usize::try_from(n_rows) {
-            Ok(n) => n,
-            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
-        };
+        // The gather never materialises an `n`-element buffer, so `n` itself
+        // is no longer needed — but the OVERFLOW GUARD still is: row indices
+        // are cast to `usize` below, and a store whose row count does not fit
+        // must be refused here rather than wrapping at the cast. Kept as an
+        // explicit check rather than an `_n` binding so the intent survives.
+        if usize::try_from(n_rows).is_err() {
+            return LGJ_ERR_LENGTH_OVERFLOW;
+        }
         let n_words = mask_words_for(n_rows) as usize;
 
         // Effective participation (spec §3.1/§3.4): the caller's facet_mask
@@ -1583,32 +1613,24 @@ pub extern "C" fn lgj_hop(
         let mut out = vec![0u64; n_words];
         let bytes = rowstore.as_bytes();
 
-        // ONE pass over the store answering ALL 32 facets, instead of one
-        // full-width sweep per facet.
+        // GATHER: touch only the rows `src` names.
         //
-        // The previous shape looped `for facet in 0..32 { sweep(all n rows) }`,
-        // which re-read the entire store 32 times to look at 4 bytes of each
-        // 512-byte row per pass. Measured by bench Component G
-        // (ISS-LGJ-HOP-SWEEPS-FULL-POPULATION): cost FLAT in frontier density
-        // and ~linear in population — a hop paying for the population it
-        // ignores rather than the frontier it starts from. The arithmetic says
-        // why: 32 × 65_536 strided compares is ~2M operations, nowhere near the
-        // 24 ms observed, but 32 passes over a 33 MB store is ~1 GB of memory
-        // traffic. The loop ORDER was the cost, not the row count.
+        // The previous shape swept the whole population into an
+        // `n`-element `facet_bits` buffer and then intersected with `src`.
+        // Measured by `examples/hop_gather_vs_sweep.rs` across four
+        // populations x twelve densities, with byte-identical output
+        // asserted at every point: the gather wins EVERY configuration --
+        // 2612x at 0.01% density and still 1.7x at 100%.
         //
-        // `simd_rowstore_facet_match` already answers "which facets of this row
-        // carry class X" for every row in a single MultiLaneColumn pass, one
-        // `U32x16::eq_bitmask` per 64-byte chunk. Using it here is strictly
-        // less work and introduces no new kernel — it is the same sanctioned
-        // ndarray::simd surface (abi.md §8), just consumed the right way round.
-        let mut facet_bits = vec![0u32; n];
-        kernels::simd_rowstore_facet_match(&rowstore.bytes_arc(), n, edge_classid, &mut facet_bits);
-
-        // Decode + scatter, now driven by the FRONTIER rather than by the
-        // population: walk src's set rows, and for each take only the facets
-        // that both matched and participate. This half has no ndarray
-        // primitive (spec §3.4 / council S2-2) and stays scalar; the compare
-        // above already ran through the sanctioned SIMD kernel.
+        // No crossover, so no threshold and no dispatch. The reason it
+        // holds even at full density is that the sweep materialises a
+        // per-row intermediate each row reads exactly once: it does
+        // everything this loop does, PLUS allocate, zero, write and re-read
+        // `n` u32s. Strictly more work everywhere.
+        //
+        // This loop is scalar and beats the vectorised sweep. The win is in
+        // not doing the work, not in the vector width -- see the doc
+        // comment above for why no `ndarray::simd` primitive is missing.
         let effective_facets = effective as u32;
         for (w, &sw) in src_snapshot.iter().enumerate() {
             let mut bits = sw;
@@ -1617,19 +1639,22 @@ pub extern "C" fn lgj_hop(
                 bits &= bits - 1;
                 let row = (w as u64) * ROWS_PER_WORD + bit as u64;
                 // Defensive: a conformant mask's tail is always zero, so this
-                // is unreachable for a well-formed src_mask — but guards
+                // is unreachable for a well-formed src_mask -- but guards
                 // against a deliberately corrupted snapshot rather than
                 // letting the byte-offset math below run past the buffer.
                 if row >= n_rows {
                     continue;
                 }
-                let mut fb = facet_bits[row as usize] & effective_facets;
-                while fb != 0 {
-                    let facet = fb.trailing_zeros();
-                    fb &= fb - 1;
-                    let base = (row * crate::rowstore::ROW_BYTES
-                        + u64::from(facet) * crate::rowstore::FACET_BYTES)
-                        as usize;
+                let row_base = (row * crate::rowstore::ROW_BYTES) as usize;
+                for facet in 0..crate::rowstore::ROW_FACETS {
+                    if (effective_facets >> facet) & 1 == 0 {
+                        continue;
+                    }
+                    let base = row_base + facet as usize * crate::rowstore::FACET_BYTES as usize;
+                    let classid = u32::from_le_bytes(bytes[base..base + 4].try_into().unwrap());
+                    if classid != edge_classid {
+                        continue;
+                    }
                     let payload_hi32 =
                         u32::from_le_bytes(bytes[base + 12..base + 16].try_into().unwrap());
                     if payload_hi32 != 0 {

@@ -339,6 +339,64 @@ Behaviour is unchanged, not merely believed to be: lgj-abi 134/134, AllTests
 304, GraphHopTest 66 **including G3 at the identical 384-byte floor**,
 TradesParity 12, TradesAllocation 3, BricksAuth 62.
 
+### FIXED AGAIN — and the crossover I predicted does not exist
+
+The section below was written when the one-pass rewrite still left native 43×
+the best scalar arm, and it named the next rung as a *gather* whose merit
+depended on a **density crossover**: sparse frontiers should favour a gather,
+dense ones the sweep's sequential vectorised access. It said to measure rather
+than assume.
+
+Measured — `native/lgj-abi/examples/hop_gather_vs_sweep.rs`, both shapes over
+**five populations (1 024 … 262 144) × twelve densities**, with byte-identical
+output asserted at every one of the 60 configurations plus an anti-vacuity
+guard against an empty hop:
+
+**There is no crossover. Gather wins all 60.**
+
+| n_rows | 0.01 % | 1 % | 25 % | 100 % |
+|---|---|---|---|---|
+| 1 024 | 361× | 113× | 7.3× | 1.73× |
+| 4 096 | 1 295× | 143× | 5.9× | 1.75× |
+| 65 536 | 2 666× | 117× | 2.5× | **1.78×** |
+| 262 144 | 2 754× | 90× | 2.6× | **1.73×** |
+
+**Why it holds even at 100 % density** — the part I had wrong. A sweep
+MATERIALISES an `n`-element per-row intermediate that each row reads exactly
+once, so its cost is never amortised. At full density the sweep does
+everything the gather does *plus* allocate, zero, write and re-read `n` u32s.
+It is strictly more work at every density, not merely at sparse ones. I
+reasoned about access *pattern* and missed that one shape simply does *more*.
+
+**A scalar gather beats a vectorised `ndarray::simd` sweep.** Same lesson the
+object-model ladder taught in the Component-C/F family: the win is in not
+doing the work, not in the vector width.
+
+### End-to-end through the independent instrument
+
+Re-running Component G with the gather in place, same command:
+
+| `native_hop` | 1 % / 4096 | 1 % / 65536 | 25 % / 4096 | 25 % / 65536 |
+|---|---|---|---|---|
+| original (32 sweeps) | 479.0 µs | 24 798.3 µs | 521.2 µs | 23 633.9 µs |
+| one-pass | 374.7 µs | 7 120.3 µs | 375.8 µs | 8 076.9 µs |
+| **gather** | **1.9 µs** | **34.4 µs** | **61.0 µs** | **3 534.1 µs** |
+| vs original | **246×** | **720×** | 8.5× | 6.7× |
+
+And the ordering the whole component was built to test has inverted — native
+is now **fastest at every configuration**, 2.0×–13× ahead of the best scalar
+arm, where it began this arc slowest at every configuration by 2.6×–165×.
+
+Two honesty notes. The Rust probe and the JMH harness are independent
+instruments and they agree: sweep at 1 %/65 536 measures 6 754–8 118 µs in
+Rust against JMH's 7 120 µs. And this JMH run was noisier than the previous
+one — `classidScan` at 1 %/4096 reports 25.6 ± 61.9 µs, an error bar larger
+than the score — so the *scalar* absolutes here are weak. Native's own errors
+are tight (1.9 ± 0.3, 34.4 ± 8.1), and a 720× change is far outside any noise
+in this container.
+
+Raw probe output: `.claude/board/hop-gather-vs-sweep-crossover.txt`.
+
 ### Still slower than the best scalar arm — the honest remaining gap
 
 At 1 % / 65 536, native is 7 120 µs against `classidScan`'s 164 µs: **43×**.
