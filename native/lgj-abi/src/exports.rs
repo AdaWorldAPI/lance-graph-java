@@ -1613,24 +1613,31 @@ pub extern "C" fn lgj_hop(
         let mut out = vec![0u64; n_words];
         let bytes = rowstore.as_bytes();
 
-        // GATHER: touch only the rows `src` names.
+        // AND OVER MASKS, on a memoised per-facet mask.
         //
-        // The previous shape swept the whole population into an
-        // `n`-element `facet_bits` buffer and then intersected with `src`.
-        // Measured by `examples/hop_gather_vs_sweep.rs` across four
-        // populations x twelve densities, with byte-identical output
-        // asserted at every point: the gather wins EVERY configuration --
-        // 2612x at 0.01% density and still 1.7x at 100%.
+        // `facet_bits(classid)[row]` is a 32-bit MASK of which facets of that
+        // row carry the edge class, so the participation test is one AND --
+        // `facet_bits[row] & effective` -- and not 32 byte compares. Built
+        // once per (store, classid) through the sanctioned `ndarray::simd`
+        // kernel and shared by refcount thereafter; the store is immutable, so
+        // it never needs invalidation.
         //
-        // No crossover, so no threshold and no dispatch. The reason it
-        // holds even at full density is that the sweep materialises a
-        // per-row intermediate each row reads exactly once: it does
-        // everything this loop does, PLUS allocate, zero, write and re-read
-        // `n` u32s. Strictly more work everywhere.
+        // This is the shape the substrate's own currency asks for, and it took
+        // three tries to get here honestly:
         //
-        // This loop is scalar and beats the vectorised sweep. The win is in
-        // not doing the work, not in the vector width -- see the doc
-        // comment above for why no `ndarray::simd` primitive is missing.
+        //   1. 32 full-width classid sweeps per hop -- mask-shaped, but the
+        //      AND was computed over the whole population EVERY hop. 24.8 ms.
+        //   2. gather: skip the mask entirely, read each src row's facets
+        //      inline. 34 us -- 720x faster, and measured to beat a sweep at
+        //      every density (no crossover exists), but it traded the algebra
+        //      away: the classid predicate stopped being a mask at all.
+        //   3. this: keep the mask, pay for it ONCE. The AND is what the
+        //      earlier sweeps were doing; memoising is what makes it cheap.
+        //
+        // Only the scatter stays outside mask algebra, and irreducibly so: the
+        // destination index is DECODED from the row's payload, so it is a
+        // data-dependent scatter, not a set operation.
+        let facet_bits = rowstore.facet_bits(edge_classid);
         let effective_facets = effective as u32;
         for (w, &sw) in src_snapshot.iter().enumerate() {
             let mut bits = sw;
@@ -1645,16 +1652,13 @@ pub extern "C" fn lgj_hop(
                 if row >= n_rows {
                     continue;
                 }
-                let row_base = (row * crate::rowstore::ROW_BYTES) as usize;
-                for facet in 0..crate::rowstore::ROW_FACETS {
-                    if (effective_facets >> facet) & 1 == 0 {
-                        continue;
-                    }
-                    let base = row_base + facet as usize * crate::rowstore::FACET_BYTES as usize;
-                    let classid = u32::from_le_bytes(bytes[base..base + 4].try_into().unwrap());
-                    if classid != edge_classid {
-                        continue;
-                    }
+                let mut fb = facet_bits[row as usize] & effective_facets;
+                while fb != 0 {
+                    let facet = fb.trailing_zeros();
+                    fb &= fb - 1;
+                    let base = (row * crate::rowstore::ROW_BYTES
+                        + u64::from(facet) * crate::rowstore::FACET_BYTES)
+                        as usize;
                     let payload_hi32 =
                         u32::from_le_bytes(bytes[base + 12..base + 16].try_into().unwrap());
                     if payload_hi32 != 0 {

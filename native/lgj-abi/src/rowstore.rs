@@ -90,7 +90,28 @@ pub struct RowStore {
     /// The seed the buffer was generated from.
     pub seed: u64,
     bytes: Arc<[u8]>,
+    /// Memoised per-row facet-match masks, keyed by classid.
+    ///
+    /// `facet_bits(c)[row]` has bit `f` set iff facet `f` of that row carries
+    /// classid `c` — i.e. one 32-bit MASK per row, which is what makes a hop
+    /// an AND rather than a byte compare.
+    ///
+    /// **No invalidation, by construction.** `RowStore` exposes no `&mut self`
+    /// method: the buffer is built once in `generate`/`generate_with_edges`
+    /// and is immutable for the store's whole life. So a cached answer can
+    /// never go stale, and this needs none of the machinery a mutable-store
+    /// cache would.
+    facet_cache: std::sync::RwLock<Vec<(u32, Arc<[u32]>)>>,
 }
+
+/// How many distinct classids keep a memoised mask per store.
+///
+/// Each entry costs `n_rows * 4` bytes (1 MiB at 262 144 rows), so this is
+/// bounded rather than unbounded-by-classid. Four covers the shapes measured
+/// here — a traversal reuses one edge class far more often than it rotates
+/// between many — and eviction is oldest-first rather than LRU because at this
+/// size the bookkeeping would cost more than the miss it avoids.
+const FACET_CACHE_SLOTS: usize = 4;
 
 impl std::fmt::Debug for RowStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -131,6 +152,7 @@ impl RowStore {
             n_rows,
             seed,
             bytes: Arc::from(bytes),
+            facet_cache: std::sync::RwLock::new(Vec::new()),
         })
     }
 
@@ -226,6 +248,7 @@ impl RowStore {
             n_rows,
             seed,
             bytes: Arc::from(bytes),
+            facet_cache: std::sync::RwLock::new(Vec::new()),
         })
     }
 
@@ -233,6 +256,49 @@ impl RowStore {
     /// the store's life (see the module header).
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// The memoised per-row facet-match mask for `classid`, built on first
+    /// ask and shared thereafter.
+    ///
+    /// This is the hop's mask half. `out[row]` is a 32-bit mask of which
+    /// facets of that row carry `classid`, so a hop is
+    /// `facet_bits[row] & participation` — an AND over masks — rather than 32
+    /// byte compares per row. Building it is one `MultiLaneColumn` pass
+    /// through the sanctioned `ndarray::simd` kernel; the point of memoising
+    /// is that a traversal pays that O(n) pass ONCE and every subsequent hop
+    /// on the same `(store, classid)` is the AND alone.
+    ///
+    /// Returns `Arc<[u32]>` deliberately: the caller shares the buffer, never
+    /// copies it. A cache hit is a refcount bump.
+    ///
+    /// Concurrency: the read lock is dropped before any build, so two threads
+    /// racing on a cold classid may both build. That is a wasted pass, never a
+    /// wrong answer — the store is immutable, so both compute the identical
+    /// buffer — and it is preferred to holding a write lock across an O(n)
+    /// SIMD sweep.
+    pub fn facet_bits(&self, classid: u32) -> Arc<[u32]> {
+        if let Ok(g) = self.facet_cache.read() {
+            if let Some((_, bits)) = g.iter().find(|(c, _)| *c == classid) {
+                return Arc::clone(bits);
+            }
+        }
+
+        let n = self.n_rows as usize;
+        let mut built = vec![0u32; n];
+        crate::kernels::simd_rowstore_facet_match(&self.bytes, n, classid, &mut built);
+        let bits: Arc<[u32]> = Arc::from(built);
+
+        if let Ok(mut g) = self.facet_cache.write() {
+            // Another thread may have won the race; keep one entry per classid.
+            if !g.iter().any(|(c, _)| *c == classid) {
+                if g.len() >= FACET_CACHE_SLOTS {
+                    g.remove(0);
+                }
+                g.push((classid, Arc::clone(&bits)));
+            }
+        }
+        bits
     }
 
     /// A cheap shared handle to the same bytes — what the kernels wrap in a

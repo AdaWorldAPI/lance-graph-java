@@ -116,6 +116,38 @@ fn hop_gather(store: &RowStore, src: &[u64], effective: u32, n_words: usize) -> 
     out
 }
 
+/// MEMOISED — the shipped shape. `facet_bits` is one 32-bit MASK per row, so
+/// the participation test is an AND. Passing the mask in lets the caller time
+/// the WARM case; `RowStore::facet_bits` builds and caches it on first ask.
+fn hop_memoised(
+    store: &RowStore,
+    src: &[u64],
+    effective: u32,
+    n_words: usize,
+    facet_bits: &[u32],
+) -> Vec<u64> {
+    let bytes = store.as_bytes();
+    let mut out = vec![0u64; n_words];
+    for (w, &sw) in src.iter().enumerate() {
+        let mut bits = sw;
+        while bits != 0 {
+            let bit = bits.trailing_zeros();
+            bits &= bits - 1;
+            let row = (w as u64) * 64 + u64::from(bit);
+            if row >= store.n_rows {
+                continue;
+            }
+            let mut fb = facet_bits[row as usize] & effective;
+            while fb != 0 {
+                let facet = fb.trailing_zeros();
+                fb &= fb - 1;
+                decode_into(bytes, store.n_rows, row, facet, &mut out);
+            }
+        }
+    }
+    out
+}
+
 /// A frontier of `count` rows spread across the whole population by stride —
 /// deliberately scattered, because a real BFS frontier after one hop is. A
 /// contiguous prefix would hand `gather` an unrepresentatively cache-friendly
@@ -162,8 +194,8 @@ fn main() {
 
         println!("== n_rows = {n_rows} ==");
         println!(
-            "{:>10} {:>9} {:>12} {:>12} {:>10}  faster",
-            "frontier", "density", "sweep_us", "gather_us", "ratio"
+            "{:>10} {:>9} {:>12} {:>12} {:>12} {:>12}",
+            "frontier", "density", "sweep_us", "gather_us", "memo_cold", "memo_warm"
         );
 
         for &pct in &[
@@ -190,11 +222,32 @@ fn main() {
                 std::hint::black_box(hop_gather(&store, &src, effective, n_words));
             });
 
-            let ratio = sweep / gather;
-            let faster = if ratio > 1.0 { "gather" } else { "sweep" };
+            let fb = store.facet_bits(EDGE_CLASSID);
+            let memo_warm = time_us(|| {
+                std::hint::black_box(hop_memoised(&store, &src, effective, n_words, &fb));
+            });
+            // COLD: the O(n) mask build plus one hop -- what the FIRST hop on
+            // a fresh (store, classid) actually pays. Timed by building the
+            // mask from scratch each rep rather than reading the cache.
+            let memo_cold = time_us(|| {
+                let mut built = vec![0u32; store.n_rows as usize];
+                lgj_abi::kernels::simd_rowstore_facet_match(
+                    &store.bytes_arc(),
+                    store.n_rows as usize,
+                    EDGE_CLASSID,
+                    &mut built,
+                );
+                std::hint::black_box(hop_memoised(&store, &src, effective, n_words, &built));
+            });
+            assert_eq!(
+                hop_memoised(&store, &src, effective, n_words, &fb),
+                a,
+                "memoised disagrees at n_rows={n_rows} pct={pct}"
+            );
+
             println!(
-                "{:>10} {:>8.2}% {:>12.1} {:>12.1} {:>9.2}x  {faster}",
-                count, pct, sweep, gather, ratio
+                "{:>10} {:>8.2}% {:>12.1} {:>12.1} {:>12.1} {:>12.1}",
+                count, pct, sweep, gather, memo_cold, memo_warm
             );
         }
         println!();
