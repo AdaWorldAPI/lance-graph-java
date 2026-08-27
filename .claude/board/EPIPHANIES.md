@@ -4,6 +4,51 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-27 — E-ZERO-COPY-MEMORY-SAFETY-AUDITED-CLEAN-1
+
+**Status:** AUDITED CLEAN — pinned as normative doctrine in root
+`CLAUDE.md` (new "Zero-copy + memory safety" section), same commit.
+**Confidence:** High — every item checked against source, not assumed.
+
+Operator issued a 32-point normative zero-copy/memory-safety addendum
+(merge-gating). Ran it mechanically against the tree rather than
+redesigning from taste, per the session's standing method:
+
+- Provenance-bound generation-checked handles: `registry.rs` —
+  `fabricated_handles_are_rejected_not_dereferenced`,
+  `a_reused_slot_invalidates_the_old_handle` (already present).
+- Checked-overflow bounds arithmetic: `checked_mul`/`checked_add`
+  throughout `rowstore.rs`/`kernels.rs` (already present).
+- Alignment/endianness as explicit contract fields (never inferred):
+  `LgjAbiManifest.align_of_*` filled from `core::mem::align_of` on the
+  real types; `Abi.java` rejects non-little endianness before any
+  projection (already present).
+- Manifest-first handshake ordering (magic → major → minor → sizes →
+  endianness, `requireMinor(N)` gating): `Abi.java` (already present).
+- FFM quarantine: zero `java.lang.foreign`/`java.lang.invoke` in any
+  public signature; internal use in `RowStore.java`/`FacetMatchView.java`
+  is private-field-only (verified by grep for `public .*MemorySegment/
+  Arena/ValueLayout/MethodHandle` — zero hits).
+- Named/bounded materialization only: every production `long[]`/
+  `copyOf`/`toArray` traces to `Mask.materializeRows()`, the manifest
+  handshake's own name-string read, or `rowLayoutProbe`'s ≤32-byte
+  diagnostic — no hidden proportional-to-n_rows copy.
+- Independently-derived layout parity (not self-compared):
+  `AbiContractTest`, with a deliberately-impossible-expectation arm
+  proving the check can fail.
+- SIMD backend diagnostic-only: `NativeRuntime.simdBackend()` is a
+  manifest string; zero `if` branches on it in `src/main`.
+- Worker topology substrate-private: zero `workers(`/`workerCount`/
+  `parallelism(`/`threads(` in production Java/ABI/exports (reconfirmed
+  from the prior turn's audit, unchanged).
+
+**Verdict: no gap found, nothing redesigned.** The addendum's own
+mandatory checklist (§32) is answered YES on every line by structure
+already in the tree — this entry and the CLAUDE.md section exist to
+PIN the doctrine as merge-gating going forward, not to fix a defect
+found today. Any future PR touching the membrane is reviewed against
+this section directly.
+
 ## 2026-08-27 — E-EXP-KIA-A2-64K-CONVERGENCE-TAIL-DOMINATES-1
 
 **Status:** MEASURED — in-tree, reproducible, this run banked verbatim at
