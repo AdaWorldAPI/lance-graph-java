@@ -6,20 +6,35 @@
 //! trait, late-bound by design (the operator's RULING CLARIFICATION,
 //! `.claude/plans/mask-native-navigation-correction-v1.md` §1: *"the
 //! contract defines the law; an ontology/cache/provider supplies the
-//! answers"*). `FixtureClassView` below is one such provider — the ONLY
-//! one this crate needs, because the whole SoA row store [`crate::rowstore`]
-//! generates is one deterministic domain: every classid gets the SAME 32
-//! facets (`predicate_iri: "lgj:facet/N"`, `label: "facetN"`), because the
+//! answers"*). `FixtureClassView` below is one such provider — the
+//! DEFAULT one, matching the SoA row store [`crate::rowstore`] generates:
+//! one deterministic domain where every classid gets the SAME 32 facets
+//! (`predicate_iri: "lgj:facet/N"`, `label: "facetN"`), because the
 //! generator itself does not vary a row's *shape* by classid — only its
 //! *content*.
 //!
-//! A real ontology/cache provider (a future, non-fixture `ClassView` impl)
-//! is a NAMED SEAM, not a gap this module tries to fill: see the trait
-//! itself for the shape a real provider would fill in, and
-//! `.claude/plans/mask-native-navigation-correction-v1.md` §4-NG3 for why
-//! it stays out of scope here. A per-resource provider slot on the
-//! registry entry (rather than this module-level singleton) is the seam
-//! for wiring one in.
+//! # The real provider (feature `ogar-classview`)
+//!
+//! `ogar_class_view::OgarClassView` — the ontology-backed provider over
+//! `ogar_vocab` — is bound behind the `ogar-classview` feature, and
+//! [`edge_participation`] then derives from each class's actual field
+//! count instead of the fixture constant. Measured over the vocabulary
+//! (`examples/classview_census.rs`): 98 registered classes, **12 distinct
+//! participation masks** (field counts 0–13), against the fixture's single
+//! `0xFFFF_FFFF` for all 98.
+//!
+//! What is NOT yet closed, stated plainly: the generated store draws its
+//! classids from `0..16` ([`crate::rowstore::ROWSTORE_CLASS_CARDINALITY`])
+//! while every vocabulary classid is `>= 0x0100`, so the two domains are
+//! **disjoint** — a generated store under the real provider hops nothing.
+//! The remaining fixture is the row CONTENT; replacing it with
+//! Lance-loaded SoA rows is what makes the bound provider observable
+//! end-to-end. Pinned, not merely asserted, by
+//! `exports::tests::hop_under_the_real_provider_narrows_by_class`.
+//!
+//! A per-resource provider slot on the registry entry (rather than this
+//! module-level singleton) remains the seam for binding a provider PER
+//! dataset rather than process-wide.
 //!
 //! # The `edge_participation` / `decode_mode` seam (§4-NG6)
 //!
@@ -49,6 +64,8 @@
 use lance_graph_contract::class_view::{ClassId, ClassView, FieldMask};
 use lance_graph_contract::facet::CascadeShape;
 use lance_graph_contract::ontology::{DisplayTemplate, FieldRef};
+#[cfg(feature = "ogar-classview")]
+use ogar_class_view::OgarClassView;
 use std::sync::OnceLock;
 
 /// Facets per row in the fixture row-store domain
@@ -217,10 +234,69 @@ impl FixtureClassView {
 /// non-fixture provider is what would vary this per class.
 pub fn edge_participation(classid: u32) -> FieldMask {
     // The bounds check happens for its own sake (see `class_id_for`'s doc
-    // on why): this fixture's answer does not depend on the result, but a
-    // real provider's would, and the conversion is what it would consult.
-    let _class_id = class_id_for(classid);
-    FieldMask::FULL.intersect(FieldMask(0xFFFF_FFFF))
+    // on why): the fixture's answer does not depend on the result, but the
+    // real provider's does, and the conversion is what it consults.
+    let class_id = class_id_for(classid);
+
+    #[cfg(feature = "ogar-classview")]
+    {
+        // THE REAL PROVIDER. `OgarClassView` walks `ogar_vocab`'s promoted
+        // classes, so `fields(class)` is that class's genuine basis --
+        // attributes AND associations, in source order -- and therefore
+        // VARIES by class where the fixture is constant. This is the seam
+        // §4-NG6 named; binding it is what makes the ClassView half of
+        // `MASK x ClassView -> MASK` discriminate at all.
+        //
+        // A class with `k` fields owns facet positions `0..k`, so positions
+        // at or past `k` cannot carry one of its edges. That is a genuine
+        // per-class narrowing.
+        //
+        // PRECISION, stated honestly: `fields()` is attributes ++
+        // associations flattened, and only the associations are actually
+        // edge-bearing. The trait cannot tell them apart, and
+        // `all_canonical_classes()` -- which can -- is private to
+        // ogar-class-view. So this answer is a SUPERSET of the true edge
+        // set: it may admit an attribute position (which the structured-edge
+        // `hi32 == 0` gate in `lgj_hop` then rejects) but it can never MISS
+        // a real edge. Over-admitting is the safe direction; under-admitting
+        // would silently lose edges. Narrowing to associations-only needs
+        // ogar-class-view to expose that split -- an OGAR-side ask, not a
+        // local workaround.
+        //
+        // Unknown class -> the provider's documented empty-field fallback ->
+        // an EMPTY mask, so the hop finds nothing rather than everything.
+        // That is the opposite of the fixture's answer and is deliberate: an
+        // unregistered classid is not a licence to traverse every facet.
+        let Some(cid) = class_id else {
+            return FieldMask::from(0u64);
+        };
+        let view = ogar_view();
+        let k = <OgarClassView as ClassView>::fields(view, cid).len();
+        let bits: u64 = if k >= 32 {
+            0xFFFF_FFFF
+        } else {
+            (1u64 << k) - 1
+        };
+        FieldMask::from(bits)
+    }
+
+    #[cfg(not(feature = "ogar-classview"))]
+    {
+        let _ = class_id;
+        FieldMask::FULL.intersect(FieldMask(0xFFFF_FFFF))
+    }
+}
+
+/// The process-wide real provider, built once.
+///
+/// `OgarClassView::new()` is pure construction over `ogar_vocab` (no I/O),
+/// and the registry is read-only afterwards -- so a `OnceLock` is the whole
+/// lifecycle. Deliberately NOT rebuilt per call: it walks every promoted
+/// class.
+#[cfg(feature = "ogar-classview")]
+fn ogar_view() -> &'static OgarClassView {
+    static VIEW: std::sync::OnceLock<OgarClassView> = std::sync::OnceLock::new();
+    VIEW.get_or_init(OgarClassView::new)
 }
 
 /// Which structured-edge decode convention `classid`'s edge facets use —
@@ -237,6 +313,127 @@ pub fn edge_participation(classid: u32) -> FieldMask {
 pub fn decode_mode(classid: u32) -> u32 {
     let _class_id = class_id_for(classid);
     0
+}
+
+#[cfg(all(test, feature = "ogar-classview"))]
+mod ogar_provider_tests {
+    use super::{edge_participation, ogar_view};
+    use lance_graph_contract::class_view::{ClassView, FieldMask};
+
+    /// The CONTRAST to `tests::edge_participation_covers_exactly_the_low_32_bits`
+    /// (which is gated OFF under this feature): the real provider NARROWS.
+    ///
+    /// Same inputs, opposite answers. The fixture says classid 0
+    /// participates in all 32 facets; the real provider says an
+    /// unregistered classid participates in NONE — an unknown class is not
+    /// a licence to traverse every facet. And the richest REGISTERED class
+    /// in the vocabulary still participates in strictly fewer than 32,
+    /// because 32 is the store's facet capacity, not any class's field
+    /// count.
+    ///
+    /// DISABLE: return `FieldMask::FULL` from the `ogar-classview` arm of
+    /// `edge_participation` and both halves fail at once.
+    #[test]
+    fn the_real_provider_narrows_rather_than_widens() {
+        let unregistered = edge_participation(0);
+        assert_eq!(
+            unregistered.count(),
+            0,
+            "an unregistered classid must participate in NOTHING, where the \
+             fixture answered all 32"
+        );
+
+        // 0x0103 is the richest class in `ogar_vocab` (13 fields, measured by
+        // `examples/classview_census.rs`). Even the richest is well under the
+        // store's 32-facet capacity.
+        let richest = edge_participation(0x0103);
+        assert_eq!(richest.count(), 13, "0x0103 carries 13 fields");
+        assert!(
+            richest.count() < 32,
+            "even the richest registered class must narrow below the fixture's 32"
+        );
+        // Anti-vacuity: this is the LOW-k prefix, not an arbitrary 13 bits —
+        // so a provider that returned any 13-bit pattern would fail.
+        for bit in 0..13u8 {
+            assert!(richest.has(bit), "bit {bit} must participate");
+        }
+        for bit in 13..64u8 {
+            assert!(!richest.has(bit), "bit {bit} is beyond this class's fields");
+        }
+    }
+
+    /// THE point of binding the real provider: the answer must depend on the
+    /// class. The fixture returns `FULL` for every classid, so this is the
+    /// one assertion that separates a bound provider from a stub.
+    ///
+    /// DISABLE: return `FieldMask::FULL` from the `ogar-classview` arm and
+    /// this fails -- every class collapses to one answer again.
+    #[test]
+    fn the_real_provider_varies_participation_by_class() {
+        let view = ogar_view();
+        let ids: Vec<_> = view.known_class_ids().collect();
+        assert!(
+            ids.len() >= 2,
+            "need >=2 registered classes to show variation, got {}",
+            ids.len()
+        );
+
+        let masks: Vec<FieldMask> = ids
+            .iter()
+            .map(|c| edge_participation(u32::from(*c)))
+            .collect();
+        let distinct: std::collections::BTreeSet<u64> = masks.iter().map(|m| m.0).collect();
+        assert!(
+            distinct.len() >= 2,
+            "the real provider must give >=2 DISTINCT participation masks across {} classes, \
+             got {distinct:?} -- a single answer means the provider is not discriminating",
+            ids.len()
+        );
+
+        // Anti-vacuity: the variation must come from real field counts, not
+        // from some classes being absent. Every mask here is non-empty and
+        // its popcount equals that class's field count (capped at 32).
+        for (c, m) in ids.iter().zip(masks.iter()) {
+            let k = <_ as ClassView>::fields(view, *c).len().min(32);
+            assert_eq!(
+                m.0.count_ones() as usize,
+                k,
+                "class {c}: mask popcount must equal its field count"
+            );
+        }
+    }
+
+    /// An unregistered classid gets an EMPTY mask, not a full one -- the
+    /// opposite of the fixture. A classid the ontology does not know is not
+    /// a licence to traverse all 32 facets.
+    ///
+    /// DISABLE: fall through to `FieldMask::FULL` for the unknown case and
+    /// this fails.
+    #[test]
+    fn an_unregistered_classid_participates_in_nothing() {
+        let view = ogar_view();
+        let known: std::collections::BTreeSet<u16> = view.known_class_ids().collect();
+        // Find a classid the registry does not carry.
+        let unknown = (0u16..=u16::MAX)
+            .find(|c| !known.contains(c))
+            .expect("some classid must be unregistered");
+        assert!(
+            edge_participation(u32::from(unknown)).is_empty(),
+            "unregistered class {unknown} must participate in nothing"
+        );
+
+        // ... and the silence twin: a REGISTERED class does not come back
+        // empty, so the test above is not passing because everything is empty.
+        let a_known = *known.iter().next().expect("at least one known class");
+        assert!(!edge_participation(u32::from(a_known)).is_empty());
+    }
+
+    /// Out-of-range classids are refused before the provider is consulted --
+    /// the `class_id_for` bounds check still governs.
+    #[test]
+    fn an_out_of_range_classid_participates_in_nothing() {
+        assert!(edge_participation(u32::from(u16::MAX) + 1).is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +494,7 @@ mod tests {
     /// pinned here rather than merely asserted in a doc comment (the
     /// falsifiability rule: an unexercised claim is not a behaviour).
     #[test]
+    #[cfg(not(feature = "ogar-classview"))]
     fn edge_participation_is_unaffected_by_the_classid_width_boundary() {
         let in_range = edge_participation(0);
         let at_boundary = edge_participation(u16::MAX as u32);
@@ -307,7 +505,15 @@ mod tests {
         assert_eq!(in_range, max);
     }
 
+    /// The FIXTURE's answer: every classid participates in all 32 facets.
+    ///
+    /// Gated OFF under `ogar-classview` deliberately — the real provider
+    /// MUST fail this, and its failing is the evidence that it
+    /// discriminates. The contrasting fact is pinned by
+    /// `ogar_provider_tests::the_real_provider_narrows_rather_than_widens`,
+    /// which asserts the opposite of each line below on the same inputs.
     #[test]
+    #[cfg(not(feature = "ogar-classview"))]
     fn edge_participation_covers_exactly_the_low_32_bits() {
         let p = edge_participation(0);
         assert_eq!(p.count(), 32);

@@ -1,3 +1,36 @@
+## 2026-08-27 — the REAL ClassView provider is bound, and it measures the fixture's reach
+
+The `ClassView` provider seam (§4-NG3, "a real ontology/cache provider is a
+NAMED SEAM") is no longer only named. `ogar_class_view::OgarClassView` — the
+ontology-backed provider over `ogar_vocab` — is bound behind a new
+`ogar-classview` feature on `native/lgj-abi`, and `edge_participation` derives
+from each class's real field basis instead of the fixture's constant.
+
+- **The provider discriminates, measured.** `examples/classview_census.rs`:
+  **98 registered classes, 12 distinct participation masks** (field counts
+  0–13), against the fixture's single `0xFFFF_FFFF` for all 98. An
+  unregistered classid participates in **nothing** — an unknown class is not
+  a licence to traverse every facet.
+- **The `[patch]` was load-bearing, not cosmetic.** `ogar-class-view` pulls
+  `lance-graph-contract` by git branch; this crate pulls it by path, and
+  cargo does not unify a git SourceId with a path SourceId — without the
+  patch the build carries two `lance-graph-contract` crates and therefore
+  two incompatible `ClassView` traits. Verified: `cargo tree` shows one.
+- **What binding it EXPOSED, and this is the finding.** The generated row
+  store draws classids from `0..16` (`ROWSTORE_CLASS_CARDINALITY`); every
+  vocabulary classid is `>= 0x0100`. The two domains are **disjoint**, so a
+  generated store under the real provider hops nothing. The remaining
+  fixture is the row CONTENT — Lance-loaded SoA rows are what make the bound
+  provider observable end-to-end. Pinned by
+  `hop_under_the_real_provider_narrows_by_class`, not left in prose.
+- **Default is unchanged and proven so.** Feature OFF: 134/134 rust, 447/447
+  Java (304 core + 143 consumer) — the same numbers as before. Feature ON:
+  136/136. Two fixture-semantics tests are gated OFF under the feature and
+  each has a paired ON twin asserting the CONTRASTING fact, so nothing was
+  merely disabled. Five tests red-then-green under the disable
+  (`edge_participation`'s ogar arm returns `FULL`). G11 fence green:
+  `class_view`, `canonical_node`, `ontology`, `facet` only.
+
 ## 2026-08-25 — the Ghidra end of the R2IL arc: seam verified, vocabulary measured
 
 Working the `r2il-machine-semantic-contract-v1` plan (lance-graph, PR #1027,
