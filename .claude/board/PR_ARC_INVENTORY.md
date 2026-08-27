@@ -8,6 +8,59 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #42 — lgj-abi: the REAL OGAR ClassView provider, bound behind a feature (merged 2026-08-27, `507cc93`)
+
+- **Added:** `ogar-classview` feature on `native/lgj-abi` binding
+  `ogar_class_view::OgarClassView` — the ontology-backed provider over
+  `ogar_vocab` — so `edge_participation` derives from each class's real
+  field basis instead of the fixture's `FieldMask::FULL` constant. New
+  `examples/classview_census.rs`. A `[patch."…/lance-graph"]` collapsing
+  the git-vs-path SourceId split (ogar-class-view pulls the contract by
+  git branch, this crate by path; cargo does NOT unify the two, so
+  without it the build carries two `lance-graph-contract` crates and two
+  incompatible `ClassView` traits — the trap recorded in tesseract-rs for
+  `ogar-doc-ir`). Verified: `cargo tree` shows one.
+- **Locked:** participation is a per-class fact, not a constant. Measured
+  over the vocabulary: **98 registered classes, 12 distinct participation
+  masks** (field counts 0-13) against the fixture's single answer for all
+  98. An unregistered classid participates in NOTHING — an unknown class
+  is not a licence to traverse every facet.
+- **Deferred:** the row CONTENT. Binding the provider EXPOSED that the
+  generated store draws classids from `0..16`
+  (`ROWSTORE_CLASS_CARDINALITY`) while every vocabulary classid is
+  `>= 0x0100` — **disjoint**, so a generated store under the real
+  provider hops nothing. Lance-loaded SoA rows are what make the bound
+  provider observable end-to-end. Pinned by
+  `hop_under_the_real_provider_narrows_by_class`, not left in prose.
+  Also deferred: narrowing participation to associations-only (the
+  `fields()` answer flattens attributes + associations, so it is a
+  SUPERSET — safe direction; the split needs an OGAR-side ask).
+- **Docs:** `class_view_provider`'s module docs rewritten (fixture is now
+  the DEFAULT provider, not "the ONLY one this crate needs"); the census
+  numbers and the disjoint-domain gap stated there rather than only in a
+  commit message.
+- **Gates:** default (feature OFF) Rust **134/134** and Java **447/447**
+  (304 core + 143 consumer) — unchanged, the point of defaulting off;
+  feature ON **136/136**; `clippy --all-targets -- -D warnings` + `fmt
+  --check` clean in BOTH configurations; G11 contract-import fence green
+  (`class_view`, `canonical_node`, `ontology`, `facet` only).
+- **Disable-run, red-then-green:** `edge_participation`'s ogar arm
+  returns `FieldMask::FULL` → **5 tests red** (4 provider + the hop),
+  green on restore.
+- **Two gated tests, each with a contrasting twin** — neither deleted nor
+  suppressed. `edge_participation_covers_exactly_the_low_32_bits` (all
+  32) pairs with `the_real_provider_narrows_rather_than_widens`
+  (unregistered → 0; richest class → exactly its low-13 prefix);
+  `hop_matches_the_pinned_rowstore_regression_10_19_29` (19/29) pairs
+  with the hop twin above (empty — two-sided, since the provider still
+  answers 13 for `0x0103`, so emptiness is the store's domain and not a
+  dead provider).
+- **Confidence:** high. Both halves are measured numbers with a
+  red-then-green disable behind them. The finding — that a fixture
+  answering `FULL` for every input cannot be falsified in place, and that
+  binding a real provider is what measures the fixture's reach — is
+  recorded as `E-BINDING-A-REAL-PROVIDER-MEASURES-THE-FIXTURE-1`.
+
 ## PR #32 — ABI minor 8: the register groupings served as DATA (draft, opened 2026-08-25)
 
 - **Added:** `LgjAbiManifest.{carving_count, carvings[8]}` (docs/abi.md

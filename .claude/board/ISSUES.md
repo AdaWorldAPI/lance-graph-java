@@ -1,5 +1,37 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-ARC-INVENTORY-STOPPED-AT-32 (2026-08-27) — OPEN
+
+**Found.** While landing PR #42's own arc entry, per the board README's
+rule (`PR_ARC_INVENTORY.md` — "every PR, at open").
+
+**Measured.** The file's entries run `#1..#20`, then `#32`, then nothing.
+Missing: **#21-#31 and #33-#41** — nineteen PRs with no arc entry. And
+#32's own entry still reads `(draft, opened 2026-08-25)`: it was written
+at open, correctly, and never updated with its merge sha, so the newest
+entry in the file is also stale.
+
+**Why it matters, precisely.** `LATEST_STATE.md` answers *what exists*;
+the arc answers *why it exists*. A future session reading the current file
+would conclude the repo went from minor 8 (#32) straight to a ClassView
+provider (#42), with the whole hop arc — the 32-sweep root-cause, the
+gather rewrite, the measured absence of a crossover, the memoisation and
+its cold regression — absent from the record that exists to carry it.
+
+**Not backfilled here, deliberately.** Reconstructing nineteen entries
+from a later session's memory is the retroactive-hygiene anti-pattern the
+file's own 2026-08-17 header lapse already names, with worse provenance:
+I have first-hand knowledge of #38-#41 only, and inventing Added/Locked/
+Deferred lines for #21-#31 and #33-#37 would produce a record that reads
+authoritative and is partly guessed. The honest move is to log the gap
+with its exact extent and let it be filled from each PR's own diff.
+
+**Next step when picked up.** Walk `git log --merges origin/main` for the
+missing numbers, write each entry from its own diff and PR body (not from
+recall), and update #32's header with its merge sha. One pass, not a
+trickle — a half-filled arc is harder to trust than an empty stretch with
+a dated note explaining it.
+
 ## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — RESOLVED
 
 **Found.** By running bench Component G — the F-PARITY harness — for the
