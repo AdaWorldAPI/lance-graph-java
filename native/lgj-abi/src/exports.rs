@@ -1581,42 +1581,54 @@ pub extern "C" fn lgj_hop(
         }
 
         let mut out = vec![0u64; n_words];
-        // One scratch buffer for the classid-match sub-step, reused across
-        // every participating facet — never allocated per facet.
-        let mut classid_scratch = vec![0u64; n_words];
         let bytes = rowstore.as_bytes();
 
-        for facet in 0..crate::rowstore::ROW_FACETS {
-            if (effective >> facet) & 1 == 0 {
-                continue;
-            }
-            kernels::simd_rowstore_classid_mask(
-                bytes,
-                facet as usize * crate::rowstore::FACET_BYTES as usize,
-                n,
-                edge_classid,
-                &mut classid_scratch,
-            );
-            // Walk the set bits of (src ∩ classid-mask) — decode + scatter
-            // has no ndarray primitive (spec §3.4 / council S2-2), so this
-            // half stays scalar; the compare above already ran through the
-            // sanctioned SIMD kernel.
-            for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()).enumerate() {
-                let mut bits = sw & cw;
-                while bits != 0 {
-                    let bit = bits.trailing_zeros();
-                    bits &= bits - 1;
-                    let row = (w as u64) * ROWS_PER_WORD + bit as u64;
-                    // Defensive: a conformant mask's tail is always zero, so
-                    // this is unreachable for a well-formed src_mask — but
-                    // guards against a deliberately corrupted snapshot
-                    // rather than letting the byte-offset math below run
-                    // past the buffer.
-                    if row >= n_rows {
-                        continue;
-                    }
+        // ONE pass over the store answering ALL 32 facets, instead of one
+        // full-width sweep per facet.
+        //
+        // The previous shape looped `for facet in 0..32 { sweep(all n rows) }`,
+        // which re-read the entire store 32 times to look at 4 bytes of each
+        // 512-byte row per pass. Measured by bench Component G
+        // (ISS-LGJ-HOP-SWEEPS-FULL-POPULATION): cost FLAT in frontier density
+        // and ~linear in population — a hop paying for the population it
+        // ignores rather than the frontier it starts from. The arithmetic says
+        // why: 32 × 65_536 strided compares is ~2M operations, nowhere near the
+        // 24 ms observed, but 32 passes over a 33 MB store is ~1 GB of memory
+        // traffic. The loop ORDER was the cost, not the row count.
+        //
+        // `simd_rowstore_facet_match` already answers "which facets of this row
+        // carry class X" for every row in a single MultiLaneColumn pass, one
+        // `U32x16::eq_bitmask` per 64-byte chunk. Using it here is strictly
+        // less work and introduces no new kernel — it is the same sanctioned
+        // ndarray::simd surface (abi.md §8), just consumed the right way round.
+        let mut facet_bits = vec![0u32; n];
+        kernels::simd_rowstore_facet_match(&rowstore.bytes_arc(), n, edge_classid, &mut facet_bits);
+
+        // Decode + scatter, now driven by the FRONTIER rather than by the
+        // population: walk src's set rows, and for each take only the facets
+        // that both matched and participate. This half has no ndarray
+        // primitive (spec §3.4 / council S2-2) and stays scalar; the compare
+        // above already ran through the sanctioned SIMD kernel.
+        let effective_facets = effective as u32;
+        for (w, &sw) in src_snapshot.iter().enumerate() {
+            let mut bits = sw;
+            while bits != 0 {
+                let bit = bits.trailing_zeros();
+                bits &= bits - 1;
+                let row = (w as u64) * ROWS_PER_WORD + bit as u64;
+                // Defensive: a conformant mask's tail is always zero, so this
+                // is unreachable for a well-formed src_mask — but guards
+                // against a deliberately corrupted snapshot rather than
+                // letting the byte-offset math below run past the buffer.
+                if row >= n_rows {
+                    continue;
+                }
+                let mut fb = facet_bits[row as usize] & effective_facets;
+                while fb != 0 {
+                    let facet = fb.trailing_zeros();
+                    fb &= fb - 1;
                     let base = (row * crate::rowstore::ROW_BYTES
-                        + facet as u64 * crate::rowstore::FACET_BYTES)
+                        + u64::from(facet) * crate::rowstore::FACET_BYTES)
                         as usize;
                     let payload_hi32 =
                         u32::from_le_bytes(bytes[base + 12..base + 16].try_into().unwrap());
