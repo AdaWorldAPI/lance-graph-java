@@ -304,6 +304,7 @@ path while **leaving a second, independent verdict standing beside it**:
 | #57 (9th) | `abi.md`'s "**every** operation returns `PARENT_CLOSED`" | "every **handle-mediated** operation returns `PARENT_CLOSED`" — still false |
 | #58 (10th) | Q4's *conclusion*, made conditional | the *adjacent* sentence, still claiming close-after-cache is out of contract |
 | #60 (11th) | fence 1b, built to catch a missing W1 block | a whole-file scan the block's own deletion could not turn red |
+| #60→#62 (12th) | fence 1c, disable-tested against DELETION | a REWRITE keeping both phrases while gutting what they describe |
 
 **The tenth arrived inside the fix for the eighth's cousin, one hop sideways.**
 Two reviewers made Q4's conclusion conditional; the qualification landed, and
@@ -317,6 +318,32 @@ paragraph rather than the diff hunk.
 implied `requireOpen()` guards nothing in contract — an invitation to delete
 the guard that makes the ordinary case safe. The ninth instance cost a
 quantifier; this one could have cost a check.
+
+**The twelfth broke the same rule the eleventh established, one entry later.**
+Fence 1c required "at each top-level facade call" and "not atomic". I disabled
+it by DELETING the `Mask` bullet, saw it go red, and reported the requirement
+protected — publicly, as "disproven". But deleting the bullet removed the two
+phrases along with the mechanism, so the test proved only that *deletion* is
+caught. CodeRabbit's case was a **rewrite**: keep both phrases, gut what they
+are properties *of*. Measured — a note reading *"Both halves are checked at
+each top-level facade call, and neither is not atomic"* (false about
+`RowStore`, naming no mechanism) passed **38/38**.
+
+**A disable proves the path it walks and no other.** The eleventh instance
+taught that a disable must not be *wider* than the regression; the twelfth adds
+that it must not be *narrower in kind* either. Deletion and rewrite are
+different regressions and a fence can catch one while missing the other.
+
+**And the timing is the uncomfortable part:** the finding was posted **44
+seconds before #60 merged**, so it landed against an already-merged head and I
+merged into a review I had not read. The post-merge comment sweep exists for
+exactly this and it is not enough on its own — the merge itself was premature.
+
+**Found while fixing it: fence 1c never got 1b's normalization.** "generation-
+checked registry" WRAPS in the doctrine, so the new assertion could not have
+matched. The wrapping fix was written for 1b and simply not carried across —
+the identical defect one function over, surfaced only because a later assertion
+happened to need a phrase that wraps.
 
 **The eleventh is the one I had the evidence to catch and did not.** Fence 1b
 was written to fail when the W1 class block is deleted; it scanned the whole
