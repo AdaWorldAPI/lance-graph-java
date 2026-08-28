@@ -52,7 +52,16 @@ public final class AllTests {
                 System.out.println();
                 System.out.println("=== " + name + " ===");
                 Checks shape = new Checks(name);
-                suite.accept(shape);
+                try {
+                    suite.accept(shape);
+                } catch (Throwable t) {
+                    // Same rule as the main loop: one suite blowing up must not silently
+                    // prevent the next from running (CodeRabbit, PR #48).
+                    System.out.println("      FAIL suite threw " + t);
+                    t.printStackTrace(System.out);
+                    shapeCode = 1;
+                    continue;
+                }
                 int code = shape.report();
                 if (shapeCode == 0) {
                     shapeCode = code;

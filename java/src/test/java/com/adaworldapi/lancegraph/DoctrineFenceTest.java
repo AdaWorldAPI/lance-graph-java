@@ -231,19 +231,20 @@ public final class DoctrineFenceTest {
         Map<String, Integer> observed = new TreeMap<>();
         for (Path f : javaFiles) {
             String name = f.getFileName().toString();
-            // Per CODE line, not whole-file text: a javadoc example of `new long[...]` is prose,
-            // not a call site, and must not move a pinned count (CodeRabbit, PR #48).
-            for (String code : codeLines(f)) {
-                for (Map.Entry<String, java.util.regex.Pattern> p
-                        : MATERIALIZATION_PATTERNS.entrySet()) {
-                    int n = 0;
-                    java.util.regex.Matcher m = p.getValue().matcher(code);
-                    while (m.find()) {
-                        n++;
-                    }
-                    if (n > 0) {
-                        observed.merge(name + "|" + p.getKey(), n, Integer::sum);
-                    }
+            // Comment-filtered code, matched as ONE text: filtering per line keeps prose out of
+            // the counts (CodeRabbit round 1), and joining the filtered lines back with \n lets
+            // the \s+ in each pattern span a line break — `new` and `long[4]` on separate lines
+            // is legal Java and must still count (CodeRabbit round 3).
+            String code = String.join("\n", codeLines(f));
+            for (Map.Entry<String, java.util.regex.Pattern> p
+                    : MATERIALIZATION_PATTERNS.entrySet()) {
+                int n = 0;
+                java.util.regex.Matcher m = p.getValue().matcher(code);
+                while (m.find()) {
+                    n++;
+                }
+                if (n > 0) {
+                    observed.merge(name + "|" + p.getKey(), n, Integer::sum);
                 }
             }
         }
@@ -620,11 +621,17 @@ public final class DoctrineFenceTest {
         return sb.toString();
     }
 
+    /**
+     * An unreadable source file must fail the fence LOUDLY, never scan as empty — an
+     * {@code IOException} silently converted to {@code List.of()} would let fence 2 report zero
+     * topology hits without ever scanning {@code abi.rs} (CodeRabbit, PR #48). The unchecked
+     * rethrow surfaces through the suite runner's per-suite catch as a failed suite.
+     */
     private static List<String> readLines(Path f) {
         try {
             return Files.readAllLines(f, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            return List.of();
+            throw new java.io.UncheckedIOException("fence corpus file unreadable: " + f, e);
         }
     }
 }
