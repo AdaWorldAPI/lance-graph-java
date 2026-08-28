@@ -401,7 +401,12 @@ could then yield opposite RowStore ship decisions. Ruled:
      no slower than baseline, so it **cannot** exceed a positive budget:
      that outcome PASSES, recorded as *"cost below the harness's
      resolution"*, **never** as "the probe is free". The distinction
-     matters the next time someone cites the number.
+     matters the next time someone cites the number. **This clause rests
+     on `N > 0`** — its "cannot exceed" is an argument about a *positive*
+     budget, so a zero or negative `N` would make it contradict the
+     `delta_ns < N` gate it is supposed to be consistent with (at
+     `N = 0`, `delta_ns = 0` fails the gate while this clause passes it).
+     The amendment below is therefore constrained to `N > 0`.
    - **CI overlap is a LABEL, never a verdict.** ⊘ Corrects this file's
      own first statement of this rule, which passed *any* run whose two
      arms' 99.9% CIs overlap, on the reasoning that overlap means the
@@ -423,8 +428,10 @@ could then yield opposite RowStore ship decisions. Ruled:
      too weak to say by how much" — the remedy is a better-powered run,
      never a re-interpretation).
 2. **The numeric ns cutoff is recorded by an amendment to THIS file whose
-   commit precedes the first benchmark run**, and the wave's results
-   commit must cite that amendment's sha. No number is invented here
+   commit precedes the first benchmark run, and it MUST be `N > 0`**
+   (strictly — see the non-positive clause above, whose soundness depends
+   on it; an amendment naming `N ≤ 0` is not a valid cutoff and the run
+   is void). The wave's results commit must cite that amendment's sha. No number is invented here
    because none has been measured; what is fixed here is that the number
    is fixed *first*, in the repository, where its ordering is checkable.
    A results commit whose cited amendment does not precede it is not a
@@ -551,4 +558,5 @@ unverified*. No third option.
 | 17 | Major, closure-term hole | `ISS-LGJ-EPOCH-UNCHECKED` could have closed RESOLVED on the Mask half alone while `RowStore`'s cached path stayed boolean-guarded. Closure is now per-half and conditional. |
 | 18 | Minor ×2 | The `u32` generation-wrap qualification restored to both board summaries; the Mask "ships regardless" statement reconciled with Q2. |
 | 19 | Major, form without arithmetic | §5 pre-registered the acceptance *form* but not the statistics, so identical data could still yield opposite decisions. Now defined: arms, score-to-ns/call conversion, signed delta and ratio directions, per-arm CI acceptance, and the non-positive case (passes, recorded as *below the harness's resolution*, never as "free"). |
+| 21 | Low, on #51 | The row-20 fix left the non-positive-delta auto-pass resting on an unstated premise: it argues a measurement "cannot exceed a *positive* budget", but nothing constrained the amendment's `N` to be positive. At `N = 0`, `delta_ns = 0` fails the `delta_ns < N` gate while the auto-pass clause passes it — the rule contradicting itself. §5 now states the dependency and constrains the amendment to `N > 0`. |
 | 20 | Major, post-merge on #49 | The row-19 statistics shipped a rule that auto-passed **any** CI-overlapping run, reasoning that an unresolvable cost cannot exceed the budget. False: 100 ns vs 118 ns with 9% half-widths overlap while `delta_ns = 18`, so an `N = 10 ns` budget ships a probe costing ~2× it. Arm-CI overlap and "delta under N" are different propositions. §5 now evaluates both gates independently of overlap and demotes overlap to a label. Found after #49 merged — see §8b. |
