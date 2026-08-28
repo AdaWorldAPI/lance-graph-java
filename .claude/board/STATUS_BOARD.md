@@ -6,7 +6,7 @@ the membrane / Valhalla cheap addresses / everything else underneath).
 
 | D-id | Deliverable | Status |
 |---|---|---|
-| D-LGJ-MMV-0 | Mechanical fences: materialization-list gate, §E worker-topology fence, SIMD-branch fence — each proven able to fire | Queued |
+| D-LGJ-MMV-0 | Mechanical fences: materialization-list gate, §E worker-topology fence (+ reflective arm 2b), SIMD-branch fence — each proven able to fire | Shipped (PR #48, merged `42fba54`) |
 | D-LGJ-MMV-1a | Resolve `ISS-LGJ-EPOCH-UNCHECKED` by EITHER accepted outcome: (a) epoch re-check wired on the cached-descriptor path, disable-run red-then-green, per-accessor overhead measured on the accessors themselves (not the native benches — they never touch this path); or (b) a falsifier-backed unreachability proof + doctrine downgrade, chosen only on measured cost | Queued |
 | D-LGJ-MMV-1b | Minors 2-4 lazy `Downcalls` holders; `OldAbiCompatTest` minor-1 leg; doctrine "fails cleanly at the call" wording restored by storno | Queued |
 | D-LGJ-MMV-2a | Fused single-plane columnar pass — the lab arm's ~10× claim verified through the real ABI, equivalence before timing | Queued |

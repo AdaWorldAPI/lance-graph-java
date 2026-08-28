@@ -1,4 +1,4 @@
-## 2026-08-28 — mask-membrane-valhalla-integration-v1 (PROPOSED; the layered consolidation)
+## 2026-08-28 — mask-membrane-valhalla-integration-v1 (ACTIVE; the layered consolidation)
 
 Plan: `.claude/plans/mask-membrane-valhalla-integration-v1.md`. The
 synthesis of the PR #44→#46 arc into one wave plan under the operator's
@@ -22,8 +22,9 @@ value-class promotions on measured evidence only; **W4** temporal READ
 binding via the contract's clean vocabulary — the WRITE seam stays
 blocked with GridLake (F5) and deliberately carries no D-id.
 
-**Status: PROPOSED.** D-LGJ-MMV-0 (W0 fences) is the cheapest first
-action; W1.1's Phase-0 council spec is COMMITTED at
+**Status: ACTIVE** (ratified by the PR #47 merge, `9f6e9a2`; W0 shipped
+same day via PR #48, `42fba54` — D-LGJ-MMV-0 Shipped). Next action:
+W1.1 — cast the Phase-0 council per the COMMITTED spec at
 `.claude/plans/epoch-recheck-phase0-v1.md` (frozen decisions, both
 accepted resolutions, pre-registered gates, five per-savant question
 sets).

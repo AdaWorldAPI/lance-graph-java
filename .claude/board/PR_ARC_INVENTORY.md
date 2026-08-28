@@ -42,7 +42,19 @@
   the plan itself is PROPOSED→ratified-by-merge; wave outcomes are
   gated, not promised.
 
-## PR #48 — W0: the three doctrine fences, each proven able to fire (opened 2026-08-28)
+## PR #48 — W0: the three doctrine fences, each proven able to fire (merged 2026-08-28, `42fba54` — 7 commits, head `fc281e0`)
+
+- **Merge-time addendum (rounds 4-5, post-entry):** the review cycle ran
+  FIVE bot rounds total; beyond what the entry below records, the last
+  two added: the loud unreadable-file rule (`readLines` rethrows —
+  an unreadable `abi.rs` can no longer scan as empty), split-line
+  materialization matching (filtered lines re-joined so `\s+` spans
+  breaks), the resilient no-native suite loop, `for(`/`while(` branch
+  markers, loud partial reflective discovery, and the Rust raw-string
+  TRIPWIRE (which corrected this PR's own "fails loud" doc claim — a
+  raw string mis-lexed SILENTLY; the opener now trips fence 2 outright
+  rather than growing a Rust lexer for two files with zero raw strings).
+  Every fix plant- or suite-verified; final suite 331/331.
 
 - **Added:** `DoctrineFenceTest` (17 checks) — the plan
   `mask-membrane-valhalla-integration-v1.md` W0 / D-LGJ-MMV-0 deliverable,
