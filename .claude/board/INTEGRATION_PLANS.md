@@ -1,3 +1,34 @@
+## 2026-08-28 — epoch-recheck v1→v2→v3 (RATIFIED; the W1.1 5+3 council)
+
+Plans: `.claude/plans/epoch-recheck-phase0-v1.md` (spec),
+`epoch-recheck-v2-draft.md` (Phase-2 consolidation, SUPERSEDED but
+retained — the reviewers' findings are only auditable against the draft
+they attacked), `epoch-recheck-v3.md` (**RATIFIED, implement from this**).
+
+Full 5+3 run for `mask-membrane-valhalla-integration-v1` W1.1: five
+savants (handle safety, ABI membrane, zero-copy, Java surface,
+measurement), consolidated, then three reviewers (overclaim, falsifier,
+dilution/collapse) on the draft only.
+
+**The headline reframes the deliverable.** An epoch MISMATCH is
+unreachable through `lgj_resource_info` **short of a `u32` generation
+wrap on one slot** — `close` bumps the slot generation, `insert` hands the
+advanced generation out, and the export opens with `resolve` — so a stale
+handle throws rather than returning a mismatched epoch. What ships is a **native generation-checked liveness
+probe replacing a Java boolean**, not "epoch checking". Verified
+independently three times.
+
+Also: the spec's own pre-registered disable-run was unconstructible and
+its nearest approximation vacuous (replaced); the fallback ABI export is
+struck (no new symbol needed, and one that skipped `resolve` would pass
+the disable-run while losing the guarantee); the merged plan's "banked
+benches are structurally blind" claim is FALSE for bench G (storno in the
+same PR); and `Engine.epoch`'s javadoc claims a re-check with zero callers.
+
+**Status: RATIFIED.** Implementation is D-LGJ-MMV-1a's four rows on
+`STATUS_BOARD.md`; the `Mask` half ships regardless, the `RowStore` half
+is gated on a per-accessor benchmark that does not yet exist.
+
 ## 2026-08-28 — mask-membrane-valhalla-integration-v1 (ACTIVE; the layered consolidation)
 
 Plan: `.claude/plans/mask-membrane-valhalla-integration-v1.md`. The

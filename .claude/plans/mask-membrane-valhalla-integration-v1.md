@@ -168,7 +168,15 @@ discipline remain the last layer.
   (PR #47): the banked hop/columnar benchmarks run entirely through
   native operations and never touch the cached-descriptor path, so they
   are structurally blind to per-access epoch overhead and would stay
-  unchanged even if every accessor gained a native crossing. A
+  unchanged even if every accessor gained a native crossing.
+  **⊘ STORNO (2026-08-28, W1.1 council, `epoch-recheck-v3.md` §1 C3):
+  this claim is FALSE as a universal.** It holds for benches A–F but NOT
+  for `G_HopExecutionBoundary`, whose `java_scalar_*` arms call
+  `payloadHi32At`/`payloadLow64At`/`classidAt` directly (`:212,215,231,
+  234,237`), banked at `rows=65536`. G is still NOT a valid baseline for
+  §5's gate (it measures a whole hop boundary in `us/op`; the gate is
+  `ns/accessor-call`), but a future regression in G must not be dismissed
+  as structurally unrelated to this path. A
   before/after micro-measure of the actual accessors is the gate; the
   banked native benches remain only a regression backstop for the
   operations they do exercise.

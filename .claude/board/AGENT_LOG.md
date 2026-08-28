@@ -1,3 +1,48 @@
+## 2026-08-28 — W1.1 epoch-recheck 5+3 council (8 agents, orchestrator-consolidated)
+
+**D-ids:** D-LGJ-MMV-1a (council half). **Output:**
+`.claude/plans/epoch-recheck-v3.md` (RATIFIED), `epoch-recheck-v2-draft.md`
+(SUPERSEDED, retained for auditability). One writer: this log and every
+board file below were written by the orchestrating main thread; no
+sub-agent wrote any file (all eight were briefed READ-ONLY and returned
+findings as their final message).
+
+**Phase 1 — five savants**, one per spec §6 lens, cast in parallel:
+handle safety, ABI membrane, zero-copy law, Java surface, measurement.
+Yield: the headline unreachability finding (two lenses independently),
+the ABI fallback struck, the bench-blindness claim falsified, the
+`Mask.words()` guard gap.
+
+**Phase 2 — consolidation** before any reviewer existed, per the
+anti-mush sequencing. Two savants conflicted on the same lines
+(`Mask.words()` guarded or not); the orchestrator settled it against
+source and produced a finding neither had: the two cached sites are
+structurally asymmetric (`RowStore.lane()` guards per accessor call;
+`Mask.words()` has no guard and one caller that guards once per scan).
+
+**Phase 3 — three reviewers on the draft only**: overclaim, falsifier,
+dilution/collapse. Yield: **one BLOCKING defect** (the draft's own
+replacement falsifier rested on a use-after-free, so its "deterministic"
+RED was UB — the exact evidence class the draft disqualified arm (i) for
+three paragraphs later), **one open question closed** (per-access
+placement is forced by falsifiability, not chosen on cost), an invented
+closure status caught, two normative corrections rescued from under a
+"CLEAN" heading, a wrongly-routed falsifier corrected (the test tree is
+the same package — no bench bridge needed), and five factual errors.
+
+**Phase 4 — v3**, with an audit ledger (§8) naming every Phase-3 change.
+
+**Outcome:** council COMPLETE, implementation queued as four STATUS_BOARD
+rows. The `Mask` half ships regardless; the `RowStore` half is gated on a
+per-accessor benchmark that does not exist yet.
+
+**What the fan-out cost, honestly:** eight agents to change one wave's
+deliverable from "wire the epoch check" to "ship a liveness probe, in two
+halves, one of which may not ship at all". The reviewers earned their
+keep: the blocking finding was against the orchestrator's own draft, and
+the draft would otherwise have shipped a mandatory falsifier that cannot
+reliably report failure.
+
 ## 2026-08-25 — ABI minors 6→8 + board hygiene (main thread, no fan-out)
 
 Straight-line main-thread work; no subagents spawned, so no tag-files to
