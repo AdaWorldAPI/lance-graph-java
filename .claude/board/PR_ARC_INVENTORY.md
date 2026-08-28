@@ -40,11 +40,16 @@
   the right thing, because **javadoc wraps** and a phrase split across lines
   matches no literal. The region is normalized or the fence enforces where an
   author pressed return.
-- **A residual review claim, tested rather than accepted.** The final review's
-  risk line said the fence "does not yet fully protect the `Mask` re-validation
-  requirement." Checked by deleting that bullet: **fence 1c fires on two arms.**
-  The concern does not hold, and it is recorded as disproven rather than
-  quietly ignored.
+- **A residual review claim, tested rather than accepted — and my test was too
+  narrow.** ⊘ This bullet first read: *"Checked by deleting that bullet: fence
+  1c fires on two arms. The concern does not hold."* **Struck.** Deleting the
+  bullet removed the two required phrases along with the mechanism, so it
+  proved only that DELETION is caught. The real case is a **rewrite** that
+  keeps both phrases and guts what they describe — measured, that passes 38/38.
+  CodeRabbit filed it **44 seconds before this PR merged**, so it landed
+  against an already-merged head; fixed in #62. **The claim held, and I
+  reported it disproven on a test that could not have seen it.** Instance
+  twelve.
 - **Locked:** W1 and W2 discharged, **scoped to those two** — the plan's status
   note explicitly does not claim W3-W6. Fence 1c discharges W2's own
   *"this precedent must be built, not merely cited."*
