@@ -42,8 +42,29 @@
   the plan itself is PROPOSED→ratified-by-merge; wave outcomes are
   gated, not promised.
 
-## PR #49 — W1.1: the epoch-recheck 5+3 council, ratified (v3) (opened 2026-08-28)
+## PR #49 — W1.1: the epoch-recheck 5+3 council, ratified (v3) (merged 2026-08-28, `0efb757` — 7 commits, head `490b71d`)
 
+- **Merge-time addendum (post-entry):** the external round landed **8
+  findings — Codex 2 (one P1, one P2), CodeRabbit 6** — every one
+  verified against source before it was fixed, and every one fixed
+  (`d2393fa`..`490b71d`). The P1 is the one that changed a deliverable
+  rather than prose: asserting only that the accessor *throws* stopped
+  the test *looking* at freed bytes but did not stop it *reading* them,
+  so W5 now mandates invalidate-without-free via a test-only ABI export
+  (queued as its own row) **and** populate-the-lane-cache-first ordering
+  — neither reviewer's literal fix works alone (CodeRabbit's ends in
+  `Engine.close`, the very UAF Codex flagged; Codex's alone leaves the
+  cache unpopulated, so `classidAt` re-resolves and throws on its own,
+  passing with the probe disabled). The P2 forced the benchmark
+  *statistics* to be pre-registered, not just its acceptance form.
+  **Honesty note:** the merge (13:09Z) preceded CodeRabbit's re-review of
+  `490b71d` completing — its last posted finding is 13:01:50Z, i.e. it
+  had reviewed nothing newer than `9a0e058`; and Cursor Bugbot never ran
+  at all on this PR (usage limit). The eight threads are answered by
+  reply but left **unresolved** — thread resolution is GraphQL-only and
+  the account-wide secondary limit blocked it (see
+  `.claude/knowledge/github-access-paths.md`: the one operation with no
+  fallback).
 - **Added:** `.claude/plans/epoch-recheck-v3.md` (RATIFIED — implement
   from this) and `epoch-recheck-v2-draft.md` (SUPERSEDED, retained: the
   Phase-3 findings are only auditable against the draft they attacked).
