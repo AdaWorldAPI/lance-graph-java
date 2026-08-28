@@ -130,6 +130,14 @@ restoration in `CLAUDE.md` never happens under (b).
   re-check cannot be brought under 2× the accessor's measured baseline
   cost — including via the epoch-only export — resolution (b)'s track
   opens; below 2×, (a) ships without further debate.
+- **The measurement runs under the CHOSEN atomicity arm (§3), not the
+  bare epoch compare.** Arm (i) puts a lock/lease on every access —
+  a categorically different cost than a compare — so measuring the
+  bare compare and then shipping (i) would invalidate this gate: the
+  gate would no longer observe the cost it names, the exact
+  gate-observability failure the integration plan's standing question
+  exists to catch. Order is therefore: atomicity decision FIRST, then
+  the measurement, of that arm.
 - `cargo test -p lgj-abi` + full Java suite green; clippy `-D warnings`.
 - Board: `ISS-LGJ-EPOCH-UNCHECKED` flips OPEN → RESOLVED under (a), or
   OPEN → DOWNGRADED-DOCUMENTED under (b), same commit as the code.

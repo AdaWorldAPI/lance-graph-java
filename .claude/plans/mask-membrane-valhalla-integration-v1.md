@@ -289,7 +289,12 @@ consumer-side scheduling creep F4 forbids.
   is ns/accessor-call over ≥1M calls on the cached-descriptor accessors,
   median of 5; the flip fires iff the epoch re-check cannot be brought
   under **2× the accessor's measured baseline** even via the epoch-only
-  export. In that case W1.1 pauses on its (a)/(b) decision while W2.1
+  export. The measured quantity is the re-check UNDER THE CHOSEN
+  atomicity arm (the council spec's §3) — a lock/lease per access is a
+  different cost than a bare compare, so the atomicity decision precedes
+  the measurement, and an arm-(i) choice legitimately raises the flip's
+  probability; the flip firing under (i) is a valid outcome, not a
+  failure of the plan. In that case W1.1 pauses on its (a)/(b) decision while W2.1
   proceeds — for its OWN paths only: W2's fused pass and sweeps run
   through native operations, not the cached-descriptor accessors, so
   they may be investigated and shipped regardless; nothing that READS
