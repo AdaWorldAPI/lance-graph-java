@@ -1,0 +1,220 @@
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.adaworldapi.lancegraph.bench.H_CachedAccessorProbe.cached",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 5,
+        "jvm" : "/opt/jdks/jdk-26.0.2/bin/java",
+        "jvmArgs" : [
+            "-Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12",
+            "-Djavax.net.ssl.trustStorePassword=changeit",
+            "-Djavax.net.ssl.trustStoreType=PKCS12",
+            "-Dhttps.proxyHost=127.0.0.1",
+            "-Dhttps.proxyPort=41413",
+            "-Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local",
+            "-Djdk.http.auth.tunneling.disabledSchemes=",
+            "-Djdk.http.auth.proxying.disabledSchemes=",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-modules=jdk.incubator.vector",
+            "--enable-native-access=ALL-UNNAMED"
+        ],
+        "jdkVersion" : "26.0.2.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "26.0.2.1+1-7",
+        "warmupIterations" : 5,
+        "warmupTime" : "500 ms",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 8,
+        "measurementTime" : "500 ms",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "rows" : "65536"
+        },
+        "primaryMetric" : {
+            "score" : 9.397509739102034,
+            "scoreError" : 0.36200202333673615,
+            "scoreConfidence" : [
+                9.035507715765299,
+                9.75951176243877
+            ],
+            "scorePercentiles" : {
+                "0.0" : 8.157436759637834,
+                "50.0" : 9.36017259804065,
+                "90.0" : 10.353812345773088,
+                "95.0" : 10.50484184399275,
+                "99.0" : 10.940040050208742,
+                "99.9" : 10.940040050208742,
+                "99.99" : 10.940040050208742,
+                "99.999" : 10.940040050208742,
+                "99.9999" : 10.940040050208742,
+                "100.0" : 10.940040050208742
+            },
+            "scoreUnit" : "ns/op",
+            "rawData" : [
+                [
+                    9.816169561587909,
+                    8.157958070264995,
+                    8.157436759637834,
+                    10.505677223428133,
+                    9.375570936031421,
+                    10.48896963472049,
+                    10.358033463698877,
+                    9.544089463585044
+                ],
+                [
+                    9.75150272580672,
+                    9.69838793613235,
+                    9.328261881691144,
+                    8.231308570458017,
+                    9.770807572807183,
+                    9.13593936706563,
+                    9.803850951149093,
+                    9.75159060632074
+                ],
+                [
+                    10.09864904098354,
+                    8.844149109518009,
+                    9.390389204731518,
+                    8.750829262882977,
+                    9.327434316703263,
+                    8.988154218142055,
+                    9.076128629126949,
+                    9.22356382372469
+                ],
+                [
+                    9.49873272061338,
+                    9.74748995789295,
+                    8.373696343635459,
+                    9.043555297877328,
+                    9.782571788136382,
+                    9.34477426004988,
+                    9.231967025198234,
+                    9.029099274830584
+                ],
+                [
+                    10.315822284440978,
+                    10.940040050208742,
+                    9.131134739374698,
+                    8.921428474100445,
+                    9.511453543064349,
+                    9.780349789974617,
+                    8.792938324243602,
+                    8.880483360241186
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.adaworldapi.lancegraph.bench.H_CachedAccessorProbe.probed",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 5,
+        "jvm" : "/opt/jdks/jdk-26.0.2/bin/java",
+        "jvmArgs" : [
+            "-Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12",
+            "-Djavax.net.ssl.trustStorePassword=changeit",
+            "-Djavax.net.ssl.trustStoreType=PKCS12",
+            "-Dhttps.proxyHost=127.0.0.1",
+            "-Dhttps.proxyPort=41413",
+            "-Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local",
+            "-Djdk.http.auth.tunneling.disabledSchemes=",
+            "-Djdk.http.auth.proxying.disabledSchemes=",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-modules=jdk.incubator.vector",
+            "--enable-native-access=ALL-UNNAMED"
+        ],
+        "jdkVersion" : "26.0.2.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "26.0.2.1+1-7",
+        "warmupIterations" : 5,
+        "warmupTime" : "500 ms",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 8,
+        "measurementTime" : "500 ms",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "rows" : "65536"
+        },
+        "primaryMetric" : {
+            "score" : 44.93220351479404,
+            "scoreError" : 0.9308954517578334,
+            "scoreConfidence" : [
+                44.001308063036205,
+                45.863098966551874
+            ],
+            "scorePercentiles" : {
+                "0.0" : 41.14092433218022,
+                "50.0" : 45.24743532625752,
+                "90.0" : 46.77725604297775,
+                "95.0" : 47.03762524148221,
+                "99.0" : 48.28866604842188,
+                "99.9" : 48.28866604842188,
+                "99.99" : 48.28866604842188,
+                "99.999" : 48.28866604842188,
+                "99.9999" : 48.28866604842188,
+                "100.0" : 48.28866604842188
+            },
+            "scoreUnit" : "ns/op",
+            "rawData" : [
+                [
+                    46.047623645639234,
+                    46.23992071077457,
+                    45.750302352746026,
+                    43.74754449167272,
+                    45.95015782937599,
+                    46.482685649470255,
+                    46.81948456464281,
+                    45.805444262344
+                ],
+                [
+                    45.965255352367954,
+                    46.64880947718452,
+                    42.84147575086195,
+                    43.68473093460154,
+                    44.625129906718705,
+                    46.618965833891714,
+                    48.28866604842188,
+                    45.81895435681304
+                ],
+                [
+                    46.78432667950222,
+                    45.19359233735111,
+                    45.811116087178625,
+                    42.36454523066041,
+                    42.66231868237766,
+                    43.4022153340895,
+                    42.929246134619945,
+                    42.04513946087545
+                ],
+                [
+                    42.45494550405482,
+                    44.13371936946804,
+                    42.98884012590909,
+                    44.76066492506251,
+                    45.301278315163934,
+                    46.313245404038874,
+                    47.049106329736915,
+                    46.109082519344874
+                ],
+                [
+                    44.68516186093698,
+                    46.71362031425748,
+                    41.14092433218022,
+                    45.420042943574984,
+                    44.2479500635979,
+                    44.71816454647706,
+                    43.7103423759677,
+                    45.013400547808345
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    }
+]
+
+

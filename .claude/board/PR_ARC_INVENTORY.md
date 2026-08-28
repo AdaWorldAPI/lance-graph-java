@@ -8,6 +8,32 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #54 — the fifth instance, and making `Engine.epoch`'s javadoc true (merged 2026-08-28, `cc53c8c` — 4 commits, head `fd1df59`)
+
+> ⊘ **Entry backfilled on #55 (2026-08-28).** #54 merged without it. #54 is a
+> *mixed* PR — it changed `Engine.java` and struck two plan rules, so the
+> termination clause's hygiene-only exemption does not reach it and the entry
+> was owed at merge time. Recorded late rather than left absent.
+
+- **Added:** `Engine.epoch`'s javadoc rewritten to be **true**. It had claimed
+  "Java re-checks this before trusting a cached lane segment"; #53's fix routes
+  through `Engine.describeMask`, so `epoch` retains exactly **zero** callers.
+  The javadoc now states that, says why `lgj_resource_info` is the wrong
+  question for a cached lane (it resolves the child's own slot, which outlives
+  its parent), and why the symbol is retained anyway — the `RowStore` half
+  would need a lane's *owning* resource. That rewrite is what actually
+  discharges the W3 obligation; #53's board line claiming the javadoc "is no
+  longer false" would have hidden it.
+- **Struck (plan §5), instances five through seven of the pattern:** the fifth
+  was found by review; the sixth and seventh were each **introduced by the fix
+  for the one before it**. "Void in that case" implied the struck rule still
+  applied elsewhere; the label was then attached on the sign where it belongs
+  on the interval. Each struck in place, never deleted.
+- **Confidence:** high on the javadoc (it now describes observable reality —
+  zero callers, verifiable by grep). Medium on §5 itself, and the reason is
+  §5's own history: seven repairs to one rule, three of them self-inflicted.
+  The eighth arrived on #55.
+
 ## PR #53 — W1.1: the §5 adversarial read, and the Mask half wired to the substrate (merged 2026-08-28, `3b4bc03` — 5 commits, head `8e2654d`)
 
 - **Added:** the `Mask` half of W1.1 — `Mask.words()` re-authorises its
