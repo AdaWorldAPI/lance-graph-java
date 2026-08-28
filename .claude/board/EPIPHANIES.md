@@ -4,6 +4,91 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-27 — E-ZERO-COPY-MEMORY-SAFETY-AUDITED-CLEAN-1
+
+**Status:** AUDITED CLEAN — pinned as normative doctrine in root
+`CLAUDE.md` (new "Zero-copy + memory safety" section), same commit.
+**Confidence:** High — every item checked against source, not assumed.
+
+Operator issued a 32-point normative zero-copy/memory-safety addendum
+(merge-gating). Ran it mechanically against the tree rather than
+redesigning from taste, per the session's standing method:
+
+- Provenance-bound generation-checked handles: `registry.rs` —
+  `fabricated_handles_are_rejected_not_dereferenced`,
+  `a_reused_slot_invalidates_the_old_handle` (already present).
+- Checked-overflow bounds arithmetic: `checked_mul`/`checked_add`
+  throughout `rowstore.rs`/`kernels.rs` (already present).
+- Alignment/endianness as explicit contract fields (never inferred):
+  `LgjAbiManifest.align_of_*` filled from `core::mem::align_of` on the
+  real types; `Abi.java` rejects non-little endianness before any
+  projection (already present).
+- Manifest-first handshake ordering (magic → major → minor → sizes →
+  endianness, `requireMinor(N)` gating): `Abi.java` (already present).
+- FFM quarantine: zero `java.lang.foreign`/`java.lang.invoke` in any
+  public signature; internal use in `RowStore.java`/`FacetMatchView.java`
+  is private-field-only (verified by grep for `public .*MemorySegment/
+  Arena/ValueLayout/MethodHandle` — zero hits).
+- Named/bounded materialization only: every production `long[]`/
+  `copyOf`/`toArray` traces to `Mask.materializeRows()`, the manifest
+  handshake's own name-string read, or `rowLayoutProbe`'s ≤32-byte
+  diagnostic — no hidden proportional-to-n_rows copy.
+- Independently-derived layout parity (not self-compared):
+  `AbiContractTest`, with a deliberately-impossible-expectation arm
+  proving the check can fail.
+- SIMD backend diagnostic-only: `NativeRuntime.simdBackend()` is a
+  manifest string; zero `if` branches on it in `src/main`.
+- Worker topology substrate-private: zero `workers(`/`workerCount`/
+  `parallelism(`/`threads(` in production Java/ABI/exports (reconfirmed
+  from the prior turn's audit, unchanged).
+
+**Verdict: no gap found, nothing redesigned.** The addendum's own
+mandatory checklist (§32) is answered YES on every line by structure
+already in the tree — this entry and the CLAUDE.md section exist to
+PIN the doctrine as merge-gating going forward, not to fix a defect
+found today. Any future PR touching the membrane is reviewed against
+this section directly.
+
+## 2026-08-27 — E-EXP-KIA-A2-64K-CONVERGENCE-TAIL-DOMINATES-1
+
+**Status:** MEASURED — in-tree, reproducible, this run banked verbatim at
+`.claude/board/exp-kia-a2-64k-fresh-run.txt`.
+**Confidence:** High for this host/harness; explicitly NOT the operator's
+out-of-tree 125ms/233ms weather prior (different workload, per
+`mask-native-navigation-correction-v1.md` §8.3 — that gap stays open).
+
+Fresh `lance-graph-supervisor/examples/measure_wal_curve` release run
+(lance-graph@1d7bc1b1), answering "measure the 64k execution end first"
+before any `BatchWriter`/kanban seam design: the EXP-KIA-A2-64K arm's
+**compute** phase parallelizes as documented (21.8ms seq → 6.68ms @
+workers=8, 3.27x, matching the plan's own "~3.2-3.5x on 4 cores" prior
+exactly) — but compute is the SMALL part of a cycle. Per-cycle steady-state
+total (build/population excluded, sequential vs best-parallel):
+
+```
+workers=1: think 21.81 + cast 21.52 + collect 10.06 + wal 14.62 + apply 17.73 = 85.74 ms
+workers=8: think  6.68 + cast 20.83 + collect  9.45 + wal 15.62 + apply 15.87 = 68.44 ms
+```
+
+**The cast/collect/wal/apply tail is FLAT across every worker count
+(1/2/4/8/16) — it does not shrink when compute parallelizes** — and it is
+~64-65ms of every cycle regardless: ~90% of the workers=8 total, ~10%
+compute. Sequential-vs-parallel sealed-cycle digests MATCH at every worker
+count (correctness holds; this is a WHERE-does-the-time-go finding, not a
+correctness one).
+
+Consequence for the seam question root `CLAUDE.md` names ("64K COMPUTE WAS
+PARALLEL … not yet the production loop"): parallelizing compute alone
+recovers at most ~15ms of an ~85ms cycle in this harness. The convergence
+boundary this repo's own maxims already flag as sequential-by-design
+(ONE COMPUTATION IS NOT ONE LANCE WRITE; the SOLE native writer) is where
+the time actually is — any seam design that only speeds up compute is
+optimizing the part that was never the bottleneck on this measurement.
+Cross-ref `CLAUDE.md`'s compute-model maxims and the GridLake block
+(deterministic-landing-identity gate) — this measurement is evidence FOR
+prioritizing that gate's resolution over a parallel-compute seam, not
+against parallel compute itself.
+
 ## 2026-08-27 — E-JAVA-IS-SIMD-RS-VALHALLA-PANAMA-IS-THE-POLYFILL-1
 
 **Status:** DOCTRINE — [OPERATOR-FRAMED]. Pinned as the ENFORCEMENT LAYER in

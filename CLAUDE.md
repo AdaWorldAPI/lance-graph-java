@@ -110,6 +110,82 @@ per-owner `advance(owner)` RPCs are exactly the deleted shape.
 `BatchWriter::cast()` = staging into a batch image, NOT command/ack
 messaging.
 
+## Zero-copy + memory safety — NORMATIVE, MERGE-GATING (operator-ruled, 2026-08-27)
+
+**Zero-copy means the canonical bytes remain owned by `lance-graph`; Java/
+Panama project operations onto those bytes without duplicating canonical
+state.** What crosses the membrane is identity, descriptor, layout
+contract, projection hint, operation, and result identity — never a
+second graph. **One-copy law**: multiple views/lanes/masks over the same
+substrate are fine; multiple *authorities* are not.
+
+**Shape may cross. Meaning may cross. Operations may cross. Ownership
+does not cross.** The 512×32×(4+12) row/facet contract, offsets, stride,
+alignment, endianness are legitimate contract facts Java may know —
+zero-copy is about storage *ownership*, never about layout *opacity*.
+
+Non-negotiables, each with its enforcement site (audited clean
+2026-08-27 — this is confirmation of existing structure, not a new
+build):
+
+- **Pointer value is not provenance.** Every native address is bound to
+  owner identity + generation + length + kind via the generation-checked
+  handle registry (`registry.rs::{encode_handle, resolve, resolve_kind}`);
+  a stale generation fails closed before dereference. Falsifiers:
+  `fabricated_handles_are_rejected_not_dereferenced`,
+  `a_reused_slot_invalidates_the_old_handle`.
+- **Bounds/overflow are checked, never wrapped.** `rowstore.rs`/
+  `kernels.rs` use `checked_mul`/`checked_add` throughout; overflow
+  fails closed, never truncates.
+- **Alignment and endianness are contract fields, never inferred.**
+  `LgjAbiManifest.align_of_*` are filled from `core::mem::align_of` on
+  the real types (never a literal); `endianness` is verified explicit
+  (`Abi.java` rejects non-zero before any projection).
+- **Manifest-first handshake.** `Abi.java` reads magic → abi_major
+  (exact) → minor (>=) → struct sizes/alignment → endianness, in that
+  order, before any dependent layout is resolved — never a speculative
+  read past the guaranteed prefix. `requireMinor(N)` gates every
+  minor-N-or-later operation; an older library fails cleanly at the
+  call, not at load.
+- **FFM is quarantined.** `java.lang.foreign.*`/`java.lang.invoke.*`
+  never appear in a public signature (`ApiSurfaceTest`); internal use in
+  `RowStore.java`/`FacetMatchView.java` is private-field-only, verified
+  by reflection, not by convention.
+- **Mutation crosses as verbs, not writable memory.** No public API
+  exposes a writable canonical segment; mutation happens through named
+  ABI operations (`mask_and`/`apply_projection`/etc.), never
+  `segment.set(...)`.
+- **Materialization is named and bounded.** The only production
+  `long[]`/`copyOf`/`toArray` call sites are `Mask.materializeRows()`
+  (the one named terminal), the manifest-name read during handshake, and
+  `rowLayoutProbe`'s ≤32-byte diagnostic — none is a hidden
+  proportional-to-n_rows population copy. Temporary kernel scratch
+  (SIMD scratch masks, decode buffers) is allowed and is NOT the same
+  claim as a second canonical copy.
+- **Layout parity is independently derived, not self-compared.**
+  `AbiContractTest`: Java's own layout constants vs. the artifact's
+  runtime self-description, with a deliberately-impossible-expectation
+  arm proving the check can actually fail.
+- **SIMD backend is diagnostic only.** `NativeRuntime.simdBackend()` is
+  a manifest string for logging; no `if` branches on it anywhere in
+  `src/main` — backend parity is `ndarray::simd`'s business (see E1-E6
+  below), never Java's.
+- **Worker topology stays substrate-private** — see §E of the
+  mask-native-navigation-correction-v1.md enforcement pass: no
+  `workers(`/`workerCount`/`parallelism(`/`threads(` in any production
+  Java, ABI struct, or export; `EXP-KIA-A2-64K`'s worker sweep is a
+  native benchmark independent variable, never a consumer-facing API.
+
+Wording discipline (use exactly): *"lance-graph owns the only canonical
+copy. lance-graph-java projects semantic operations across Panama onto
+that state without row/population duplication."* Never *"Java borrows
+the native database memory directly"* — that overclaims the
+abstraction. Never *"FFI is memory-safe end-to-end"* — the defensible
+claim is *"the Java consumer cannot directly express arbitrary native
+memory access; native resources are accessed through generation-checked,
+version-checked, bounds-checked ABI operations whose ownership remains
+in lance-graph."*
+
 ## The simd.rs isomorphism — ENFORCEMENT LAYER (operator-ruled, 2026-08-27)
 
 The repo's whole shape is `ndarray`'s own SIMD architecture repeated one
