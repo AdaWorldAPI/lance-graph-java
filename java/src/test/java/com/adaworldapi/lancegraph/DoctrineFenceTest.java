@@ -259,9 +259,15 @@ public final class DoctrineFenceTest {
         c.section("fence 1b: both facade classes carry the W1 scope IN THEIR CLASS JAVADOC");
         // The complete W1 obligation, not just its headline literal.
         // Lowercase: `classJavadocOf` returns a case-folded, whitespace-canonical region.
+        //
+        // `close()` is required (CodeRabbit, #60) because W1's obligation is not "mention
+        // happens-before" — it is happens-before *between `close()` and every access*. A block
+        // naming the relation without naming the operation it orders is a vaguer promise
+        // wearing the same words.
         String[] obligation = {
             "not thread-safe",
             "happens-before",
+            "close()",
             "no guard detects it",
         };
         String[][] targets = {
