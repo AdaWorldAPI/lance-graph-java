@@ -57,9 +57,17 @@ the Mask side `requireUsable` at `Mask.java:175-185` reached from
 `materializeRows` at `:102`). Both reviewers who examined it agree it was
 not fixable in place.
 
-**W5 — the replacement, as rewritten by Phase 3.** Construct the state the
-boolean cannot see: close the NATIVE resource while a live Java wrapper
-still holds `closed == false`, then read an already-resolved lane.
+**W5 — the replacement.** Construct the state the boolean cannot see:
+**invalidate** the native resource (bump its registry generation) while a
+live Java wrapper still holds `closed == false`, then read a lane that was
+already resolved into the wrapper's cache.
+
+*(Two external findings shaped this, and the plan takes the stricter half
+of each. CodeRabbit's suggested flow ended in `Engine.close(store.handle())`
+— which would still perform the read-after-free Codex flagged; Codex's
+remedy alone would still have left the cache unpopulated and the assertion
+vacuous. The construction below is invalidate-without-free AND
+populate-first, so neither defect survives.)*
 
 - **Populate the lane cache FIRST, or the test is vacuous** (CodeRabbit
   Major, PR #49 — verified in source). `RowStore.lane()` resolves lazily:
