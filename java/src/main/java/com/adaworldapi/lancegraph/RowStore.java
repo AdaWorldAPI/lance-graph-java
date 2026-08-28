@@ -25,6 +25,19 @@ import java.lang.foreign.ValueLayout;
  * <p>Ordinary try-with-resources, mirroring {@link NativePattern}. After {@link #close()} every
  * operation on this resource, and on any {@link Mask} or {@link FacetMatchView} derived from it,
  * throws {@link ClosedResourceException}. Closing twice is an error, not a silent no-op.
+ *
+ * <h2>Thread safety — this class is NOT thread-safe (arm (ii), plan W1)</h2>
+ *
+ * <p><strong>The caller must establish <em>happens-before</em> between {@link #close()} and every
+ * other access.</strong> A concurrent close-vs-access is <strong>undefined, and no guard detects
+ * it</strong> — not the {@code closed} flag (a plain non-volatile field, so it carries both a
+ * check-then-act and a visibility race) and not the substrate, because a cached descriptor read
+ * resolves no handle and so returns no status.
+ *
+ * <p>This is the Java-side half of {@code docs/abi.md}'s <em>sole-closer contract</em>: one
+ * handle, one closer, no concurrent close against a live reader. Documented, not enforced —
+ * {@code Engine.close(long)} is reachable outside this object and nothing here can stop it.
+ * Tracked as {@code ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW}.
  */
 public final class RowStore implements NativeResource, AutoCloseable {
 

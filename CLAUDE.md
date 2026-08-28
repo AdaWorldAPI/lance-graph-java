@@ -139,16 +139,28 @@ build):
   `use_after_close_is_a_status_not_a_crash`, the falsifier that holds
   unconditionally). Generation is `u32` and wraps after 2³² closes of one
   slot (documented in-source at the wrap site; not reachable in practice).
-  **Scope note, not covered by the registry check:** `lgj_lane_describe`/
-  `lgj_mask_describe` hand Java a raw `addr` once, which Java then caches
-  (`RowStore.java`'s `lanes[]`, `Mask.java`'s `words`) and reads directly
-  on every subsequent access with NO further registry call — that repeat
-  path is guarded only by a Java-side `closed` boolean, a strictly weaker,
-  non-generation-checked mechanism. `LgjLaneDesc` carries an `epoch` field
-  designed for exactly this re-check and it is currently unconsulted
-  anywhere in `src/main` (tracked: `.claude/board/ISSUES.md`
-  `ISS-LGJ-EPOCH-UNCHECKED`). Do not read "fails closed before dereference"
-  as covering the cached-descriptor path until that epoch check is wired.
+  **Scope note — the cached-descriptor path, corrected 2026-08-28 (plan W2;
+  the earlier text was written before W1.1 shipped and went stale the day
+  it did).** `lgj_lane_describe`/`lgj_mask_describe` hand Java a raw `addr`,
+  which Java caches (`RowStore.java`'s `lanes[]`, `Mask.java`'s `words`).
+  The two halves now differ and must not be described together:
+  - **`Mask`** re-validates the cached window against the generation-checked
+    registry **at each top-level facade call** (`Mask.words()` re-describes
+    through `lgj_mask_describe`, which resolves the mask WITH its parent, and
+    compares the returned `epoch` against the stamp it holds). This is
+    **not atomic with respect to a concurrent `close`** — it narrows the
+    window, it does not close it.
+  - **`RowStore`** does **not**: its `lanes[]` reads consult only the
+    Java-side `closed` boolean, a strictly weaker, non-generation-checked
+    mechanism. `ISS-LGJ-EPOCH-UNCHECKED` stays OPEN, scoped to `RowStore`.
+
+  ⊘ Struck: the earlier claim that this path reads "with NO further registry
+  call" and that `epoch` "is currently unconsulted anywhere in `src/main`".
+  Both were true when written and both became false with W1.1 (#53) —
+  `Mask.words()` is the counter-example to each. Do not read "fails closed
+  before dereference" as covering `RowStore`'s cached lanes; for `Mask`,
+  read it as re-validated per facade call and racy against a concurrent
+  close, never as a guarantee that holds through a scan.
 - **Bounds/overflow are checked, never wrapped, at the point n_rows is
   first derived.** `rowstore.rs` uses `checked_mul` at its two allocation
   sites (`generate_in`/`generate_with_edges_in`); overflow there fails
