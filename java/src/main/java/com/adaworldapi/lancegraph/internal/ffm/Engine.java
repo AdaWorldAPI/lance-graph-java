@@ -81,7 +81,21 @@ public final class Engine {
         return (long) Layouts.INFO_N_ROWS.get(s.info, 0L);
     }
 
-    /** Liveness stamp of a resource. Java re-checks this before trusting a cached lane segment. */
+    /**
+     * Liveness stamp of a resource, read from {@code LgjResourceInfo}.
+     *
+     * <p><strong>Currently unused, and the reason is worth keeping.</strong> This javadoc used to
+     * claim "Java re-checks this before trusting a cached lane segment"; that was false when
+     * written (zero callers) and is still false now, because the check that shipped in W1.1 does
+     * NOT go through here. {@code lgj_resource_info} resolves a resource's OWN registry slot, and
+     * a mask's slot outlives its parent — measured: closing the parent store natively left this
+     * probe silent while the mask's bytes were already freed. {@link Mask#words()} therefore
+     * re-authorises through {@code lgj_mask_describe}, which resolves WITH the parent.
+     *
+     * <p>Retained rather than deleted because the {@code RowStore} half of W1.1 is still open and
+     * a lane's owning resource is exactly what it will need to ask about; if that half ships
+     * without this, delete it then.
+     */
     public static long epoch(long handle) {
         Scratch s = SCRATCH.get();
         Downcalls.resourceInfo(handle, s.info);

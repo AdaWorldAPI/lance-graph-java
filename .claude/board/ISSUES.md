@@ -34,8 +34,14 @@ of this — it was never cost-gated.
 
 `Mask.words()` now re-authorises its cached word lane with the substrate
 on every use of that cache: one O(1) downcall per whole scan, never per
-word. `Engine.epoch`'s javadoc claim ("Java re-checks this before
-trusting a cached lane segment") is no longer false for masks.
+word. ⊘ **Corrected on #54 (Codex P2):** an earlier version of this line claimed
+`Engine.epoch`'s javadoc ("Java re-checks this before trusting a cached
+lane segment") "is no longer false for masks". **It is still false.** The
+fix routes through `Engine.describeMask`, so `Engine.epoch` retains
+exactly zero callers — its only mention in `src/main` is the javadoc that
+now explains why it is *not* used. That javadoc has been rewritten to say
+so, which is what actually discharges the W3 obligation; the claim above
+would have hidden it.
 
 **A measured correction to the v3 plan, found by building it.** v3 §6 said
 the probe would be `lgj_resource_info`, which "already reads live". It does
