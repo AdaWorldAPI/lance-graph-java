@@ -1,5 +1,51 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW (2026-08-28) — OPEN
+
+**Opened late, and the lateness is the first thing worth recording.** v3 W4
+requires this issue to be opened **in the same commit** that re-scopes
+`ISS-LGJ-EPOCH-UNCHECKED` to `RowStore` — *"Two entries, never one — a scoped
+resolution must not absorb an unfixed window."* #53 shipped the `Mask` half and
+#55 first tried to close the `RowStore` half; neither opened this. Found while
+re-reading W4 to check the unwind against it, one commit after the re-scoping
+rather than in it. The failure shape is the arc's own: **a paired obligation
+left standing beside a discharged one.**
+
+**What it is.** The W1.1 `Mask` probe narrows the cached-descriptor staleness
+window; it does not close it, and the residue is cross-thread. Three facts,
+each re-verified in-tree today rather than carried forward from the plan:
+
+1. `RowStore.closed` (`RowStore.java:35`) and `Mask.closed` (`Mask.java:26`)
+   are **non-volatile and lock-free** — so the Java-side guard carries both a
+   check-then-act race and a *visibility* race, facade-wide and pre-existing.
+2. `Engine.windowOf` builds `MemorySegment.ofAddress(addr).reinterpret(byteLen)`
+   (`Engine.java:403`) — an **unbounded-lifetime** segment with no FFM scope
+   check. Nothing in the segment itself can observe the resource closing.
+3. `Engine.close(long)` is `public static` (`Engine.java:73`), so it is
+   reachable **outside** the owning facade object.
+
+Together: a Java-side lock would be sound only under an unstated *"this object
+is the sole closer of this handle"* assumption. **Writing that assumption down
+is arm (ii)'s deliverable, and it is still unwritten.**
+
+**Stated rather than smoothed over.** That deliverable is a **documented
+contract, not an enforced one** — facts 2 and 3 are exactly why no Java-side
+mechanism can enforce it. The probe's own read is a native acquire through the
+registry `RwLock`, which is why it *narrows* the window; a second thread
+closing between the probe's return and the segment read is still unguarded.
+
+**Not a regression, and not newly introduced by W1.1.** The ABI states its own
+position: concurrency is unbenchmarked and *"a concurrent Java writer would
+need a documented protocol, which this ABI version does not define"*
+(`exports.rs`, cf. `abi.md` concurrency section). This entry exists so the
+window is **tracked** rather than absorbed into a scoped resolution that does
+not cover it.
+
+**Closure terms.** Closes when the sole-closer contract is written into
+`docs/abi.md` and the facade javadoc, *or* when the ABI defines a concurrent
+access protocol that makes the contract enforceable. Not gated on any
+measurement — nothing here is a cost question.
+
 ## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — EXPLORATORY, decides nothing
 
 > ⊘ Retitled (Codex P1a on #55). The header read *"the answer is 'not at
