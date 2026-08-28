@@ -42,6 +42,42 @@
   the plan itself is PROPOSED→ratified-by-merge; wave outcomes are
   gated, not promised.
 
+## PR #49 — W1.1: the epoch-recheck 5+3 council, ratified (v3) (opened 2026-08-28)
+
+- **Added:** `.claude/plans/epoch-recheck-v3.md` (RATIFIED — implement
+  from this) and `epoch-recheck-v2-draft.md` (SUPERSEDED, retained: the
+  Phase-3 findings are only auditable against the draft they attacked).
+  Full 5+3 for `mask-membrane-valhalla-integration-v1` W1.1 — five
+  savants, consolidation, three reviewers on the draft only, ratified v3
+  with an audit ledger (§8).
+- **Headline:** an epoch MISMATCH is unreachable through
+  `lgj_resource_info` (close bumps the slot generation, insert hands the
+  advanced generation out, the export opens with `resolve`), so what W1.1
+  ships is a **native generation-checked liveness probe replacing a Java
+  boolean** — not "epoch checking". Verified independently three times.
+- **Locked:** atomicity arm (ii) scoped contract on three verified
+  reasons (arm (i)'s mandatory falsifier cannot report red — no threads
+  in the test tree); six obligations W1-W6 with W1/W2 given mechanical
+  fence legs; no new ABI symbol; the `Mask` half ships regardless, the
+  `RowStore` half is per-access-or-not-at-all and gated on a benchmark
+  that does not yet exist.
+- **Reviewers changed the deliverable, not just its prose:** one BLOCKING
+  defect (the draft's own falsifier asserted on use-after-free bytes —
+  the evidence class it disqualified arm (i) for), one open question
+  closed on falsifiability, a wrongly-routed falsifier, an invented
+  closure status, two normative corrections rescued from under a "CLEAN"
+  heading, five factual errors — including a storno on the merged plan's
+  false "benches are structurally blind" claim, and a live `main` defect
+  nobody had noticed (`Engine.epoch`'s javadoc claims a re-check with
+  zero callers).
+- **Gates:** doc-only — no Rust, Java, `abi.md`, or public-API change; the
+  suite is untouched at 331/331 from PR #48. Every file:line in v3 was
+  either given with evidence by a savant or verified by the consolidation;
+  the load-bearing ones were re-verified a third time by a reviewer.
+- **Confidence:** high on the headline (three independent source
+  derivations) and on the arm decision; the implementation's cost
+  question is explicitly UNRESOLVED and gated, not assumed.
+
 ## PR #48 — W0: the three doctrine fences, each proven able to fire (merged 2026-08-28, `42fba54` — 7 commits, head `fc281e0`)
 
 - **Merge-time addendum (rounds 4-5, post-entry):** the review cycle ran
