@@ -238,9 +238,28 @@ O(1), fills a descriptor and does no work over the population — so the fix
 needs **no new ABI symbol** and v3's "no new production symbol" ruling
 survives, with its *reason* corrected.
 
-**Still open:** the `RowStore` half (per-access or not at all, gated on the
-benchmark) and the identical cached-descriptor path in `RowStore.lanes[]`.
-This entry closes the `Mask` half only.
+**Still open:** the `RowStore` half and the cached-descriptor path in
+`RowStore.lanes[]`. This entry closes the `Mask` half only.
+
+**⊘ "the identical cached-descriptor path" — struck 2026-08-28. The two paths
+are NOT identical, and the difference may settle the `RowStore` half without a
+benchmark.** Verified in-tree, not reasoned from the design: a `Mask` has a
+parent it does **not** own (`create_mask` takes `PATTERN | ROWSTORE`), so
+closing that parent is **in-contract** and still invalidates the child's cached
+words — the W1.1 falsifier. A `RowStore` is only ever a *parent*; its bytes are
+allocate-once `Arc<[u8]>` with **no realloc surface**; its constructor is
+private and every factory mints a fresh handle; and its one closer sets the
+flag `requireOpen` reads. So within the sole-closer contract there is no state
+where its cached lane is stale and `closed` is false — the weaker mechanism is
+sufficient **for this resource**, structurally rather than by luck.
+
+**Not acted on, and that is the point.** Full argument, its adversarial check,
+and its single load-bearing dependency are `epoch-recheck-v3.md` **Q4**, filed
+as a PROPOSAL. W4's rejection route for this half is a *measurement*; rejection
+on structural grounds is a route the plan does not define, so adopting it is an
+amendment rather than a session's own call. **Closing this issue on an argument
+I wrote today would repeat instance eight one PR after it was caught.** The
+issue stays OPEN pending a ruling.
 
 ## ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST — §5 adversarial read, FIXED
 
