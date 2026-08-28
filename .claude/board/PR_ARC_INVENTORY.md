@@ -82,7 +82,9 @@
 - **Locked:** atomicity arm (ii) scoped contract on three verified
   reasons (arm (i)'s mandatory falsifier cannot report red — no threads
   in the test tree); six obligations W1-W6 with W1/W2 given mechanical
-  fence legs; no new ABI symbol; the `Mask` half ships regardless, the
+  fence legs; no new ABI symbol **on the production path** (the one the
+  wave admits is test-only, and a full ABI citizen — v3 §8 row 13);
+  the `Mask` half ships regardless, the
   `RowStore` half is per-access-or-not-at-all and gated on a benchmark
   that does not yet exist.
 - **Reviewers changed the deliverable, not just its prose:** one BLOCKING
