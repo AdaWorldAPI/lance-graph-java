@@ -4,11 +4,78 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-28 — E-ZERO-COPY-MEMORY-SAFETY-OVERCLAIM-CORRECTION-1
+
+**Status:** CORRECTS `E-ZERO-COPY-MEMORY-SAFETY-AUDITED-CLEAN-1` (below) —
+that entry's "no gap found" verdict itself overclaimed. Storno entry per
+board README's append-only rule; the corrected entry's prose is left
+untouched below except this note and its own Status/Confidence lines.
+**Confidence:** High — every correction below is a five-savant-verified,
+three-reviewer-ratified finding (5+3 council, PR #45 as target, run
+2026-08-28), not a single-pass re-read.
+
+The prior entry's single-pass audit (a general-purpose lens, not a
+council) confirmed all 9 doctrine bullets by citation but did not
+independently RE-DERIVE several claims — a 5+3 council convened
+specifically because that audit was the only review PR #45 got
+(CodeRabbit's own comment was just its auto-summary, "Review failed — the
+pull request is closed"; Bugbot hit its usage limit twice and never ran).
+The council found 5 real overclaims in the CLAUDE.md doctrine text,
+fixed in the same commit as this entry:
+
+1. **"a stale generation fails closed before dereference"** was stated as
+   universal; it is false for the cached-descriptor path
+   (`lgj_lane_describe`/`lgj_mask_describe` hand Java a raw `addr` once,
+   read directly thereafter with no further registry call — guarded only
+   by a Java `closed` boolean, not the generation registry). Fixed:
+   scoped to "handle-mediated" operations; the cached-descriptor gap
+   named explicitly, its `epoch` re-check tracked as `ISS-LGJ-EPOCH-
+   UNCHECKED`.
+2. **"an older library fails cleanly at the call, not at load"** was
+   stated as blanket; false for ABI minors 2-4 (row store/edges/hop),
+   which fail at `Downcalls.<clinit>` via eager `MethodHandle` resolution
+   — a gap `Downcalls.java`'s own comment already tracked, that the new
+   doctrine text presented as already closed. Fixed: scoped to the
+   minor-5+ lazy-holder pattern; minors 2-4 named as the tracked
+   exception.
+3. **"checked_mul/checked_add throughout rowstore.rs and kernels.rs"**
+   overclaimed uniform coverage: `kernels.rs` has zero occurrences (it
+   bounds against an already-allocated slice's real `.len()` via
+   `assert_eq!`, a sound but DIFFERENT mechanism); `rowstore.rs` has
+   exactly two, both at the two allocation sites. Fixed: scoped to "at
+   the point n_rows is first derived", with `kernels.rs`'s actual
+   mechanism named rather than left silent.
+4. **"never `segment.set(...)`"** was contradicted by the already-named
+   Import exception (`RowStore.importRows` → `Engine.setU64` →
+   `segment.set(...)`, on a lane the ABI marks `LGJ_FLAG_WRITABLE` by
+   design). Fixed: the bullet now cross-references the exception it
+   already names elsewhere in this file, rather than reading as an
+   absolute the codebase visibly violates.
+5. **The materialization list was a closed enumeration missing two real
+   call sites** (`Abi.java`'s `readCarvings`, `Engine.facetSumResolved`'s
+   `long[2]`) — both bounded/non-population-proportional, so the
+   underlying property held even though the list didn't. The council's
+   reviewers split on the fix shape (overclaim-auditor favored converting
+   to a property claim; dilution-collapse-sentinel BLOCKed that as a
+   collapse — a checkable exhaustive list has real falsifiability value a
+   property claim loses) — the stricter verdict won: the list is now
+   five items, kept exhaustive, not converted to prose.
+
+**Process finding, not a doctrine-text issue:** PR #45 itself had no
+`PR_ARC_INVENTORY.md` entry — a real board-hygiene gap independent of the
+doctrine overclaims, caught by this council's `firewall-warden` pass and
+backfilled in this same commit (see that file).
+
 ## 2026-08-27 — E-ZERO-COPY-MEMORY-SAFETY-AUDITED-CLEAN-1
 
-**Status:** AUDITED CLEAN — pinned as normative doctrine in root
-`CLAUDE.md` (new "Zero-copy + memory safety" section), same commit.
-**Confidence:** High — every item checked against source, not assumed.
+**Status:** CORRECTED 2026-08-28 by `E-ZERO-COPY-MEMORY-SAFETY-OVERCLAIM-
+CORRECTION-1` (above) — a 5+3 council found 5 real overclaims in the
+doctrine text this entry certified. Originally: "AUDITED CLEAN — pinned
+as normative doctrine in root `CLAUDE.md`, same commit."
+**Confidence:** Medium — the single-pass audit's citation checks were
+individually accurate (every named function/test does exist), but the
+"no gap found" verdict overclaimed; it verified citations, not universal
+scope. See the correction entry for what was actually wrong.
 
 Operator issued a 32-point normative zero-copy/memory-safety addendum
 (merge-gating). Ran it mechanically against the tree rather than

@@ -1,5 +1,38 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — OPEN
+
+**Found.** By the 5+3 council's `handle-lifecycle-auditor` pass on PR #45
+(the zero-copy/memory-safety doctrine review). `LgjLaneDesc`/`LgjMaskDesc`
+carry an `epoch` field (`exports.rs`, lane/mask describe exports)
+specifically so a Java-side holder of a cached descriptor address could
+re-validate it against the live resource. Grepped `epoch` across
+`java/src/main` — it appears only in layout/record construction
+(`Engine.java`'s `LaneWindow`), never in a comparison. The re-check the
+field exists for is unwired; the only guard on the cached-descriptor path
+is a Java `closed` boolean (weaker: it does not detect a slot that closed
+and was reused for a different resource within the same process, the way
+a generation comparison would).
+
+**Not urgent, not silent-corruption-shaped today**: `RowStore`/`Mask`
+mark themselves permanently closed on `close()` (no slot reuse observed
+from the Java facade's own lifecycle — a `RowStore` handle is never
+recycled to address a different resource while a `lanes[]` cache still
+points at the old one, per `RowStoreLifetimeTest`). The gap is real but
+currently unreachable through the facade's own public API; it becomes
+load-bearing only if a future capability lets a Java-held descriptor
+outlive a same-slot resource swap. Filed so it is not silently assumed
+covered by the generation-registry claim in `CLAUDE.md`'s zero-copy
+section (see that section's "Pointer value is not provenance" bullet,
+corrected 2026-08-28 to name this gap explicitly rather than imply
+`epoch` is checked).
+
+**Next step, not yet scheduled**: wire `epoch` comparison into
+`RowStore`/`Mask`'s per-access path (`lane(int)`, `checkedRow`), or, if
+measurement shows the facade's own close-discipline makes it provably
+unreachable, downgrade this entry to a documented invariant rather than
+a live gap — either resolution needs the measurement, not assumption.
+
 ## ISS-LGJ-HOP-LAYOUT-BLOCKS-THE-ALGEBRA (2026-08-27) — RESOLVED (same day; ABI minor 10)
 
 **Found.** By landing R1 (selection as mask algebra) and measuring it.
