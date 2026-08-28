@@ -372,11 +372,13 @@ That is not pre-registration: an implementer could pick the metric AND
 its threshold after seeing preliminary data, and identical measurements
 could then yield opposite RowStore ship decisions. Ruled:
 
-1. **The ns delta is PRIMARY; the 2× ratio is a secondary sanity check.**
-   Both must pass. The ratio does not replace the budget and the budget
-   does not replace the ratio — at a low-single-digit-ns baseline the
-   ratio alone is undecidable (§5.3), and a budget alone would hide a
-   pathological multiple on a fast accessor.
+1. **The ns delta is the verdict; the 2× ratio is a diagnostic flag.**
+   ⊘ This bullet read *"Both must pass"* and is **struck**: the delta
+   verdict table below is the SOLE source of PASS / FAIL / UNDERPOWERED,
+   and the ratio blocks nothing. The reason for wanting the ratio at all
+   survives — at a low-single-digit-ns baseline the ratio alone is
+   undecidable (§5.3), while a budget alone would hide a pathological
+   multiple on a fast accessor — so it is **recorded**, not enforced.
 
    **The statistics, defined so identical data cannot yield two different
    decisions** (CodeRabbit, PR #49 — the form was pre-registered while the
@@ -394,11 +396,19 @@ could then yield opposite RowStore ship decisions. Ruled:
      was actually protecting — *at least* 5 forks (see "≥5 forks" in the
      acceptance form) — not a median as the score.
    - **Primary, signed and directional.**
-     `delta_ns = score(after) − score(before)`. Ship if
-     `delta_ns < N` (N = the amendment's cutoff). A *negative* delta means
-     the probe measured faster than baseline.
-   - **Secondary, directional.** `ratio = score(after) / score(before)`.
-     Ship if `ratio < 2.0`.
+     `delta_ns = score(after) − score(before)` (N = the amendment's
+     cutoff). A *negative* delta means the probe measured faster than
+     baseline. ⊘ This bullet read *"Ship if `delta_ns < N`"* and is
+     **struck as a verdict**: a bare point-estimate comparison contradicts
+     the table below wherever the interval straddles `N` — at
+     `delta_ns = 9, hw_delta = 2, N = 10` it ships while the table returns
+     UNDERPOWERED (upper bound 11). This bullet now **defines a quantity**;
+     the table alone decides what it means.
+   - **Diagnostic, directional.** `ratio = score(after) / score(before)`.
+     ⊘ This bullet read *"Ship if `ratio < 2.0`"* and is **struck as a
+     verdict** — see the diagnostic-flag rule below. `2.0` remains the
+     threshold at which the ratio is **flagged for investigation** in the
+     results commit; it blocks nothing.
    - **Run acceptance is EX ANTE and stated in terms of `N`.** ⊘ Corrects
      the per-arm-only criterion (each arm's 99.9% half-width < 10% of its
      own score), which is **not jointly satisfiable with a small budget**.
@@ -574,7 +584,9 @@ unverified*. No third option.
 - **Q3 — CLOSED** by §5 (Codex P2, statistics tightened by CodeRabbit):
   neither replaces the other. `delta_ns = score(after) − score(before)` in
   ns/accessor-call is primary, `ratio = score(after)/score(before)` under
-  2.0 is the secondary check, both must pass, each arm's own 99.9% CI
+  2.0 is a non-blocking diagnostic flag (⊘ this line read "both must
+  pass"; struck — the delta table is the sole verdict), each arm's own
+  99.9% CI
   half-width must be under 10% of its own score or the run is void, a
   non-positive delta passes and is recorded as *below the harness's
   resolution* rather than as free, **the delta interval is the WHOLE verdict
@@ -618,6 +630,7 @@ unverified*. No third option.
 | 17 | Major, closure-term hole | `ISS-LGJ-EPOCH-UNCHECKED` could have closed RESOLVED on the Mask half alone while `RowStore`'s cached path stayed boolean-guarded. Closure is now per-half and conditional. |
 | 18 | Minor ×2 | The `u32` generation-wrap qualification restored to both board summaries; the Mask "ships regardless" statement reconciled with Q2. |
 | 19 | Major, form without arithmetic | §5 pre-registered the acceptance *form* but not the statistics, so identical data could still yield opposite decisions. Now defined: arms, score-to-ns/call conversion, signed delta and ratio directions, per-arm CI acceptance, and the non-positive case (passes, recorded as *below the harness's resolution*, never as "free"). |
+| 24 | Major/P1, on #53 — CodeRabbit and Codex, independently | **Row 23's own fix committed row 23's own defect.** It declared the delta table "the whole verdict function" while leaving three earlier verdict statements standing — "Ship if `delta_ns < N`", "Ship if `ratio < 2.0`", and Q3's "both must pass" — none marked struck. Codex's counterexample: at `delta_ns = 9, hw_delta = 2, N = 10` the earlier rule ships while the table returns UNDERPOWERED. So the fourth instance of the pattern row 23 *named*, produced by the commit that named it. All three are now struck in place (⊘, not deleted): the delta and ratio bullets define QUANTITIES, the table alone returns a verdict. |
 | 23 | Adversarial read of §5 against its own premises (this pass, no reviewer) | Six defects, all internal-consistency, none of which a diff review would surface because each rule reads correctly *alone*: (1) the standalone `delta_ns ≤ 0` auto-pass **contradicted** the delta table it was shipped beside — at `delta=−1, hw=50, N=10` one says PASS, the other UNDERPOWERED; (2) per-arm-only run acceptance makes PASS **unreachable for any `N ≤ 14 ns`** at the ceiling it permits, even for a free probe — a gate that cannot return its own PASS; (3) the ratio was still compared on bare point estimates, the very error just fixed for the delta, and could veto a passing delta under "both must pass"; (4) "paired per-iteration samples" is **incoherent with §5.5's build-time variant swap** — separate builds have no pairing; (5) offering two estimators to be chosen at analysis time reopened exactly the freedom Q3 closed; (6) the retained "median of 5" contradicts the defined `avgt`-with-CI score every rule depends on. Fixed: one verdict function, ex-ante power precondition, ratio demoted to a flag, estimator fixed in the amendment, median clause regraded. **The pattern across rows 20/22/23: each repair fixed one verdict path and left a second standing beside it.** |
 | 22 | P2, on #51 — subsumes row 20 | Row 20 kept arm-CI overlap as a *label* after removing it as a verdict. Still unsound: overlapping CIs for two means are not a CI for their difference, so the label asserts a noise-floor claim the data does not support AND lets a point-estimate failure read as definitively "too costly" on a run that cannot tell. §5 now computes `hw_delta` on the delta itself and compares the interval to `0` and `N`, with a straddling interval classified **UNDERPOWERED** — neither pass nor fail. Arm-vs-arm comparison no longer appears in the rule. |
 | 21 | Low, on #51 | The row-20 fix left the non-positive-delta auto-pass resting on an unstated premise: it argues a measurement "cannot exceed a *positive* budget", but nothing constrained the amendment's `N` to be positive. At `N = 0`, `delta_ns = 0` fails the `delta_ns < N` gate while the auto-pass clause passes it — the rule contradicting itself. §5 now states the dependency and constrains the amendment to `N > 0`. |

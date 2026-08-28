@@ -68,6 +68,23 @@ analysis-time estimator reopening the freedom Q3 closed; and the retained
 the *whole* rule afterwards, not the diff. Three of these six survived
 three review rounds precisely because each round looked at what changed.
 
+**⊘ AMENDED 2026-08-28 (#53) — the "FIXED" above was premature, and the
+way it was wrong is the entry's own subject.** The repair declared the
+delta table the sole verdict function and then **left three earlier
+verdict statements standing** — "Ship if `delta_ns < N`", "Ship if
+`ratio < 2.0`", and Q3's "both must pass". CodeRabbit and Codex found it
+independently; Codex's counterexample is `delta_ns = 9, hw_delta = 2,
+N = 10`, where the earlier rule ships and the table returns UNDERPOWERED.
+
+So the pattern this entry describes claimed a **fourth** instance, and
+its author was the commit that named it. The lesson is therefore stronger
+than first written: **naming a failure mode does not confer immunity to
+it.** Writing "each repair left a second verdict standing" in the same
+diff that left a second verdict standing is as clear a demonstration as
+the ledger will ever get. All three statements are now struck in place
+(⊘, never deleted) — the delta and ratio bullets define quantities, the
+table alone returns a verdict.
+
 ## ISS-LGJ-CI-OVERLAP-AUTOPASS — post-merge finding on #49, FIXED in the follow-up
 
 **What:** `epoch-recheck-v3.md` §5's first statement of the measurement
