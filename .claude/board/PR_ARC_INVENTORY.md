@@ -8,6 +8,91 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #60 — W1+W2 built, and the fence that had to be fixed twice (merged 2026-08-28, `97f25c5` — 4 commits, head `c6d8a4c`)
+
+- **Opened because a board entry hid two obligations behind two words.** #57's
+  entry said arm (ii) "finally landed"; W1 and W2 had **no implementation at
+  all**. Codex found it on #59, *after* #59 merged.
+- **W1 built:** the thread-safety scope on `RowStore` and `Mask` — `happens-before`
+  appeared **nowhere in `java/src`** before this — plus the once-per-scan note on
+  `materializeRows()`.
+- **W2 built, and the stale doctrine is the part that mattered.** Root
+  `CLAUDE.md` had said the cached path takes "NO further registry call" and that
+  `epoch` "is unconsulted anywhere in `src/main`" — **both false for `Mask`
+  since #53**, in the file every session reads first. A future session would
+  have read a description of a gap already half-closed. Now split per half,
+  struck in place.
+- **Fence 1b was partly vacuous, and my own disable run contained the proof.**
+  It scanned the whole FILE; `Mask.materializeRows()` independently names the
+  literal, so deleting the class block — the regression the leg exists to catch
+  — left it green. Turning it red had taken stripping **two** occurrences; I
+  noticed the second, removed it, and never asked why two were needed. **The
+  rule this adds:** *a disable that removes more than the regression does not
+  demonstrate the regression is caught; if it must be widened to go red, the
+  widening IS the finding.* Instance **eleven**.
+- **Three reviewer roles, worth distinguishing.** Codex found the scoping hole;
+  **CodeRabbit found it independently** (third convergence of the day) *and*
+  added what Codex's did not — require the obligation to name `close()`, since
+  W1's duty is happens-before *between `close()` and every access*, not a
+  mention of the relation.
+- **The repair nearly failed the other way**, which is its own keeper: scoping
+  to the class javadoc immediately failed four arms on prose that plainly said
+  the right thing, because **javadoc wraps** and a phrase split across lines
+  matches no literal. The region is normalized or the fence enforces where an
+  author pressed return.
+- **A residual review claim, tested rather than accepted.** The final review's
+  risk line said the fence "does not yet fully protect the `Mask` re-validation
+  requirement." Checked by deleting that bullet: **fence 1c fires on two arms.**
+  The concern does not hold, and it is recorded as disproven rather than
+  quietly ignored.
+- **Locked:** W1 and W2 discharged, **scoped to those two** — the plan's status
+  note explicitly does not claim W3-W6. Fence 1c discharges W2's own
+  *"this precedent must be built, not merely cited."*
+- **Deferred, and it is the arc's real open question:** **enforcement.**
+  Everything here checks *wording*. 1c can prove `CLAUDE.md` says the right
+  thing about `Engine.close(long)`; nothing can prove a caller honours it.
+- **Scope:** javadoc + doctrine + two fence legs + board/plan. No ABI symbol, no
+  public signature, no behaviour change. Gate 338 → **359**.
+- **Confidence:** high on the fences (both disable-verified, 1b twice — once
+  wrongly, once correctly). High on the doctrine now matching the code, since a
+  fence checks it. **Low on the doctrine staying matched in places no fence
+  reads** — `CLAUDE.md` went stale for weeks and only a reviewer noticed.
+
+## PR #58 — Q4: the halves differ by lifetime ownership, not frequency (merged 2026-08-28, `a7e4ed5` — 3 commits, head `7c9ce3e`)
+
+- **A PROPOSAL, deliberately not acted on.** `ISS-LGJ-EPOCH-UNCHECKED` stays
+  OPEN. Adopting a structural rejection is an amendment the plan does not
+  currently define, and closing it on an argument written the same day would
+  have repeated instance eight one PR after a reviewer caught it.
+- **The finding:** §5 frames the `Mask`/`RowStore` asymmetry as **frequency**
+  (per-scan vs per-call) and therefore makes the `RowStore` half a *cost*
+  question. Verified in source, it is **lifetime ownership**: a `Mask` has a
+  parent it does not own, so closing that parent is in-contract and still
+  invalidates its cached words; a `RowStore` is only ever a parent, its bytes
+  are allocate-once `Arc<[u8]>` with no realloc surface, and its one closer
+  sets the flag `requireOpen` reads.
+- **Four review findings, all correct.** Two reviewers converged independently
+  on the conclusion being unconditional. CodeRabbit's sharpest line —
+  *"the private constructor and fresh handles do not prove sole-closer
+  behavior"* — was right: that was **a fact about construction used as a fact
+  about closure**. `Engine.close(long)` needs no facade at all.
+- **So the claim is weaker and honest:** a stale lane with `closed == false` is
+  **out of contract**, never *impossible*. The contract landed in #57 as
+  documentation, not enforcement, and Q4 inherits exactly that.
+- **A scope error caught late, and it had teeth.** Q4 said the close-after-cache
+  scenario was reachable only by violating the contract. False — it is an
+  ordinary single-thread ordering that `RowStoreLifetimeTest` exercises, and
+  read literally the sentence implied `requireOpen()` guards nothing in
+  contract, **an invitation to delete it**. Instance **ten**: a *neighbouring*
+  sentence left asserting the stronger claim after its neighbour was weakened.
+- **Locked:** the two scenarios are tabulated apart, and the per-access
+  `requireOpen()` requirement is stated as **required, not optional**.
+- **Deferred:** the `RowStore` half itself — settled in neither direction.
+- **Confidence:** high on the four facts (each read in source). Medium on the
+  framing surviving contact with enforcement: if a concurrent-access protocol
+  ever lands, Q4's "out of contract" becomes a much stronger claim and should
+  be re-derived rather than promoted.
+
 ## PR #57 — the sole-closer contract, and the leak two reviewers disagreed their way onto (merged 2026-08-28, `d6d21132` — 3 commits, head `e77ed59`)
 
 - **Opened as documentation; found a bug, so the title changed mid-flight.**
