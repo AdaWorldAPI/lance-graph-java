@@ -10,7 +10,7 @@
 
 ## PR #48 — W0: the three doctrine fences, each proven able to fire (opened 2026-08-28)
 
-- **Added:** `DoctrineFenceTest` (14 checks) — the plan
+- **Added:** `DoctrineFenceTest` (17 checks) — the plan
   `mask-membrane-valhalla-integration-v1.md` W0 / D-LGJ-MMV-0 deliverable,
   turning the PR #46-corrected doctrine's three prose claims into
   executable fences: **fence 1** pins the exact per-file occurrence count
@@ -22,28 +22,44 @@
   substrate-internal scheduling deliberately out of scope, per §E's own
   ownership logic); **fence 3** confines backend tokens to their three
   define/relay homes and rejects any code line that both carries a
-  backend token and branches. Registered in `AllTests` including the
-  no-native path (source fences need no `.so`, same rationale as
-  `ApiSurfaceTest`).
+  backend token and branches; **fence 2b** (added in review) re-checks
+  §E REFLECTIVELY — no public facade method may be topology-named — the
+  spelling-immune arm no lexical scan can equal (`ApiSurfaceTest`'s own
+  footing applied to §E). All fences read ONE shared comment filter
+  (`codeLines`), so prose in a javadoc can neither move a pinned count
+  nor report a leak; fence 3's branch markers match the canonicalized
+  line and cover ternaries/boolean operators, closing the in-place
+  ternary rewrite that kept the carrier census unchanged. Registered in
+  `AllTests` including the no-native path (source fences need no `.so`,
+  same rationale as `ApiSurfaceTest`).
 - **Locked:** each fence arm observed red-then-green on a planted
   violation before landing — unfenced `Arrays.copyOf`+`new long[` in
   `View.java` (fence 1, both patterns), `public View workers(int)`
-  (fence 2), `if (simdBackend().equals("avx512"))` (fence 3 branch half),
-  a stray `SIMD_AVX2` reference in `View.java` (fence 3 homes half).
-  Anti-vacuity guards pin the corpus as real (≥20 files scanned, ≥5
-  backend-token code lines) so an empty-scan pass cannot masquerade as
-  clean.
-- **Deliberately source-text, and says so:** `ApiSurfaceTest` checks the
-  compiled surface by reflection because inherited signatures leak
-  invisibly in source; these three properties are the opposite case —
-  call sites, identifiers, branches — which exist only in source.
-- **Gates:** full Java suite 328/328 (314 prior + 14 new), zero
+  (fence 2), the SAME method with its name and paren split across two
+  lines (invisible to any per-line lexical scan — ONLY fence 2b fired,
+  proving the reflective arm adds coverage rather than redundancy),
+  `if (simdBackend().equals("avx512"))` (fence 3, both halves), a stray
+  `SIMD_AVX2` reference in `View.java` (fence 3 homes half), and a
+  pinned `Layouts.java` carrier line rewritten IN PLACE to a ternary —
+  census count unchanged, caught by the widened marker half alone.
+  Stay-silent twin: a planted comment line carrying `Arrays.copyOf` +
+  `new long[64]` + `workers(8)` moves nothing (prose is filtered by the
+  shared `codeLines`). Anti-vacuity guards pin the corpus as real
+  (≥20 files scanned, ≥29 compiled public types, ≥5 backend-token code
+  lines) so an empty-scan pass cannot masquerade as clean.
+- **Deliberately source-text where the property lives only in source**
+  (call sites, branches), reflective where it lives in the compiled
+  surface (topology-named methods, fence 2b) — and honest about the
+  split: lexical fences are TRIPWIRES, not proofs; the census pins are
+  what force a determined evasion to touch the pin table in the same
+  diff, making it reviewable.
+- **Gates:** full Java suite 331/331 (314 prior + 17 new), zero
   regressions; no Rust/`abi.md`/public-API change of any kind.
 - **Board note:** the `STATUS_BOARD` D-LGJ-MMV-0 row lives on PR #47 (the
   plan, in flight when this opened); it flips Queued → Shipped once both
   are on `main`.
 - **Confidence:** high — every claim is a pinned count, a red-then-green
-  disable-run, or the 328-check suite.
+  disable-run, or the 331-check suite.
 
 ## PR #45 — board: PR #44 arc entry + EXP-KIA-A2-64K fresh measurement + zero-copy/memory-safety doctrine pin (merged 2026-08-28, `b2956d3` — 2 commits, head `22f3293`)
 

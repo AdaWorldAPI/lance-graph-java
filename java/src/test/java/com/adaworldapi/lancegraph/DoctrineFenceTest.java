@@ -44,21 +44,30 @@ import java.util.stream.Stream;
  * backend-invariant.
  *
  * <p>These are source-text fences, and say so honestly: {@code ApiSurfaceTest} checks the
- * COMPILED surface by reflection because inherited signatures leak invisibly in source; these
- * three properties are the opposite case — call sites, identifiers, and branches, which exist
- * only in source (reflection cannot see a branch at all).
+ * COMPILED surface by reflection because inherited signatures leak invisibly in source; the
+ * fenced properties are mostly the opposite case — call sites, identifiers, and branches, which
+ * exist only in source (reflection cannot see a branch at all). The one property that IS visible
+ * in the compiled surface — a topology-named public method — additionally gets a reflective arm
+ * (fence 2b below), which no spelling can evade, so the lexical fence 2 is the tripwire and the
+ * reflective arm is the proof for that half. Lexical fences remain tripwires, not proofs: they
+ * catch the accidental violation and the lazy evasion, and the census pins force a determined
+ * evader to touch the pin table in the same diff, which is what makes the evasion reviewable.
  *
- * <p><strong>Evasion hardening (Codex review, PR #48):</strong> all matching runs over
- * WHITESPACE-CANONICALIZED text (every whitespace character stripped), so legal Java spellings
- * like {@code new long [n]}, {@code .toArray (...)}, {@code Arrays .copyOf(...)} or
- * {@code workers (int n)} cannot slip past a literal substring. And because fence 3's same-line
- * branch check can be laundered through a local ({@code String s = simdBackend();} then
- * branching on {@code s} a line later), fence 3 ALSO pins the exact per-file count of
- * token-carrying code lines — the laundering assignment itself carries the token, so a new
- * carrier line anywhere fails the census even when no branch shares its line. The stated
- * residual: laundering by REWRITING one of the pinned lines in place is caught by the same-line
- * branch check; aliasing an already-aliased value is beyond any source fence and is what
- * review + the doctrine's wording discipline remain for.
+ * <p><strong>Evasion hardening (Codex + CodeRabbit reviews, PR #48):</strong> all fences read
+ * the SAME comment-filtered code lines ({@link #codeLines}), so prose in a javadoc or block
+ * comment can neither add a materialization count nor report a topology leak; fence 1's
+ * patterns and fence 2's tokens match whitespace-tolerantly ({@code new long [n]},
+ * {@code .toArray (...)}, {@code Arrays .copyOf(...)}, {@code workers (int n)} all still hit);
+ * fence 3's branch markers match over the WHITESPACE-CANONICALIZED line, and the marker set
+ * covers ternaries and boolean operators ({@code ?}, {@code &&}, {@code ||}), so an in-place
+ * rewrite like {@code return simdBackend()=="avx2" ? a() : b();} — which keeps the carrier
+ * census unchanged — is caught by the marker half. And because fence 3's same-line branch check
+ * can be laundered through a local ({@code String s = simdBackend();} then branching on
+ * {@code s} a line later), fence 3 ALSO pins the exact per-file count of token-carrying code
+ * lines — the laundering assignment itself carries the token, so a new carrier line anywhere
+ * fails the census even when no branch shares its line. The stated residual: aliasing an
+ * already-aliased value is beyond any source fence and is what review + the doctrine's wording
+ * discipline remain for.
  *
  * <p><strong>Proven able to fire (the W0 gate), each verified red-then-green at build time:</strong>
  * <ul>
@@ -66,9 +75,16 @@ import java.util.stream.Stream;
  *       ("unfenced materialization"); removed → green.</li>
  *   <li>Fence 2: a planted {@code public View workers(int n)} on {@code View.java} → red;
  *       removed → green.</li>
+ *   <li>Fence 2b: the same plant, spelled {@code workers (int n)}, → red on the REFLECTIVE arm
+ *       (the compiled method name carries no spelling); removed → green.</li>
  *   <li>Fence 3: a planted {@code if (simdBackend().equals("avx512"))} in
  *       {@code NativeRuntime.java} → red on BOTH halves (token outside a def/relay line with a
  *       branch marker); removed → green.</li>
+ *   <li>Fence 3 homes half: a stray {@code SIMD_AVX2} reference in {@code View.java} → red;
+ *       removed → green.</li>
+ *   <li>Fence 3 marker half alone: a pinned carrier line in {@code Layouts.java} rewritten
+ *       in place to a ternary (census count unchanged) → red on the branch check; restored →
+ *       green.</li>
  * </ul>
  *
  * <p>Needs no native library — like {@code ApiSurfaceTest}, it is most useful before the
@@ -164,8 +180,16 @@ public final class DoctrineFenceTest {
         BACKEND_LINE_PINS.put("Layouts.java", 4);       // the four SIMD_* manifest constants
     }
 
+    /**
+     * Matched against the WHITESPACE-CANONICALIZED carrier line (CodeRabbit, PR #48):
+     * {@code simdBackend()=="avx2"} carries {@code ==} with no spaces, and a ternary rewrite of
+     * a pinned line ({@code ... ? a() : b()}) keeps the carrier census unchanged, so the marker
+     * set must see it. {@code ?} / {@code &&} / {@code ||} cannot appear on any lawful
+     * define/relay line (a constant definition, a record component, a getter body), so they are
+     * safe markers here even though they are not branches everywhere in Java.
+     */
     private static final String[] BRANCH_MARKERS = {
-        "if ", "if(", "switch", " == ", " != ", ".equals(",
+        "if(", "switch", "==", "!=", ".equals(", "?", "&&", "||", "case",
     };
 
     public static void main(String[] args) {
@@ -195,6 +219,7 @@ public final class DoctrineFenceTest {
 
         fenceMaterialization(c, javaFiles);
         fenceTopology(c, javaFiles, abiSrc);
+        fenceTopologyReflective(c);
         fenceBackendDiagnosticOnly(c, javaFiles);
     }
 
@@ -206,16 +231,19 @@ public final class DoctrineFenceTest {
         Map<String, Integer> observed = new TreeMap<>();
         for (Path f : javaFiles) {
             String name = f.getFileName().toString();
-            String body = read(f);
-            for (Map.Entry<String, java.util.regex.Pattern> p
-                    : MATERIALIZATION_PATTERNS.entrySet()) {
-                int n = 0;
-                java.util.regex.Matcher m = p.getValue().matcher(body);
-                while (m.find()) {
-                    n++;
-                }
-                if (n > 0) {
-                    observed.merge(name + "|" + p.getKey(), n, Integer::sum);
+            // Per CODE line, not whole-file text: a javadoc example of `new long[...]` is prose,
+            // not a call site, and must not move a pinned count (CodeRabbit, PR #48).
+            for (String code : codeLines(f)) {
+                for (Map.Entry<String, java.util.regex.Pattern> p
+                        : MATERIALIZATION_PATTERNS.entrySet()) {
+                    int n = 0;
+                    java.util.regex.Matcher m = p.getValue().matcher(code);
+                    while (m.find()) {
+                        n++;
+                    }
+                    if (n > 0) {
+                        observed.merge(name + "|" + p.getKey(), n, Integer::sum);
+                    }
                 }
             }
         }
@@ -255,7 +283,7 @@ public final class DoctrineFenceTest {
 
         List<String> hits = new ArrayList<>();
         for (Path f : javaFiles) {
-            scanForTokens(f, TOPOLOGY_TOKENS_JAVA, hits, false);
+            scanForTokens(f, TOPOLOGY_TOKENS_JAVA, hits);
         }
 
         // The ABI's consumer-facing surface only: struct fields (abi.rs) and exported symbols
@@ -271,7 +299,7 @@ public final class DoctrineFenceTest {
         }
         c.that("the ABI surface files were found (abi.rs + exports.rs)", abiSurface.size() == 2);
         for (Path f : abiSurface) {
-            scanForTokens(f, TOPOLOGY_TOKENS_ABI, hits, false);
+            scanForTokens(f, TOPOLOGY_TOKENS_ABI, hits);
         }
 
         if (hits.isEmpty()) {
@@ -283,6 +311,85 @@ public final class DoctrineFenceTest {
                         + " EXP-KIA's sweep is a native benchmark variable, never an API", false);
             }
         }
+    }
+
+    // ── Fence 2b: the reflective arm ───────────────────────────────────────────────────────
+
+    /**
+     * The spelling-immune half of the topology fence (the review round's own lesson made
+     * structural): a lexical scan can be evaded by any legal spelling the pattern did not
+     * anticipate, but a public method NAMED for topology exists in the compiled class file with
+     * exactly one spelling. This is the same footing as {@code ApiSurfaceTest} — reflection over
+     * compiled classes — applied to §E. The lexical fence 2 stays for what reflection cannot
+     * see: the ABI struct fields and Rust exports, and non-public / local uses.
+     */
+    private static void fenceTopologyReflective(Checks c) {
+        c.section("fence 2b: no public facade method is topology-named (reflective, §E)");
+
+        List<Class<?>> types = publicFacadeTypes(c);
+        // Anti-vacuity: the compiled facade must actually be on the classpath.
+        c.that("the reflective arm sees the compiled facade (" + types.size()
+                + " public types >= 5)", types.size() >= 5);
+
+        List<String> leaks = new ArrayList<>();
+        for (Class<?> t : types) {
+            for (java.lang.reflect.Method m : t.getMethods()) {
+                if (m.getDeclaringClass() == Object.class) {
+                    continue;
+                }
+                String n = m.getName().toLowerCase(java.util.Locale.ROOT);
+                for (String stem : new String[] {"worker", "parallelism", "partition", "shard"}) {
+                    if (n.contains(stem)) {
+                        leaks.add(t.getSimpleName() + "." + m.getName());
+                        break;
+                    }
+                }
+                if (n.equals("threads")) {
+                    leaks.add(t.getSimpleName() + "." + m.getName());
+                }
+            }
+        }
+        if (leaks.isEmpty()) {
+            c.that("no public method on any facade type carries a topology name"
+                    + " (worker/parallelism/partition/shard/threads)", true);
+        } else {
+            for (String l : leaks) {
+                c.that("TOPOLOGY-NAMED PUBLIC METHOD: " + l + " — worker count belongs to the"
+                        + " state owner; no spelling of this method is admissible (§E)", false);
+            }
+        }
+    }
+
+    /** Enumerate public facade types the same way {@code ApiSurfaceTest} does. */
+    private static List<Class<?>> publicFacadeTypes(Checks c) {
+        List<Class<?>> found = new ArrayList<>();
+        try {
+            Path root = Path.of(DoctrineFenceTest.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI());
+            Path pkg = root.resolve("com/adaworldapi/lancegraph");
+            if (!Files.isDirectory(pkg)) {
+                return found;
+            }
+            try (Stream<Path> files = Files.list(pkg)) {
+                for (Path p : files.toList()) {
+                    String file = p.getFileName().toString();
+                    if (!file.endsWith(".class") || file.contains("$")) {
+                        continue;
+                    }
+                    String simple = file.substring(0, file.length() - ".class".length());
+                    Class<?> t = Class.forName("com.adaworldapi.lancegraph." + simple);
+                    if (java.lang.reflect.Modifier.isPublic(t.getModifiers())
+                            && !simple.endsWith("Test") && !simple.equals("Checks")
+                            && !simple.equals("AllTests")) {
+                        found.add(t);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            c.note("could not scan the classpath: " + e);
+        }
+        found.sort(java.util.Comparator.comparing(Class::getSimpleName));
+        return found;
     }
 
     // ── Fence 3 ────────────────────────────────────────────────────────────────────────────
@@ -297,16 +404,19 @@ public final class DoctrineFenceTest {
 
         for (Path f : javaFiles) {
             String name = f.getFileName().toString();
-            List<String> lines = readLines(f);
+            List<String> lines = codeLines(f); // prose may discuss backends freely
             for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i);
-                String code = line.strip();
-                if (code.startsWith("*") || code.startsWith("//") || code.startsWith("/*")) {
-                    continue; // prose may discuss backends freely; only code is fenced
+                String code = lines.get(i);
+                if (code.isEmpty()) {
+                    continue;
                 }
+                // Canonical form for BOTH halves (CodeRabbit, PR #48): the tokens are plain
+                // identifiers (whitespace inside one is illegal Java), but the branch markers
+                // are operators, and `x=="avx2"` must match `==` regardless of spacing.
+                String canon = canonical(code);
                 boolean carries = false;
                 for (String token : BACKEND_TOKENS) {
-                    if (code.contains(token)) {
+                    if (canon.contains(token)) {
                         carries = true;
                         break;
                     }
@@ -320,7 +430,7 @@ public final class DoctrineFenceTest {
                     strayed.add(name + ":" + (i + 1) + " " + code);
                 }
                 for (String marker : BRANCH_MARKERS) {
-                    if (code.contains(marker)) {
+                    if (canon.contains(marker)) {
                         branched.add(name + ":" + (i + 1) + " " + code);
                         break;
                     }
@@ -405,13 +515,12 @@ public final class DoctrineFenceTest {
         }
     }
 
-    private static void scanForTokens(Path f, String[] tokens, List<String> hits,
-            boolean skipComments) {
+    private static void scanForTokens(Path f, String[] tokens, List<String> hits) {
         String name = f.getFileName().toString();
-        List<String> lines = readLines(f);
+        List<String> lines = codeLines(f); // one comment filter for every fence (CodeRabbit)
         for (int i = 0; i < lines.size(); i++) {
-            String code = lines.get(i).strip();
-            if (skipComments && (code.startsWith("*") || code.startsWith("//"))) {
+            String code = lines.get(i);
+            if (code.isEmpty()) {
                 continue;
             }
             // Whitespace-canonical, case-insensitive: `public View workers (int n)` becomes
@@ -426,6 +535,40 @@ public final class DoctrineFenceTest {
         }
     }
 
+    /**
+     * The ONE comment filter every fence reads through (CodeRabbit, PR #48: three fences with
+     * three notions of "code" means prose can fail the build under one fence and pass under
+     * another). Returns lines index-aligned with the file — a comment line becomes {@code ""} so
+     * reported line numbers stay real. Line comments ({@code //}), javadoc continuation
+     * ({@code *}), block openers ({@code /*}), and the interior of a multi-line block comment
+     * are all skipped; the same prefixes cover the Rust files fence 2 scans ({@code //},
+     * {@code ///}, {@code /* ... *}{@code /}).
+     */
+    private static List<String> codeLines(Path f) {
+        List<String> raw = readLines(f);
+        List<String> out = new ArrayList<>(raw.size());
+        boolean inBlock = false;
+        for (String line : raw) {
+            String code = line.strip();
+            if (inBlock) {
+                inBlock = !code.contains("*/");
+                out.add("");
+                continue;
+            }
+            if (code.startsWith("//") || code.startsWith("*")) {
+                out.add("");
+                continue;
+            }
+            if (code.startsWith("/*")) {
+                inBlock = !code.contains("*/");
+                out.add("");
+                continue;
+            }
+            out.add(code);
+        }
+        return out;
+    }
+
     /** Strip every whitespace character — the canonical form all fences match against. */
     private static String canonical(String s) {
         StringBuilder sb = new StringBuilder(s.length());
@@ -436,14 +579,6 @@ public final class DoctrineFenceTest {
             }
         }
         return sb.toString();
-    }
-
-    private static String read(Path f) {
-        try {
-            return Files.readString(f, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            return "";
-        }
     }
 
     private static List<String> readLines(Path f) {
