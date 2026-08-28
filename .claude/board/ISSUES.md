@@ -33,6 +33,22 @@ rather than a bare "always close" instruction — the old comment was wrong
 because it reasoned from a plausible assumption about cascade, so the
 replacement records what the registry actually does.
 
+**Swept for the same shape elsewhere, and it is CLEAN** (2026-08-28, after the
+fix — a bug found once is worth one grep for its siblings). Every
+`Engine.close` call site in `java/src/main`, exhaustively:
+
+| site | shape |
+|---|---|
+| `Mask.close` | unconditional (this fix) |
+| `RowStore.close` | unconditional; holds no child handles — its only `long` fields are `handle` and `rowCount` |
+| `NativePattern.close` | unconditional, and closes its three internal masks (`scratchMask` / `auxMask` / `allMask`) **first**, so a child is never left pointing at a dead parent even transiently |
+
+**No other conditional skip exists.** Note what the sweep does *not* cover: a
+`Mask` a caller holds over a `NativePattern` is not one of those three internal
+fields, so it still becomes an orphan when its parent closes — which is correct
+by design (the caller owns it) and is now safe precisely because this fix makes
+`Mask.close()` release an orphan.
+
 ## ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW (2026-08-28) — OPEN
 
 **Opened late, and the lateness is the first thing worth recording.** v3 W4

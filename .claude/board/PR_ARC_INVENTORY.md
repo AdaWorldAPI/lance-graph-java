@@ -8,6 +8,57 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #57 — the sole-closer contract, and the leak two reviewers disagreed their way onto (merged 2026-08-28, `d6d21132` — 3 commits, head `e77ed59`)
+
+- **Opened as documentation; found a bug, so the title changed mid-flight.**
+  `Mask.close()` guarded its native close with `if (parent.isOpen())`, commented
+  *"the selection was freed with it… Nothing leaks either way."* Both halves
+  false: `registry::close` takes only the handle's OWN slot and never cascades,
+  and `create_mask` gives a mask its own `Box<[u64]>`. **An orphaned selection
+  leaked its words and its registry slot for the life of the process.**
+- **How it surfaced is the transferable part.** Codex (P2) said an orphan's
+  `lgj_close` returns `OK`; CodeRabbit said `INVALID_HANDLE`, citing that very
+  comment, and asked for it to be *documented*. They cannot both be right, so it
+  went to source: `a_mask_whose_parent_closed_reports_parent_closed` ends
+  `assert_eq!(lgj_close(m), LGJ_OK)`. Codex had the fact, CodeRabbit had the
+  inconsistency, **neither was arguing about a leak — and the leak was what the
+  disagreement was standing on.** Deferring to the more confident reviewer, or
+  splitting the difference, would have shipped the bug as documented behaviour.
+  **When two reviewers contradict each other, the disagreement is the signal.**
+- **Falsified via the complement, because the defect is invisible.** No
+  observable distinguishes a leaked slot from a live one, so
+  `orphanCloseActuallyReleases` asserts a **second** close is REJECTED — which
+  can only happen if the first one ran. Red-then-green verified; 337 → **338**.
+- **Arm (ii)'s written contract, finally landed.** `docs/abi.md` "Concurrency"
+  gains *The sole-closer contract (normative for callers; NOT enforced)*,
+  carried at all three `close()` sites, stated **with the three facts that make
+  it unenforceable** rather than as a bare rule.
+- **Three doc overclaims corrected, each verified in source first.** (1) *"every
+  operation on an orphaned child returns `PARENT_CLOSED`"* — this PR's own first
+  correction narrowed it to *"every **handle-mediated** operation"* and that was
+  **still false**; now scoped to operations resolving the child WITH its parent,
+  naming both exclusions. (2) the `Arena`-nested-lifetime claim — false for lane
+  windows; the facade's arenas back output scratch. (3) *"the `epoch` field lets
+  Java detect a stale segment"* — it does not; that is `ISS-LGJ-EPOCH-UNCHECKED`.
+- **Overclaim 1 is instance NINE** of `ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST`
+  and the purest the ledger has: eight and nine are not the same claim, they are
+  the **same sentence**, narrowed once and still wrong — so no diff could show
+  the repair and the residue apart. **Narrowing a quantifier reads like
+  diligence and yields only a smaller overclaim;** what catches it is
+  enumerating the call sites.
+- **Locked:** `ISS-LGJ-ORPHAN-MASK-CLOSE-LEAKED` opened and RESOLVED here.
+  `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` stays **OPEN** — arm (ii)'s
+  deliverable is discharged, and writing a contract down is not enforcing it.
+- **Deferred:** enforcement. Every close-side guarantee in this PR is a promise
+  to callers, not a mechanism; the ABI defines no concurrent-access protocol.
+- **Scope:** one behaviour change, one falsifier, doc + javadoc. No ABI symbol,
+  no public signature. Gate 338/338, clippy/fmt clean.
+- **Confidence:** high on the leak and its fix (registry read directly, falsifier
+  disable-verified). High on the contract's *wording*; **low on its force** — it
+  is unenforceable by construction and says so. Medium on the doc surface being
+  free of further overclaims: three were found in one pass, two by reviewers,
+  and nothing systematically checks a doc claim against the code it describes.
+
 ## PR #55 — Component H: one crossing measured, and a verdict withdrawn (merged 2026-08-28, `b55c1e8` — 5 commits, head `b101ba3`)
 
 - **Opened claiming a verdict, and the claim was wrong.** Title and body read
