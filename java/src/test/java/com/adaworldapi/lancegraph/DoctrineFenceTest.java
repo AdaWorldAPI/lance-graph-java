@@ -190,6 +190,9 @@ public final class DoctrineFenceTest {
      */
     private static final String[] BRANCH_MARKERS = {
         "if(", "switch", "==", "!=", ".equals(", "?", "&&", "||", "case",
+        // Loop conditions are branches too: `while(accepts(simdBackend()))` consumes the
+        // diagnostic without carrying any of the markers above (CodeRabbit round 5).
+        "for(", "while(",
     };
 
     public static void main(String[] args) {
@@ -389,7 +392,9 @@ public final class DoctrineFenceTest {
                 }
             }
         } catch (Exception e) {
-            c.note("could not scan the classpath: " + e);
+            // A partial discovery must not satisfy the anti-vacuity bound with whatever it found
+            // before dying (CodeRabbit round 5) — fail the suite loudly, same rule as readLines.
+            throw new IllegalStateException("reflective facade discovery failed mid-scan", e);
         }
         found.sort(java.util.Comparator.comparing(Class::getSimpleName));
         return found;
@@ -518,8 +523,29 @@ public final class DoctrineFenceTest {
         }
     }
 
+    /**
+     * Rust raw-string opener ({@code r"..."} / {@code r#"..."#}): a construct {@link #codeLines}
+     * does NOT model — its quote-scan would end the "literal" at the wrong quote and can then
+     * silently drop code after a {@code //} inside it (CodeRabbit round 5, correcting this
+     * class's earlier claim that the unmodeled construct fails loud). Rather than growing a Rust
+     * lexer for two files that contain no raw strings today, the fence TRIPS on the opener
+     * itself: introducing one into abi.rs/exports.rs fails fence 2 until the filter is taught.
+     */
+    private static final java.util.regex.Pattern RUST_RAW_STRING_OPENER =
+            java.util.regex.Pattern.compile("(^|[^A-Za-z0-9_])r#*\"");
+
     private static void scanForTokens(Path f, String[] tokens, List<String> hits) {
         String name = f.getFileName().toString();
+        if (name.endsWith(".rs")) {
+            List<String> raw = readLines(f);
+            for (int i = 0; i < raw.size(); i++) {
+                if (RUST_RAW_STRING_OPENER.matcher(raw.get(i)).find()) {
+                    hits.add(name + ":" + (i + 1) + " [rust raw string — unmodeled by the"
+                            + " comment filter; teach codeLines before using one here] "
+                            + raw.get(i).strip());
+                }
+            }
+        }
         List<String> lines = codeLines(f); // one comment filter for every fence (CodeRabbit)
         for (int i = 0; i < lines.size(); i++) {
             String code = lines.get(i);
@@ -551,7 +577,8 @@ public final class DoctrineFenceTest {
      * glob) neither starts a comment nor truncates the code after it. The same lexing covers
      * the Rust files fence 2 scans ({@code //}, {@code ///}, block comments); Rust's nested
      * block comments and raw strings are not modeled — neither occurs in the two scanned files,
-     * and a false positive from either fails LOUD, never silent.
+     * and a raw-string OPENER now trips fence 2 outright ({@link #RUST_RAW_STRING_OPENER}), so
+     * the unmodeled construct fails loud instead of silently mis-lexing.
      */
     private static List<String> codeLines(Path f) {
         List<String> raw = readLines(f);
