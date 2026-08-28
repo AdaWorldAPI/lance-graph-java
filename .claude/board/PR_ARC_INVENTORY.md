@@ -79,12 +79,6 @@
   "epoch checking". Derived independently three times from source, and
   pinned by a committed test as a W1.1 deliverable (source reading
   establishes today's path; only a test keeps a refactor honest).
-  **Two delivery paths, never one:** the `Mask` half ships
-  UNCONDITIONALLY (one downcall per whole scan); the `RowStore` half
-  ships ONLY if the per-access benchmark passes §5's gate, and otherwise
-  does not ship at all. Reading this headline as "W1.1 ships the probe"
-  full stop would mark the `RowStore` half delivered before its gate
-  closes.
 - **Locked:** atomicity arm (ii) scoped contract on three verified
   reasons (arm (i)'s mandatory falsifier cannot report red — no threads
   in the test tree); six obligations W1-W6 with W1/W2 given mechanical
@@ -109,6 +103,18 @@
 - **Confidence:** high on the headline (three independent source
   derivations) and on the arm decision; the implementation's cost
   question is explicitly UNRESOLVED and gated, not assumed.
+- **Correction 2026-08-28 (post-merge, from #51):** the Headline above
+  reads "what W1.1 ships is a native generation-checked liveness probe"
+  without its condition, which would mark the `RowStore` half delivered
+  before its gate closes. **Two delivery paths, never one:** the `Mask`
+  half ships UNCONDITIONALLY (one downcall per whole scan); the
+  `RowStore` half ships ONLY if the per-access benchmark passes §5's
+  gate, and otherwise does not ship at all. Recorded here rather than
+  edited into the Headline — this file's own rule is that only the
+  Confidence line is updatable in place and corrections append as dated
+  lines, so an in-place headline edit (as first attempted in #51) erases
+  the distinction between what was recorded at merge and what was learned
+  after it.
 
 ## PR #48 — W0: the three doctrine fences, each proven able to fire (merged 2026-08-28, `42fba54` — 7 commits, head `fc281e0`)
 

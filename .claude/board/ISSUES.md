@@ -15,6 +15,19 @@ Under an `N = 10 ns` amendment the rule ships a probe costing ~2× budget.
 LABEL on the verdict, never a verdict. A failure so labelled stays a
 failure — the remedy is a better-powered run, never a re-interpretation.
 
+**⊘ STORNO 2026-08-28 (same day, from #51) — the Fix above is itself
+superseded.** Keeping arm-CI overlap as a *label* is still unsound:
+overlapping CIs for two separate means are not a confidence interval for
+their difference, and say nothing about how that difference compares to
+`N`. So the label asserted a noise-floor claim the data does not support,
+and in the other direction let a point-estimate failure be written up as
+definitively "too costly" on a run that could not tell. **The uncertainty
+is now computed on `delta_ns` itself** and its interval compared to `0`
+and `N`; an interval straddling `N` is **UNDERPOWERED** — neither pass
+nor fail, remedy a better-powered run. Arm-vs-arm comparison no longer
+appears in the rule. The line above is kept, not deleted: it is what the
+first repair said, and the second repair is only legible against it.
+
 **Provenance worth keeping:** CodeRabbit posted this ~2 minutes AFTER #49
 merged, so no gate on #49 could have caught it and the merge itself could
 not have waited for it. A subscription is not finished at merge — the
