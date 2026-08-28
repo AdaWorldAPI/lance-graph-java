@@ -409,9 +409,14 @@ public final class DoctrineFenceTest {
         }
         StringBuilder note = new StringBuilder();
         for (int i = start; i < end; i++) {
-            note.append(lines.get(i)).append('\n');
+            note.append(' ').append(lines.get(i).strip());
         }
-        String text = note.toString();
+        // Whitespace-canonical and case-folded, exactly as `classJavadocOf` does for javadoc.
+        // Markdown wraps too: "generation-checked registry" is split across two lines in the
+        // doctrine today, so a raw-line scan cannot see it. This normalization was written for
+        // fence 1b and NOT carried here when 1c was built — the identical defect, one function
+        // over, found only because a later assertion needed a phrase that happened to wrap.
+        String text = note.toString().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
         c.that("the note is a real region, not an empty match (" + (end - start) + " lines >= 5)",
                 end - start >= 5);
 
@@ -422,8 +427,24 @@ public final class DoctrineFenceTest {
         for (String req : new String[] {"at each top-level facade call", "not atomic"}) {
             c.that("the note states W2's required wording: \"" + req + "\"", text.contains(req));
         }
+        // The MECHANISM, not just its properties (CodeRabbit, #60 — posted 44 seconds before
+        // that PR merged, so it landed against an already-merged head and is fixed here).
+        //
+        // Required because the two phrases above are properties a rewrite can KEEP while
+        // deleting what they are properties OF. Measured: a note reading "Both halves are
+        // checked at each top-level facade call, and neither is not atomic..." — false about
+        // `RowStore`, and naming no mechanism at all — passed 38/38.
+        //
+        // My own disable had deleted the whole `Mask` bullet, which took the two phrases with
+        // it and went red, and I read that as proof the half was protected. It proved deletion
+        // was caught, never rewrite. **A disable proves the path it walks and no other.**
+        c.that("the note names Mask's mechanism, not merely its properties — a rewrite can keep"
+                        + " \"at each top-level facade call\" while deleting what re-validates",
+                text.contains("mask")
+                        && text.contains("re-validates")
+                        && text.contains("generation-checked registry"));
         c.that("the note keeps the two halves apart — RowStore is named as still unguarded",
-                text.contains("RowStore") && text.contains("ISS-LGJ-EPOCH-UNCHECKED"));
+                text.contains("rowstore") && text.contains("iss-lgj-epoch-unchecked"));
     }
 
     private static void fenceMaterialization(Checks c, List<Path> javaFiles) {
