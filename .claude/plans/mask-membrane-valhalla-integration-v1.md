@@ -121,6 +121,20 @@ properties. Make them tests so they cannot silently drift again:
   red, remove it) — the falsifiability rule, applied to the fences
   themselves.
 
+**Scope honesty (added after the PR #48 review round):** the lexical
+fences are TRIPWIRES, not proofs. Every evasion finding the reviews
+produced (Codex ×3, CodeRabbit ×3) was one finding in six costumes — a
+text pattern evaded by a legal spelling it did not anticipate. What the
+fences actually guarantee: the accidental violation and the lazy evasion
+fail loudly, and the census pins force a determined evasion to touch the
+pin table in the same diff, which makes it reviewable. Where the fenced
+property is visible in the COMPILED surface, the fence gets a reflective
+arm instead (fence 2b: no topology-named public method — proven
+non-redundant by a name/paren split across two lines that only the
+reflective arm caught); where it exists only in source (call sites,
+branches), lexical + census is the honest ceiling, and review + wording
+discipline remain the last layer.
+
 ### W1 — close the membrane (G-A + G-B)
 
 - **W1.1 Epoch re-check** (the Phase-0 council spec is COMMITTED at
@@ -282,3 +296,11 @@ consumer-side scheduling creep F4 forbids.
   closes as "lab-confirmed, production-deferred" — a valid outcome, not a
   failure; the addresses are already cheap enough to have hit every
   allocation gate.
+
+**Standing review question for every future gate in this plan** (the
+review round's recurring failure class, three-for-three: benchmarks that
+structurally could not see per-accessor overhead, vacuous falsifiers,
+whitespace-evadable fences): *can this gate observe the violation it
+names, through the path a violation would actually take?* A gate that
+cannot is worse than none — it certifies. Every new gate answers this
+question in its own description before it counts as a gate.
