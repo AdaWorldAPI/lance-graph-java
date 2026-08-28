@@ -643,14 +643,34 @@ unverified*. No third option.
   — the missing piece is **enforcement** (a concurrent-access protocol in the
   ABI), not more argument.
 
-  **What this does and does not say.** It does *not* contradict Q1: per-access
-  remains the only falsifiable *placement*, exactly as Q1 argues. It asks the
+  **What this does and does not say — and the scope here was WRONG until
+  CodeRabbit corrected it on #58.** It does *not* contradict Q1: per-access
+  remains the only falsifiable *placement*, exactly as Q1 argues. Q4 asks the
   question one level up — whether the `RowStore` guard has anything
-  **in-contract** to be falsifiable *about*. The scenario Q1 names (a close
-  after the lane is cached) is, for a row store specifically, reachable only by
-  violating the sole-closer contract, i.e. only in territory abi.md now
-  declares undefined. A probe there defends past the contract boundary, which
-  it cannot do completely anyway — it narrows the window, never closes it.
+  **in-contract** to be falsifiable *about*.
+
+  ⊘ **An earlier draft said "the scenario Q1 names (a close after the lane is
+  cached) is reachable only by violating the sole-closer contract." That is
+  FALSE, and dangerously so.** A close after the lane is cached is a perfectly
+  ordinary **single-thread, in-contract lifecycle ordering** — resolve a lane
+  while open, `close()` through the object's own sole closer, then read — and
+  `RowStoreLifetimeTest` exercises exactly it (*"raw lane cached before close,
+  then read after — the guard must still fire"*, `classidAt` and
+  `payloadLow64At` both required to throw). Read literally, the struck sentence
+  implied `requireOpen()` guards nothing in contract, which would invite
+  removing the very guard that makes that ordering safe.
+
+  **The two scenarios, kept apart:**
+
+  | scenario | in contract? | what catches it |
+  |---|---|---|
+  | close after cache, `closed == true` | **YES**, ordinary | the per-access `requireOpen()` — **required, not optional** |
+  | stale lane while `closed == false` | **no** — needs a second closer or a concurrent close | nothing today; a probe would narrow, never close, the window |
+
+  Only the second row is Q4's subject. The first row is untouched by Q4 and
+  **the per-access `requireOpen()` requirement stands explicitly**. A probe
+  would defend only the second row, past the contract boundary, and cannot do
+  so completely anyway.
 
   **Adversarial check, recorded because the conclusion is convenient.** This
   finding would relieve me of an obligation a reviewer just insisted on, which

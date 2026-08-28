@@ -286,6 +286,26 @@ path while **leaving a second, independent verdict standing beside it**:
 | row 23 | the auto-pass | — (one verdict function now) |
 | #55 (8th) | — | the entry declared its own run void, then acted on it one paragraph later |
 | #57 (9th) | `abi.md`'s "**every** operation returns `PARENT_CLOSED`" | "every **handle-mediated** operation returns `PARENT_CLOSED`" — still false |
+| #58 (10th) | Q4's *conclusion*, made conditional | the *adjacent* sentence, still claiming close-after-cache is out of contract |
+
+**The tenth arrived inside the fix for the eighth's cousin, one hop sideways.**
+Two reviewers made Q4's conclusion conditional; the qualification landed, and
+the sentence **immediately below it** went on asserting that "the scenario Q1
+names (a close after the lane is cached) is reachable only by violating the
+sole-closer contract." False: that is an ordinary single-thread ordering, and
+`RowStoreLifetimeTest` exercises it. Caught by CodeRabbit, which read the
+paragraph rather than the diff hunk.
+
+**Why this one had teeth rather than being a wording slip:** read literally it
+implied `requireOpen()` guards nothing in contract — an invitation to delete
+the guard that makes the ordinary case safe. The ninth instance cost a
+quantifier; this one could have cost a check.
+
+**What generalizes past instance nine:** nine was the same *sentence* narrowed
+and still wrong. Ten is a *neighbouring* sentence left asserting the stronger
+claim after its neighbour was weakened. So the sweep after any qualification is
+not "re-read the sentence I changed" — it is **re-read the paragraph, and ask
+which other sentence was resting on the claim I just weakened.**
 
 **The ninth is the purest instance the ledger has, and it is mine from one PR
 later.** Fixing the eighth taught nothing about the ninth, because they are not
