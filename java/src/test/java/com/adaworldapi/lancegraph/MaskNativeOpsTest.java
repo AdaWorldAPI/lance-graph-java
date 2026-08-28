@@ -28,6 +28,11 @@ public final class MaskNativeOpsTest {
     private static final int FACETS_PER_ROW = 32;
     private static final long SEED = 0xABCDL;
 
+    /**
+     * Exercise the native mask operations reachable from the public facade — {@code minus},
+     * {@code hop}, {@code importRows}, {@code materializeRows}, the {@link WideFieldMask}
+     * factories, and the W1.1 cached-lane liveness probe.
+     */
     public static void run(Checks c) {
         c.section("Mask.minus(): parity vs a hand-computed scalar expected set, at a"
                 + " non-multiple-of-64 row count (the tail rule, docs/abi.md §13)");
@@ -154,6 +159,70 @@ public final class MaskNativeOpsTest {
             try (Mask none = rs.importRows()) {
                 c.eq("importRows() with zero rows selects nothing", 0, none.count());
             }
+        }
+
+        c.section("W1.1 Mask half: the cached word lane is re-authorised by the substrate,"
+                + " not by a Java boolean");
+        {
+            // The construction the plan mandates (epoch-recheck-v3 §6, W5's shape applied to the
+            // Mask half): POPULATE THE CACHE FIRST, then invalidate the native resource behind
+            // Java's back, then use the cache again.
+            //
+            // Populate-first is load-bearing. If the window were still unresolved, words() would
+            // call describeMask() fresh and throw on its own, and this test would pass with the
+            // probe deleted -- measuring the wrong mechanism entirely. Getting a real count out
+            // of materializeRows() first is what proves the cache is warm.
+            //
+            // Note what is NOT done here: nothing reads the cached address after the free. The
+            // probe refuses BEFORE returning the window, so no freed byte is ever dereferenced --
+            // which is the whole reason the guard is a substrate question rather than a Java one.
+            RowStore rs = RowStore.open(256, SEED);
+            Mask m = rs.importRows(0L, 1L, 2L, 63L, 64L, 200L);
+            long[] warm = m.materializeRows();
+            c.eq("the cache is warm: materializeRows() returned every row before invalidation",
+                    6, warm.length);
+
+            // Close the NATIVE resource directly. Java's own bookkeeping is untouched, so
+            // requireUsable() still passes and execution reaches the probe -- which is the only
+            // thing left that can notice.
+            com.adaworldapi.lancegraph.internal.ffm.Engine.close(rs.handle());
+
+            // The FIRST post-close call is the only one that goes through the cache path, and
+            // the message is asserted here for that reason: the probe CLEARS the stale window on
+            // refusal, so every later call finds words == null and takes the fresh-describe path
+            // instead, where the ABI's own status message is the correct one to see. Asserting
+            // the probe's marker on a later call fails -- observed, not reasoned about.
+            String probeMarker = "the packed bits of";
+            String viaCache = null;
+            try {
+                m.materializeRows();
+            } catch (ClosedResourceException e) {
+                viaCache = e.getMessage();
+            }
+            c.that("a warm cached word lane is refused once the substrate no longer resolves"
+                            + " the handle", viaCache != null);
+            c.that("the refusal names what it refused -- it came through the cache probe, which"
+                            + " is what a bare exception-type check could not have shown",
+                    viaCache != null && viaCache.contains(probeMarker));
+
+            // ... and it stays refused. This one goes through the fresh-describe path, because
+            // the probe dropped the window rather than leaving it for a second caller.
+            c.throwsUp("the refusal is not a one-shot -- the stale window was dropped",
+                    ClosedResourceException.class,
+                    m::materializeRows);
+
+            // count() asks the substrate every time and never touches a cached address, so it
+            // fails through the ABI's own status. Both paths raise ClosedResourceException, so a
+            // type check cannot tell them apart; the message is what discriminates.
+            String viaAbi = null;
+            try {
+                m.count();
+            } catch (ClosedResourceException e) {
+                viaAbi = e.getMessage();
+            }
+            c.that("count() also refuses once the parent is gone", viaAbi != null);
+            c.that("count() refuses through the ABI's own status, NOT through the cache probe",
+                    viaAbi != null && !viaAbi.contains(probeMarker));
         }
 
         c.section("WideFieldMask factories and accessors");

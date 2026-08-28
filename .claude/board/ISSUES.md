@@ -1,5 +1,90 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-EPOCH-UNCHECKED — RESOLVED for the `Mask` half (W1.1)
+
+`Mask.words()` now re-authorises its cached word lane with the substrate
+on every use of that cache: one O(1) downcall per whole scan, never per
+word. `Engine.epoch`'s javadoc claim ("Java re-checks this before
+trusting a cached lane segment") is no longer false for masks.
+
+**A measured correction to the v3 plan, found by building it.** v3 §6 said
+the probe would be `lgj_resource_info`, which "already reads live". It does
+— but it resolves the mask's **own** registry slot, and **that slot
+outlives its parent**. The first implementation probed it and the falsifier
+went red the right way: closing the parent store natively left the probe
+silent, `count()` correctly reported `PARENT_CLOSED`, and
+`materializeRows()` went on to **read freed bytes without crashing**.
+
+Two things worth keeping from that:
+
+1. **An absent segfault is not evidence of safety.** The exact hazard
+   Codex's P1 on #49 described, reproduced here on purpose and observed
+   doing nothing visible.
+2. **Handle liveness is not lane liveness.** A child handle resolving says
+   nothing about whether the bytes it points at are still owned. The
+   authorising question is the one that resolves the parent chain.
+
+`lgj_mask_describe` is that question — `registry::resolve_mask_with_parent`,
+O(1), fills a descriptor and does no work over the population — so the fix
+needs **no new ABI symbol** and v3's "no new production symbol" ruling
+survives, with its *reason* corrected.
+
+**Still open:** the `RowStore` half (per-access or not at all, gated on the
+benchmark) and the identical cached-descriptor path in `RowStore.lanes[]`.
+This entry closes the `Mask` half only.
+
+## ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST — §5 adversarial read, FIXED
+
+**The pattern, which is the point of this entry.** Three successive
+repairs to ONE rule (audit rows 20, 22, 23), and each fixed a verdict
+path while **leaving a second, independent verdict standing beside it**:
+
+| repair | fixed | left standing |
+|---|---|---|
+| row 20 | overlap as a verdict | overlap as a *label* |
+| row 22 | the label | the standalone `delta_ns ≤ 0` auto-pass |
+| row 23 | the auto-pass | — (one verdict function now) |
+
+Each version read correctly *in isolation*, which is why three review
+rounds did not catch it: a diff review sees the rule that changed, not
+the rule that did not. Only reading §5 whole, against its own premises,
+surfaces two rules that disagree on the same input.
+
+**Verified contradictions, with numbers.** `delta_ns = −1`,
+`hw_delta = 50`, `N = 10`: the auto-pass clause returns PASS, the delta
+table returns UNDERPOWERED, and nothing said which wins. And per-arm-only
+run acceptance at its own 10% ceiling gives `hw_delta = 14.1 ns` for two
+100 ns arms, making the PASS row **unreachable for every `N ≤ 14`** even
+when the probe is free — a gate that cannot return its own PASS.
+
+**Four further defects in the same pass:** the ratio still compared on
+bare point estimates (the error just fixed for the delta, left on the
+secondary metric, able to veto a passing delta); "paired per-iteration
+samples" incoherent with §5.5's build-time variant swap; a choose-at-
+analysis-time estimator reopening the freedom Q3 closed; and the retained
+"median of 5" contradicting the `avgt`-with-CI score every rule uses.
+
+**Standing lesson:** when a rule is repaired under review pressure, read
+the *whole* rule afterwards, not the diff. Three of these six survived
+three review rounds precisely because each round looked at what changed.
+
+**⊘ AMENDED 2026-08-28 (#53) — the "FIXED" above was premature, and the
+way it was wrong is the entry's own subject.** The repair declared the
+delta table the sole verdict function and then **left three earlier
+verdict statements standing** — "Ship if `delta_ns < N`", "Ship if
+`ratio < 2.0`", and Q3's "both must pass". CodeRabbit and Codex found it
+independently; Codex's counterexample is `delta_ns = 9, hw_delta = 2,
+N = 10`, where the earlier rule ships and the table returns UNDERPOWERED.
+
+So the pattern this entry describes claimed a **fourth** instance, and
+its author was the commit that named it. The lesson is therefore stronger
+than first written: **naming a failure mode does not confer immunity to
+it.** Writing "each repair left a second verdict standing" in the same
+diff that left a second verdict standing is as clear a demonstration as
+the ledger will ever get. All three statements are now struck in place
+(⊘, never deleted) — the delta and ratio bullets define quantities, the
+table alone returns a verdict.
+
 ## ISS-LGJ-CI-OVERLAP-AUTOPASS — post-merge finding on #49, FIXED in the follow-up
 
 **What:** `epoch-recheck-v3.md` §5's first statement of the measurement
