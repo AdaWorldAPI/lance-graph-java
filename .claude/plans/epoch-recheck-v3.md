@@ -69,23 +69,47 @@ still holds `closed == false`, then read an already-resolved lane.
   put a merge-gating falsifier where the test harness cannot run it
   (`bench/run.sh:32` compiles against `java/src/main` only and runs JMH,
   not `Checks`).
-- **Assertion shape (BLOCKING correction).** Assert **only that the
-  accessor throws** — never on any value read from freed storage. With the
-  probe: expect `ClosedResourceException`. Disabled: `classidAt` returns
-  normally and the "it threw" assertion fails. That red never inspects
-  freed bytes.
-- **Honest labelling.** The disable arm is **UAF-dependent, not
-  deterministic**. `registry::close` drops the `Arc` (`registry.rs:343`),
-  so the cached `MemorySegment.ofAddress(addr).reinterpret(...)`
-  (`Engine.java:389`) read is a use-after-free: absent the throw
-  assertion it could return stale-but-still-mapped bytes (silent green) or
-  segfault. v2 called this falsifier "deterministic" while §3 reason 1
-  disqualifies arm (i) for exactly this evidence class — the standard
-  applies to both or neither. The throw-only assertion removes the silent
-  green; the residual segfault risk is mitigated by pinning a small
-  fixture (`RowStore.open(1024, …)`, the shape `RowStoreLifetimeTest.java:34`
-  already uses) **with that reasoning written in the test's own doc
-  comment** — a justified choice, not an accident.
+- **Assertion shape.** Assert **only that the accessor throws** — never on
+  any value read. With the probe: expect `ClosedResourceException`.
+  Disabled: the accessor returns normally and the "it threw" assertion
+  fails.
+- **Construction — invalidate WITHOUT freeing (third correction, Codex P1
+  on PR #49; this is the one that actually makes W5 sound).** Asserting
+  only on the throw was necessary and **not sufficient**: with the probe
+  disabled, `classidAt` still *executes* `MemorySegment.get` against
+  storage `registry::close` has already freed (`registry.rs:343` drops the
+  `Arc`; `Engine.java:389`'s segment carries no FFM scope). Not looking at
+  the value does not stop the read from happening — the JVM can die before
+  the assertion is ever reached, and choosing a small fixture guarantees
+  nothing about whether the allocator keeps the page mapped. So the
+  disable arm's outcome stayed platform-dependent.
+
+  **The construction must therefore invalidate the registry entry while
+  keeping the allocation alive.** No existing path does this: `close`
+  takes the entry out AND drops the `Arc` in one step
+  (`registry.rs:330-344`). This needs a **test-only ABI export** that bumps
+  the slot generation while deliberately leaking the `Arc`, so the address
+  stays mapped. Then both arms are deterministic and neither touches freed
+  memory: the probe arm's `resolve` fails → throws; the disabled arm reads
+  **live, still-mapped** bytes, returns a stale-but-valid value, and the
+  "it threw" assertion fails → RED, no UB, on every platform.
+
+  Per the STOP rule and C2's discipline, that export is a substrate-side
+  deliverable and a **full ABI citizen** — its own minor bump, manifest +
+  `abi.md` entry, lazy holder, `requireMinor(N)`, and an
+  `OldAbiCompatTest` leg. It is the **only** new symbol this wave admits,
+  and it is admitted because without it the mandatory gate cannot report
+  failure reliably. (Tracked as its own row on `STATUS_BOARD.md`.)
+
+- **The pattern this defect illustrates, recorded because it took three
+  rounds.** v2 asserted on bytes read after a use-after-free. Phase 3
+  corrected the *assertion* — stop looking at the value. Codex corrected
+  the *execution* — stop performing the read. Each round removed one
+  symptom of the same root cause and left the cause standing, and the
+  middle round felt like a fix precisely because it addressed what the
+  previous critique had named. **When a correction targets the observation
+  of an unsafe operation rather than the operation, ask whether the
+  operation still happens.**
 - **Struck from v2:** the "distinguish the probe's failure from
   `requireOpen`'s" clause. On this fixture `closed == false` by
   construction, so `requireOpen` cannot fire at all — the clause is inert
@@ -310,9 +334,28 @@ Why it is undecidable *today*, not merely unmeasured:
 **The acceptance FORM, pre-registered now so the gate has a satisfaction
 condition** (without this §5 is not a gate but a veto of indefinite
 duration): ≥5 forks; accept a run only if the 99.9% CI half-width is
-< 10% of the score; report the **ns delta AND the ratio**; select (a) if
-the per-call delta is under a threshold fixed BEFORE the run. Only the
-number is left to measurement; the form is fixed here.
+< 10% of the score; report the **ns delta AND the ratio**.
+
+**Q3 is closed here, and the cutoff is procedurally pre-registered
+(Codex P2 on PR #49).** v3 as first written left both the metric and its
+number open — the ratio "retained", an absolute budget still an open
+question, and the cutoff "fixed BEFORE the run" by nobody in particular.
+That is not pre-registration: an implementer could pick the metric AND
+its threshold after seeing preliminary data, and identical measurements
+could then yield opposite RowStore ship decisions. Ruled:
+
+1. **The ns delta is PRIMARY; the 2× ratio is a secondary sanity check.**
+   Both must pass. The ratio does not replace the budget and the budget
+   does not replace the ratio — at a low-single-digit-ns baseline the
+   ratio alone is undecidable (§5.3), and a budget alone would hide a
+   pathological multiple on a fast accessor.
+2. **The numeric ns cutoff is recorded by an amendment to THIS file whose
+   commit precedes the first benchmark run**, and the wave's results
+   commit must cite that amendment's sha. No number is invented here
+   because none has been measured; what is fixed here is that the number
+   is fixed *first*, in the repository, where its ordering is checkable.
+   A results commit whose cited amendment does not precede it is not a
+   measurement — it is a post-hoc threshold, and the run is void.
 
 ---
 
@@ -368,8 +411,10 @@ as a test that attempts the mismatch and fails, or it is labelled
   ship and the Mask half does.
 - **Q2.** Does `Mask.words()`'s missing guard get fixed in this wave or
   filed separately? Masked today by one guarded caller.
-- **Q3.** Should the 2× ratio be replaced outright by an absolute ns
-  budget, given §5.3?
+- **Q3 — CLOSED** by §5 (Codex P2): neither replaces the other. The ns
+  delta is primary, the 2× ratio a secondary sanity check, both must pass,
+  and the numeric cutoff is recorded by a dated amendment to this file
+  whose commit must precede the first benchmark run.
 - **Q4.** Is `NativePattern`'s locked-close asymmetry worth normalizing, or
   documenting as deliberate?
 - **Q5 (new, from §4).** Does the fence gain a freshness-name stem, or is
@@ -392,3 +437,10 @@ as a test that attempts the mismatch and fails, or it is labelled
 | 10 | mis-citation | `Mask.java:124-127` (double-close throw) → `requireUsable` at `:175-185` via `materializeRows` `:102`. |
 | 11 | orphaned gate | D4's frozen falsifiers restored to §6 explicitly. |
 | 12 | unenforceable | W1/W2 given mechanical fence legs; §5 given a pre-registered acceptance form. |
+
+### 8b — external review on PR #49 (after ratification)
+
+| # | verdict | change |
+|---|---|---|
+| 13 | P1, third round on one defect | W5 again: asserting only on the throw stopped the council from *looking* at freed bytes but not from *reading* them, so the disable arm stayed platform-dependent. Construction changed to invalidate-without-free via a test-only ABI export (the one new symbol this wave admits, a full ABI citizen). The three-round pattern is recorded in §1 C1 as its own lesson. |
+| 14 | P2, pre-registration hole | Q3 closed (ns delta primary, ratio secondary, both must pass) and the numeric cutoff bound to an amendment commit that must PRECEDE the first run — otherwise metric and threshold could both be chosen after seeing data. |
