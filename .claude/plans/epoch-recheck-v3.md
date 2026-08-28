@@ -588,6 +588,119 @@ unverified*. No third option.
   per accessor call) is falsifiable. Measurement (§5) cannot rescue the
   cheap arm; if per-access proves too costly, the RowStore half does not
   ship and the Mask half does.
+- **Q4 — PROPOSED 2026-08-28, NOT self-ratified: the two halves were never
+  symmetric in the way §5 assumes, and the `RowStore` half may not be a cost
+  question at all.** §5 frames the asymmetry as one of *frequency* — `Mask`
+  pays a probe once per scan, `RowStore` once per accessor call — and therefore
+  makes the `RowStore` half a cost question needing a benchmark. The actual
+  asymmetry is one of **lifetime ownership**, and it sits upstream of cost.
+
+  Four facts, each verified in-tree on 2026-08-28 rather than reasoned from the
+  design:
+
+  1. **A `Mask` has a parent it does not own.** `create_mask` accepts a parent
+     of kind `PATTERN | ROWSTORE` (`registry.rs`), and that parent's close runs
+     through the parent's *own* sole closer. So closing a `RowStore` while a
+     `Mask` over it is alive is **entirely within** the sole-closer contract
+     (abi.md, "Concurrency") and still invalidates the child's cached words.
+     That is exactly the W1.1 falsifier, and it is why the `Mask` half was
+     worth shipping.
+  2. **A `RowStore` is only ever a parent.** Nothing in the registry makes a
+     row store a child of anything, so no in-contract close of *another*
+     object can invalidate its lanes.
+  3. **A `RowStore`'s backing bytes are allocate-once and immutable** —
+     `bytes: Arc<[u8]>` (`rowstore.rs`), with `generate*` constructors and **no
+     push / resize / insert / realloc surface at all**. Lane addresses are
+     stable for the store's whole lifetime.
+  4. **Its handle has exactly one closer, and that closer sets the flag.**
+     `RowStore`'s constructor is private and every factory mints a fresh
+     handle, so two facades cannot share one. `RowStore.close()` sets `closed`,
+     which `requireOpen` checks on every accessor call.
+
+  **Therefore — and this conclusion is CONDITIONAL, which both reviewers on #58
+  were right to insist be said first rather than left in the adversarial
+  check:** *within* the sole-closer contract there is no state in which a
+  `RowStore`'s cached lane is stale while `closed` is false. The Java boolean —
+  a mechanism this plan and the root `CLAUDE.md` both correctly call "strictly
+  weaker" — is **sufficient for this specific resource, inside that contract**,
+  for a structural reason rather than a lucky one.
+
+  **What the condition costs, stated plainly.** The contract landed in #57 and
+  is **documented, not enforced**: `Engine.close(long)` is still `public
+  static` and reachable outside the owning facade, `windowOf`'s segment is
+  unbounded-lifetime, and `RowStore.closed` is a plain non-volatile boolean.
+  A caller who violates the contract — or a second thread closing while a
+  reader is live — *can* therefore produce a stale cached lane with
+  `closed == false`. **Q4 does not claim that state is structurally
+  impossible.** It claims the state is **out of contract**, which is weaker and
+  is the honest form. The probe would defend only that out-of-contract
+  territory, and cannot do so completely: re-describing narrows the window and
+  never closes it (`ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW`).
+
+  **So adoption is gated twice, not once:** the ruling below, *and* the
+  contract being real. #57 makes it real as **documentation**. If a future
+  session wants the stronger form — "impossible" rather than "out of contract"
+  — the missing piece is **enforcement** (a concurrent-access protocol in the
+  ABI), not more argument.
+
+  **What this does and does not say — and the scope here was WRONG until
+  CodeRabbit corrected it on #58.** It does *not* contradict Q1: per-access
+  remains the only falsifiable *placement*, exactly as Q1 argues. Q4 asks the
+  question one level up — whether the `RowStore` guard has anything
+  **in-contract** to be falsifiable *about*.
+
+  ⊘ **An earlier draft said "the scenario Q1 names (a close after the lane is
+  cached) is reachable only by violating the sole-closer contract." That is
+  FALSE, and dangerously so.** A close after the lane is cached is a perfectly
+  ordinary **single-thread, in-contract lifecycle ordering** — resolve a lane
+  while open, `close()` through the object's own sole closer, then read — and
+  `RowStoreLifetimeTest` exercises exactly it (*"raw lane cached before close,
+  then read after — the guard must still fire"*, `classidAt` and
+  `payloadLow64At` both required to throw). Read literally, the struck sentence
+  implied `requireOpen()` guards nothing in contract, which would invite
+  removing the very guard that makes that ordering safe.
+
+  **The two scenarios, kept apart:**
+
+  | scenario | in contract? | what catches it |
+  |---|---|---|
+  | close after cache, `closed == true` | **YES**, ordinary | the per-access `requireOpen()` — **required, not optional** |
+  | stale lane while `closed == false` | **no** — needs a second closer or a concurrent close | nothing today; a probe would narrow, never close, the window |
+
+  Only the second row is Q4's subject. The first row is untouched by Q4 and
+  **the per-access `requireOpen()` requirement stands explicitly**. A probe
+  would defend only the second row, past the contract boundary, and cannot do
+  so completely anyway.
+
+  **Adversarial check, recorded because the conclusion is convenient.** This
+  finding would relieve me of an obligation a reviewer just insisted on, which
+  is precisely when a self-serving argument is most likely. Three counters, and
+  where each lands: *(a) "contract violations do happen"* — true, but the same
+  reasoning would demand a probe on every cached read everywhere; the contract
+  is the boundary, and defending past it is unbounded. *(b) "a future op might
+  reallocate"* — none exists and `Arc<[u8]>` makes the bytes structurally
+  immutable, but this is a **real** dependency and is written into the closure
+  condition below. *(c) "is `Mask` genuinely in-contract-vulnerable?"* — yes,
+  verified: its parent's close is by the parent's own sole closer, and the W1.1
+  falsifier reproduced it through the sanctioned route.
+
+  **This is a PROPOSAL and it is deliberately not acted on.** W4 routes rejection of
+  the `RowStore` half through §7 Q1 — whose cost arm is *measured under §5*,
+  with Q3 fixing the verdict statistics. (⊘ An earlier draft called this "a §7
+  Q1 *measurement*", conflating W4's pointer with the route it points at: Q1 is
+  closed on **falsifiability** and defers cost to §5.) Either way the route is
+  a measurement, and rejection on architectural grounds is a **different route
+  that this plan does not currently define**. Adopting it is an amendment, not a session's own call —
+  and closing `ISS-LGJ-EPOCH-UNCHECKED` on the strength of an argument I wrote
+  today would repeat instance eight exactly (`ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST`),
+  one PR after it was caught. **The issue stays OPEN pending a ruling.**
+
+  **If adopted**, the closure condition is: the `RowStore` half is rejected on
+  structural grounds, and the rejection is **void the moment fact 3 stops
+  holding** — any mutating or reallocating row-store op reopens it, since a
+  realloc invalidates a cached lane with no close involved and neither the
+  boolean nor a close-triggered probe would catch it. That single dependency is
+  the whole load the argument bears.
 - **Q2 — safety half CLOSED** by the `words()` probe (see §6: every
   `requireUsable` condition implies native closure, so the probe fires in
   both). What remains open is only message quality — whether `words()` also

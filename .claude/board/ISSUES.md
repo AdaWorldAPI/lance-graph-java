@@ -254,9 +254,40 @@ O(1), fills a descriptor and does no work over the population — so the fix
 needs **no new ABI symbol** and v3's "no new production symbol" ruling
 survives, with its *reason* corrected.
 
-**Still open:** the `RowStore` half (per-access or not at all, gated on the
-benchmark) and the identical cached-descriptor path in `RowStore.lanes[]`.
-This entry closes the `Mask` half only.
+**Still open:** the `RowStore` half and the cached-descriptor path in
+`RowStore.lanes[]`. This entry closes the `Mask` half only.
+
+**⊘ "the identical cached-descriptor path" — struck 2026-08-28. The two paths
+are NOT identical, and the difference may settle the `RowStore` half without a
+benchmark.** Verified in-tree, not reasoned from the design: a `Mask` has a
+parent it does **not** own (`create_mask` takes `PATTERN | ROWSTORE`), so
+closing that parent is **in-contract** and still invalidates the child's cached
+words — the W1.1 falsifier. A `RowStore` is only ever a *parent*; its bytes are
+allocate-once `Arc<[u8]>` with **no realloc surface**; its constructor is
+private and every factory mints a fresh handle; and its one closer sets the
+flag `requireOpen` reads. So **within** the sole-closer contract there is no
+state where its cached lane is stale and `closed` is false — the weaker
+mechanism is sufficient **for this resource, inside that contract**,
+structurally rather than by luck.
+
+**The conditional is load-bearing and belongs here, not in a footnote** (both
+reviewers on #58 said so independently). The contract landed in #57 as
+**documentation, not enforcement**: `Engine.close(long)` is still `public
+static`, `windowOf`'s segment is unbounded-lifetime, and `closed` is a plain
+non-volatile boolean. A contract violation, or a concurrent close against a
+live reader, *can* produce a stale cached lane with `closed == false`. **Q4
+does not claim that is impossible — it claims it is out of contract**, and the
+probe would defend only that territory, incompletely (re-describing narrows the
+window, never closes it). The stronger form needs **enforcement**, not more
+argument.
+
+**Not acted on, and that is the point.** Full argument, its adversarial check,
+and its single load-bearing dependency are `epoch-recheck-v3.md` **Q4**, filed
+as a PROPOSAL. W4's rejection route for this half is a *measurement*; rejection
+on structural grounds is a route the plan does not define, so adopting it is an
+amendment rather than a session's own call. **Closing this issue on an argument
+I wrote today would repeat instance eight one PR after it was caught.** The
+issue stays OPEN pending a ruling.
 
 ## ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST — §5 adversarial read, FIXED
 
@@ -271,6 +302,26 @@ path while **leaving a second, independent verdict standing beside it**:
 | row 23 | the auto-pass | — (one verdict function now) |
 | #55 (8th) | — | the entry declared its own run void, then acted on it one paragraph later |
 | #57 (9th) | `abi.md`'s "**every** operation returns `PARENT_CLOSED`" | "every **handle-mediated** operation returns `PARENT_CLOSED`" — still false |
+| #58 (10th) | Q4's *conclusion*, made conditional | the *adjacent* sentence, still claiming close-after-cache is out of contract |
+
+**The tenth arrived inside the fix for the eighth's cousin, one hop sideways.**
+Two reviewers made Q4's conclusion conditional; the qualification landed, and
+the sentence **immediately below it** went on asserting that "the scenario Q1
+names (a close after the lane is cached) is reachable only by violating the
+sole-closer contract." False: that is an ordinary single-thread ordering, and
+`RowStoreLifetimeTest` exercises it. Caught by CodeRabbit, which read the
+paragraph rather than the diff hunk.
+
+**Why this one had teeth rather than being a wording slip:** read literally it
+implied `requireOpen()` guards nothing in contract — an invitation to delete
+the guard that makes the ordinary case safe. The ninth instance cost a
+quantifier; this one could have cost a check.
+
+**What generalizes past instance nine:** nine was the same *sentence* narrowed
+and still wrong. Ten is a *neighbouring* sentence left asserting the stronger
+claim after its neighbour was weakened. So the sweep after any qualification is
+not "re-read the sentence I changed" — it is **re-read the paragraph, and ask
+which other sentence was resting on the claim I just weakened.**
 
 **The ninth is the purest instance the ledger has, and it is mine from one PR
 later.** Fixing the eighth taught nothing about the ninth, because they are not
