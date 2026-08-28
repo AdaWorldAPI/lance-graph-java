@@ -220,6 +220,30 @@ path while **leaving a second, independent verdict standing beside it**:
 | row 20 | overlap as a verdict | overlap as a *label* |
 | row 22 | the label | the standalone `delta_ns ≤ 0` auto-pass |
 | row 23 | the auto-pass | — (one verdict function now) |
+| #55 (8th) | — | the entry declared its own run void, then acted on it one paragraph later |
+| #57 (9th) | `abi.md`'s "**every** operation returns `PARENT_CLOSED`" | "every **handle-mediated** operation returns `PARENT_CLOSED`" — still false |
+
+**The ninth is the purest instance the ledger has, and it is mine from one PR
+later.** Fixing the eighth taught nothing about the ninth, because they are not
+the same claim — they are the same *sentence*, narrowed once and still wrong.
+`abi.md` promised `PARENT_CLOSED` from *every* operation on an orphaned child;
+#57 narrowed that to every **handle-mediated** operation and shipped it as the
+correction. Codex (P2, #57) showed the narrowed version false in two ways the
+repo's own tests already assert: `lgj_resource_info` resolves the child's own
+still-live slot and returns `OK`, and `lgj_close(orphan)` returns `OK` —
+pinned at `exports.rs`'s `a_mask_whose_parent_closed_reports_parent_closed`,
+whose last line is `assert_eq!(lgj_close(m), LGJ_OK)`.
+
+The true predicate is narrower than either: only operations that resolve the
+child **with its parent** (`resolve_mask_with_parent`). Both sites now say that
+and name the two exclusions.
+
+**What generalizes:** rows 5-7 recorded fixes that *introduced* the next defect.
+This is that shape at its tightest — the repair and the residue in one sentence,
+so no diff could show them apart. A quantifier narrowed once ("every" → "every
+handle-mediated") reads like diligence and is only a *smaller* overclaim; the
+check that catches it is enumerating the actual call sites, not re-reading the
+sentence.
 
 Each version read correctly *in isolation*, which is why three review
 rounds did not catch it: a diff review sees the rule that changed, not

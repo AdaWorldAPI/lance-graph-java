@@ -257,7 +257,7 @@ plan falsifies it directly rather than assuming it.
 | Can native storage relocate? | **No.** Lanes are allocated once at `lgj_pattern_open` and never reallocated, resized, or moved while the resource is alive. This is a hard ABI guarantee; any future growable lane requires a `major` bump. |
 | Can Java mutate it? | Only where `LGJ_FLAG_WRITABLE` is set on the descriptor. Pattern lanes are **read-only**; mask words are writable. |
 | What happens when the resource closes? | Its lanes are freed, its generation is bumped, its children fail with `PARENT_CLOSED`. |
-| Can a child view outlive the parent? | It can *exist* but not *work* — every **handle-mediated** operation on it returns `PARENT_CLOSED`. ⚠ This does **not** cover a descriptor address Java has already cached and reads directly: that read consults no handle, so nothing returns a status at all. See *The sole-closer contract* below. |
+| Can a child view outlive the parent? | It can *exist* but not *work* — every operation that **resolves the child with its parent** (`resolve_mask_with_parent`: `mask_count`, `mask_describe`, `mask_and`, …) returns `PARENT_CLOSED`. Two exclusions, both deliberate and both covered by tests: `lgj_resource_info` resolves the child's **own** slot, which is still live, and returns `OK`; and `lgj_close(child)` on an orphan also returns `OK`, since the child is still a real resource to release. ⚠ Nor does any of this cover a descriptor address Java has already cached and reads directly — that read resolves nothing, so no status is returned at all. See *The sole-closer contract* below. |
 | How are errors represented? | Negative `i32` status. Never a panic across the boundary (§9). |
 
 ### Concurrency
@@ -289,8 +289,10 @@ caller who violates it gets no diagnostic:
    carry both a check-then-act race and a *visibility* race across threads.
 
 **Why the generation-checked registry does not close this.** It fails closed on
-every *handle resolve*, which is why every handle-mediated operation on a closed
-parent returns `PARENT_CLOSED`. But a cached descriptor read resolves no handle:
+every *handle resolve*, which is why every operation that resolves a child **with
+its parent** returns `PARENT_CLOSED` once that parent is gone (the exclusions are
+in the resource table above: `lgj_resource_info` and `lgj_close` resolve the
+child's own slot and return `OK`). But a cached descriptor read resolves nothing:
 Java holds the address, reads through it, and the registry is never consulted.
 Re-authorising the cached address before each use (as `Mask.words()` does, via
 `lgj_mask_describe`) **narrows** the window — the probe's read is a native
