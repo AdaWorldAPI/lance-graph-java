@@ -48,6 +48,18 @@ import java.util.stream.Stream;
  * three properties are the opposite case — call sites, identifiers, and branches, which exist
  * only in source (reflection cannot see a branch at all).
  *
+ * <p><strong>Evasion hardening (Codex review, PR #48):</strong> all matching runs over
+ * WHITESPACE-CANONICALIZED text (every whitespace character stripped), so legal Java spellings
+ * like {@code new long [n]}, {@code .toArray (...)}, {@code Arrays .copyOf(...)} or
+ * {@code workers (int n)} cannot slip past a literal substring. And because fence 3's same-line
+ * branch check can be laundered through a local ({@code String s = simdBackend();} then
+ * branching on {@code s} a line later), fence 3 ALSO pins the exact per-file count of
+ * token-carrying code lines — the laundering assignment itself carries the token, so a new
+ * carrier line anywhere fails the census even when no branch shares its line. The stated
+ * residual: laundering by REWRITING one of the pinned lines in place is caught by the same-line
+ * branch check; aliasing an already-aliased value is beyond any source fence and is what
+ * review + the doctrine's wording discipline remain for.
+ *
  * <p><strong>Proven able to fire (the W0 gate), each verified red-then-green at build time:</strong>
  * <ul>
  *   <li>Fence 1: a planted {@code long[] extra = new long[4];} in {@code View.java} → red
@@ -87,11 +99,36 @@ public final class DoctrineFenceTest {
         MATERIALIZATION_PINS.put("Abi.java|MemorySegment.copy", 1);
     }
 
-    /** Every pattern fence 1 watches — including ones whose lawful count is zero everywhere. */
-    private static final String[] MATERIALIZATION_PATTERNS = {
-        "Arrays.copyOf", ".toArray(", "new long[", "new int[", "new byte[",
-        "MemorySegment.copy", "ByteBuffer.allocate", "Collectors.",
-    };
+    /**
+     * Every pattern fence 1 watches — including ones whose lawful count is zero everywhere.
+     * Display name → whitespace-tolerant regex, so {@code new long [n]} /
+     * {@code Arrays .copyOf} / {@code .toArray (...)} spellings cannot evade (Codex, PR #48).
+     * The {@code new} keyword keeps a real identifier boundary on BOTH sides ({@code \b} +
+     * mandatory {@code \s+} before the type), which plain whitespace-stripping cannot express
+     * ({@code return new int[0]} stripped becomes {@code returnnewint[0]} and the boundary is
+     * destroyed — measured, not hypothetical).
+     */
+    private static final Map<String, java.util.regex.Pattern> MATERIALIZATION_PATTERNS =
+            new TreeMap<>();
+
+    static {
+        MATERIALIZATION_PATTERNS.put("Arrays.copyOf",
+                java.util.regex.Pattern.compile("\\bArrays\\s*\\.\\s*copyOf"));
+        MATERIALIZATION_PATTERNS.put(".toArray(",
+                java.util.regex.Pattern.compile("\\.\\s*toArray\\s*\\("));
+        MATERIALIZATION_PATTERNS.put("new long[",
+                java.util.regex.Pattern.compile("\\bnew\\s+long\\s*\\["));
+        MATERIALIZATION_PATTERNS.put("new int[",
+                java.util.regex.Pattern.compile("\\bnew\\s+int\\s*\\["));
+        MATERIALIZATION_PATTERNS.put("new byte[",
+                java.util.regex.Pattern.compile("\\bnew\\s+byte\\s*\\["));
+        MATERIALIZATION_PATTERNS.put("MemorySegment.copy",
+                java.util.regex.Pattern.compile("\\bMemorySegment\\s*\\.\\s*copy"));
+        MATERIALIZATION_PATTERNS.put("ByteBuffer.allocate",
+                java.util.regex.Pattern.compile("\\bByteBuffer\\s*\\.\\s*allocate"));
+        MATERIALIZATION_PATTERNS.put("Collectors.",
+                java.util.regex.Pattern.compile("\\bCollectors\\s*\\."));
+    }
 
     // ── Fence 2: topology tokens that must never appear on the consumer surface ────────────
     private static final String[] TOPOLOGY_TOKENS_JAVA = {
@@ -110,6 +147,22 @@ public final class DoctrineFenceTest {
 
     private static final Set<String> BACKEND_TOKEN_HOMES =
             Set.of("NativeRuntime.java", "Abi.java", "Layouts.java");
+
+    /**
+     * The exact per-home count of CODE lines carrying a backend token (measured 2026-08-28).
+     * This is the anti-laundering half (Codex, PR #48): {@code String s = simdBackend();}
+     * followed by branching on {@code s} evades the same-line branch check — but the
+     * assignment line itself carries the token, so ANY new carrier line fails this census
+     * until deliberately re-pinned. Rewriting a pinned line in place to add a branch is the
+     * same-line check's job; the two nets overlap by design.
+     */
+    private static final Map<String, Integer> BACKEND_LINE_PINS = new TreeMap<>();
+
+    static {
+        BACKEND_LINE_PINS.put("NativeRuntime.java", 3); // simdBackend() def, its body, describe()
+        BACKEND_LINE_PINS.put("Abi.java", 4);           // record components ×2, relay def + body
+        BACKEND_LINE_PINS.put("Layouts.java", 4);       // the four SIMD_* manifest constants
+    }
 
     private static final String[] BRANCH_MARKERS = {
         "if ", "if(", "switch", " == ", " != ", ".equals(",
@@ -154,10 +207,15 @@ public final class DoctrineFenceTest {
         for (Path f : javaFiles) {
             String name = f.getFileName().toString();
             String body = read(f);
-            for (String pattern : MATERIALIZATION_PATTERNS) {
-                int n = countOccurrences(body, pattern);
+            for (Map.Entry<String, java.util.regex.Pattern> p
+                    : MATERIALIZATION_PATTERNS.entrySet()) {
+                int n = 0;
+                java.util.regex.Matcher m = p.getValue().matcher(body);
+                while (m.find()) {
+                    n++;
+                }
                 if (n > 0) {
-                    observed.merge(name + "|" + pattern, n, Integer::sum);
+                    observed.merge(name + "|" + p.getKey(), n, Integer::sum);
                 }
             }
         }
@@ -234,6 +292,7 @@ public final class DoctrineFenceTest {
 
         List<String> strayed = new ArrayList<>();
         List<String> branched = new ArrayList<>();
+        Map<String, Integer> carrierCensus = new TreeMap<>();
         int tokenLines = 0;
 
         for (Path f : javaFiles) {
@@ -256,6 +315,7 @@ public final class DoctrineFenceTest {
                     continue;
                 }
                 tokenLines++;
+                carrierCensus.merge(name, 1, Integer::sum);
                 if (!BACKEND_TOKEN_HOMES.contains(name)) {
                     strayed.add(name + ":" + (i + 1) + " " + code);
                 }
@@ -265,6 +325,32 @@ public final class DoctrineFenceTest {
                         break;
                     }
                 }
+            }
+        }
+
+        // The anti-laundering census: every carrier line accounted for, per home, exactly.
+        List<String> censusDrift = new ArrayList<>();
+        for (Map.Entry<String, Integer> pin : BACKEND_LINE_PINS.entrySet()) {
+            Integer got = carrierCensus.get(pin.getKey());
+            if (got == null || !got.equals(pin.getValue())) {
+                censusDrift.add(pin.getKey() + " carries " + (got == null ? 0 : got)
+                        + " token lines, pinned " + pin.getValue());
+            }
+        }
+        for (Map.Entry<String, Integer> o : carrierCensus.entrySet()) {
+            if (!BACKEND_LINE_PINS.containsKey(o.getKey())) {
+                censusDrift.add(o.getKey() + " carries " + o.getValue()
+                        + " token lines, pinned 0 (not a home)");
+            }
+        }
+        if (censusDrift.isEmpty()) {
+            c.that("the backend-token carrier census matches its pin exactly (a laundering"
+                    + " assignment is itself a new carrier line and fails here)", true);
+        } else {
+            for (String d : censusDrift) {
+                c.that("BACKEND CARRIER CENSUS DRIFT: " + d + " — a new line consuming the"
+                        + " diagnostic (even without a same-line branch) must be deliberately"
+                        + " re-pinned or removed", false);
             }
         }
 
@@ -328,7 +414,9 @@ public final class DoctrineFenceTest {
             if (skipComments && (code.startsWith("*") || code.startsWith("//"))) {
                 continue;
             }
-            String lower = code.toLowerCase(java.util.Locale.ROOT);
+            // Whitespace-canonical, case-insensitive: `public View workers (int n)` becomes
+            // `publicviewworkers(intn)` and still carries `workers(`.
+            String lower = canonical(code).toLowerCase(java.util.Locale.ROOT);
             for (String token : tokens) {
                 if (lower.contains(token.toLowerCase(java.util.Locale.ROOT))) {
                     hits.add(name + ":" + (i + 1) + " [" + token + "] " + code);
@@ -338,14 +426,16 @@ public final class DoctrineFenceTest {
         }
     }
 
-    private static int countOccurrences(String body, String pattern) {
-        int n = 0;
-        int at = body.indexOf(pattern);
-        while (at >= 0) {
-            n++;
-            at = body.indexOf(pattern, at + pattern.length());
+    /** Strip every whitespace character — the canonical form all fences match against. */
+    private static String canonical(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (!Character.isWhitespace(ch)) {
+                sb.append(ch);
+            }
         }
-        return n;
+        return sb.toString();
     }
 
     private static String read(Path f) {
