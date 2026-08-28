@@ -1,3 +1,249 @@
+## 2026-08-27 — ABI minor 10: the columnar store LANDS, and Java is proven layout-blind
+
+The R2 that #44 measured as a lab arm is now the substrate change R11
+predicted it would be: **an additive constructor plus lane descriptors.**
+
+- **`lgj_rowstore_open_columnar`** — facet-major over the `(row × facet)`
+  plane: classid / lo64 / hi32 regions, each 32 contiguous per-facet blocks;
+  same 512n bytes, same generator draws, same logical content (pinned:
+  `layouts_hold_identical_logical_content`, with an anti-vacuity guard that
+  the BYTES differ). A layout is a schema, not a resource kind — every
+  mask/hop/count symbol takes the handle unchanged.
+- **Measured through the ABI** (65 536 rows, all 32 facets, equivalence
+  asserted before timing): hop **4.8× / 4.6× / 3.3×** over AoS at the
+  classid-frontier / 2-hop-frontier / full-population arms. The lab's fused
+  single-plane pass has a further ~10× in it — named as the next rung.
+- **The lane table is the mechanism** (33 → 97): payload lo64/hi32 lanes
+  join classid, every descriptor carrying its layout's own offset+stride.
+  Java's per-row accessors now read ONLY through served descriptors —
+  `rowOffset` and the facade's last geometry constants are DELETED — and the
+  disable-run proves it two-sided: stride hard-coded to 512 fails the
+  columnar store at row 1 facet 0 (the first address divergence) while AoS
+  stays green. E3 is now structural on both sides of the membrane.
+- **Honest refusal:** the register-sweep family (`facetSumAs`/`facetSum`/
+  layout probe) returns the new `UNSUPPORTED_LAYOUT` (-18) on facet-major —
+  the 12-byte register is deliberately split there, and gathering it back
+  per row would be the serialization this repo just spent a day removing.
+  Pinned two-sided; AoS unaffected.
+- **The operator's stated facts, pinned as tests, not trusted:** every
+  carving group (6×2 / 4×3 / 3×4) is ≤ 4 bytes — half the JEP 401
+  flattening budget R4/R10 measured from the Valhalla side — and 512 plus
+  every columnar region/block offset is 64-aligned for any n
+  (`carving_groups_fit_the_flattening_budget_and_the_layout_is_64_aligned`).
+- Gates: Rust **138/138** both feature configs, clippy `-D warnings` + fmt;
+  Java **314 core** (ColumnarStoreTest 10 new) **+ 143 consumer**; compat
+  proven BOTH directions against a real minor-9 library built from the
+  previous commit (minor-10 gate names the minor, never a missing symbol);
+  runtime-confirmed `abi 0.10`. `docs/abi.md` §18, symbol count 26,
+  status −18.
+
+## 2026-08-27 — the simd.rs isomorphism pinned as the ENFORCEMENT LAYER; J2 closed
+
+- **Doctrine pinned** (root `CLAUDE.md`, rules E1–E6; board entry
+  `E-JAVA-IS-SIMD-RS-VALHALLA-PANAMA-IS-THE-POLYFILL-1`): Java ↔ `simd.rs`
+  (facade, vocabulary only), Valhalla+Panama ↔ the cfg-dispatch polyfill,
+  Rust ↔ `simd_{arch}.rs` (all machinery). Grounded by measurement, not
+  analogy: 37 facade functions / 0 shipping instructions vs 488 intrinsics
+  in one backend; `simd_scalar` a backend BELOW the facade; facade
+  intrinsics only under `#[cfg(test)]` as oracles.
+- **J2 closed under E3.** `RowStore`'s hand-written `ROW_BYTES = 512` /
+  `FACET_BYTES = 16` and the literal `+ 4` / `+ 12` payload offsets are
+  gone; `internal/ffm/Layouts` now DERIVES `ROW_BYTES` / `FACET_BYTES` /
+  `FACET_PAYLOAD_OFFSET` / `FACET_PAYLOAD_HI32_OFFSET` from
+  `ROW_LAYOUT`/`ROW_FACET` (`byteOffset(groupElement("payload"))`, the
+  u64's own `byteSize()` — no literal survives), and the facade names them.
+  One source, proven by the existing `SELF_CHECK`; the enforcement is the
+  DELETION of the second spelling, not a tautological test.
+- Gates: Java 304 core unchanged; consumer suites unchanged (no signature
+  moved); Rust untouched by this commit beyond none.
+
+## 2026-08-27 — ABI minor 9: the reduction moved to where the data is, and the placement rule is now ABI
+
+Operator ruling, verbatim intent: *"java hands decorative where() through
+Panama; Rust is doing mask ops, ONLY"* — and, on the first fix attempt,
+*"java doesn't even know mask count."* Both corrections were needed, because
+the violation survived one layer up from where it was first repaired.
+
+- **The violation, three shapes of it.** `FacetMatchView.cardinality()` (1)
+  popcounted a fetched segment in a Java loop, doc-commented "deliberately
+  Java-side" to save a crossing; (2) after the first correction, composed 32
+  per-facet `maskOfFacetClass(...).count()` calls and summed in Java — every
+  OPERATION native, but the DECOMPOSITION (32 facets, a sum) still executing
+  in Java. Java knowing "32" is Java holding a moving part. (3) The fix I
+  first PROPOSED — "add a popcount symbol over the buffer" — was the same
+  disease: asking how to reduce a buffer Java should never hold.
+- **Minor 9, one symbol:** `lgj_rowstore_facet_match_count(res, needle,
+  out_count)` — Σ_f popcount(class_f), computed natively with the same
+  strided-equality mask the classid ops use plus the sanctioned popcount. One
+  crossing, one u64 back; Java does not learn that the answer has parts.
+  `cardinality()` is now a single delegation. Falsifier runs the count against
+  TWO independent oracles (the `lgj_row_facet_match` buffer popcount — the
+  very reduction Java used to do — and a scalar recompute), plus absent-needle
+  zero and null-out rejection. 135/135 both feature configs.
+- **Both gate directions proven against a REAL minor-8 library** (built from
+  `main` @ c6127c5 in a worktree): `cardinality` throws `AbiMismatchException`
+  naming minor 9 — never a bare missing symbol, never a silent fallback to a
+  Java-side loop. 8/8 compat checks. (Worktree lesson: path deps resolve
+  relative to the worktree, so it must sit beside the sibling repos, not in
+  /tmp.)
+- **The stale-`.so` iron rule fired for real, and caught MY OWN gap.** The
+  root-invoked `cargo build --release --manifest-path ...` was silently
+  REFUSED (repo root resolves the default toolchain, below the 1.97 floor;
+  the MSRV error was hidden by tail-piping) — so the R1 Java runs earlier
+  today loaded a PRE-R1 `.so`. Harmless there only because R1 changes no
+  observable behaviour; the minor-9 `requireMinor` gate is what surfaced it,
+  exactly as #26/#27 designed. Correct build: from inside `native/lgj-abi`
+  (pinned toolchain) with `CARGO_TARGET_DIR` pointed at the root target Java
+  loads.
+- **docs/abi.md**: 25 symbols; minor-9 history entry stating the placement
+  rule as ABI, not preference.
+
+## 2026-08-27 — R1: the hop's selection is mask algebra again, and the layout is now the measured blocker
+
+Operator ruling: *"there's no gathering — gathering is a serialization of what
+is already there to begin with."* Correct, and the audit that followed found
+the walk was not the only place the algebra had leaked.
+
+- **R1 shipped, byte-identical.** `lgj_hop` selects with
+  `src ∧ class_f ∧ struct_f`, word-parallel. **134/134** including the pinned
+  10/19/29 regression — which is the proof the answer did not move — and
+  447/447 Java unchanged.
+- **F2, which no PR in the arc had caught:** `payload_hi32 != 0` was an `if`
+  inside the row walk in EVERY version, PR #22's clean one included. It is a
+  per-row equality against zero, i.e. the same strided primitive as the classid
+  match, twelve bytes further into the facet. Closed for **one call site and
+  zero new kernels** — `simd_rowstore_u32_eq_mask` takes an arbitrary offset,
+  so `first_offset = f*16 + 0` is the class and `f*16 + 12` is the gate.
+- **`facet_bits` / `facet_cache` / `FACET_CACHE_SLOTS` deleted.** Under the
+  operator's format-string reading of the 4+12 facet (`classid -F payload`,
+  PowerShell `"{0} {1}" -F $1,$2`) the memo was caching the interpolated
+  string. The projection is applied at read, never stored.
+- **R1 alone is a 19× REGRESSION, and that is the finding.** 65 536 rows:
+  one-pass sweep 2 126 µs → mask algebra **40 632 µs**, flat in density. 32
+  facets × 2 predicates = **64 full passes at stride 512** ≈ 2 GB of traffic to
+  read 512 KB. At 1 024 rows it is 144 µs; 64× the rows costs 282× the time —
+  cache and TLB collapsing together. The algebra is right; the LAYOUT is the
+  defect, exactly as R11 (#31) priced it at 9.2× before this arc began.
+- **R2 measured as a lab arm (R11 precedent, zero ABI change).** The canvas is
+  the **(row × facet) plane**, not the row: same 512 bytes reordered
+  field-major, so `class` and `struct` are ONE contiguous pass each with no
+  stride, participation is a PERIODIC operand (64 slots per word = exactly 2
+  rows × 32 facets, so it is one repeated `u64`, not a buffer), and `src`
+  expands 1 row-bit → 32 slot-bits by splat.
+
+| 65 536 rows | 0.01 % | 1 % | 25 % | 100 % |
+|---|---|---|---|---|
+| sweep (shipped pre-R1) | 5 147 | 3 034 | 2 969 | 5 252 |
+| gather (#40, the serialization) | 1.0 | 27.7 | 1 659 | 3 880 |
+| mask algebra, AoS (R1) | 41 600 | 49 667 | 48 604 | 51 329 |
+| **columnar plane (R2 probe)** | **902** | **1 066** | **1 367** | **2 271** |
+
+  Columnar is **~40×** the AoS mask shape, **2.3–5.7×** the one-pass sweep, and
+  beats the gather outright at 100 %. Its cost tracks the CANVAS, not the
+  frontier — 2.5× across a 10 000× density range — which is the signature the
+  mask-native invariant asks for. Equivalence asserted at all 12 configurations
+  per population: all four shapes byte-identical. Raw output banked at
+  `.claude/board/hop-mask-algebra-vs-columnar.txt`.
+- **Honest boundary:** at a sparse frontier the gather is still faster in
+  absolute terms, because any whole-plane operation is O(population) and a walk
+  is O(frontier). That is not a defect to fix — it is the trade the doctrine
+  makes deliberately, and it is why the columnar number (flat in density)
+  matters more than the sparse-density comparison.
+- **Not done:** the columnar store itself. The probe builds the plane from the
+  AoS store; a columnar STORE builds it at generation. That is the ABI-side
+  change and it is measured-but-unlanded.
+
+## 2026-08-27 — the REAL ClassView provider is bound, and it measures the fixture's reach
+
+The `ClassView` provider seam (§4-NG3, "a real ontology/cache provider is a
+NAMED SEAM") is no longer only named. `ogar_class_view::OgarClassView` — the
+ontology-backed provider over `ogar_vocab` — is bound behind a new
+`ogar-classview` feature on `native/lgj-abi`, and `edge_participation` derives
+from each class's real field basis instead of the fixture's constant.
+
+- **The provider discriminates, measured.** `examples/classview_census.rs`:
+  **98 registered classes, 12 distinct participation masks** (field counts
+  0–13), against the fixture's single `0xFFFF_FFFF` for all 98. An
+  unregistered classid participates in **nothing** — an unknown class is not
+  a licence to traverse every facet.
+- **The `[patch]` was load-bearing, not cosmetic.** `ogar-class-view` pulls
+  `lance-graph-contract` by git branch; this crate pulls it by path, and
+  cargo does not unify a git SourceId with a path SourceId — without the
+  patch the build carries two `lance-graph-contract` crates and therefore
+  two incompatible `ClassView` traits. Verified: `cargo tree` shows one.
+- **What binding it EXPOSED, and this is the finding.** The generated row
+  store draws classids from `0..16` (`ROWSTORE_CLASS_CARDINALITY`); every
+  vocabulary classid is `>= 0x0100`. The two domains are **disjoint**, so a
+  generated store under the real provider hops nothing. The remaining
+  fixture is the row CONTENT — Lance-loaded SoA rows are what make the bound
+  provider observable end-to-end. Pinned by
+  `hop_under_the_real_provider_narrows_by_class`, not left in prose.
+- **Default is unchanged and proven so.** Feature OFF: 134/134 rust, 447/447
+  Java (304 core + 143 consumer) — the same numbers as before. Feature ON:
+  136/136. Two fixture-semantics tests are gated OFF under the feature and
+  each has a paired ON twin asserting the CONTRASTING fact, so nothing was
+  merely disabled. Five tests red-then-green under the disable
+  (`edge_participation`'s ogar arm returns `FULL`). G11 fence green:
+  `class_view`, `canonical_node`, `ontology`, `facet` only.
+
+## 2026-08-25 — the Ghidra end of the R2IL arc: seam verified, vocabulary measured
+
+Working the `r2il-machine-semantic-contract-v1` plan (lance-graph, PR #1027,
+merged) from the GHIDRA side while a sibling session drives W0-W4.
+
+- **The seam is an interface.** `Language.parse` -> `InstructionPrototype`
+  -> `getPcode()`, both interfaces, `InstructionPrototype` with exactly two
+  implementations and ONE construction site
+  (`SleighLanguage.java:392`). **No Ghidra core fork required** — this was
+  an open unknown gating the whole Java half.
+- **R12** (`valhalla-lab/reproducers/`): Ghidra's P-code payloads do NOT
+  flatten even at their optimistic lower bound (16 B / 12 B, references
+  deleted); ordinals do, at VM element size 8. A real 2-input `PcodeOp` is
+  **five heap objects**. Verdict: the W5 facade ADDRESSES the vocabulary
+  rather than carrying it — which needs nothing new, it is what
+  `LaneId`/`Ordinal`/`MaskId` already do.
+- **Unanticipated:** an 8-byte `VarnodeNarrow` (u8 space, u8 size, 48-bit
+  offset) also flattens — so a content-bearing descriptor is possible, not
+  only a pointer. Recorded as an option for W1, deliberately not proposed
+  as the design.
+- Nothing swapped, nothing minted, no layout touched. Measurement + trace
+  only.
+
+## 2026-08-25 — ABI minor 8: the register groupings are DATA, and the load gate stopped requiring the whole manifest
+
+- **The wire encoding of §14's `carving` is no longer written anywhere by
+  hand.** The contract owns the set (`CascadeShape::ROTATIONS`),
+  `kernels::CARVING_ORDER` (a `const`) derives the order by a RULE (group
+  count, descending — never declaration position), and the manifest serves
+  it in two new fields: `carving_count: u32` + `carvings: [u16; 8]`
+  (`(groups << 8) | group_bytes`). No new symbol; the manifest already
+  exists so Java can discover the ABI's shape rather than declare it.
+  `LgjAbiManifest` is now 128 bytes.
+- **Java keeps its ARITY and loses its ENCODING.** `Carving.groups()` /
+  `groupBytes()` stay declared — the arity IS the constant's identity —
+  while `wire()`/`ofWire()` look up the served table. `CarvingTable` holds
+  the one clearly-named pre-minor-8 compatibility shim, so exactly one
+  place in the build carries a literal encoding and its name says it is
+  history.
+- **A latent defect fixed on the way:** Java's load gate required the FULL
+  manifest layout, so the FIRST growth of that struct — this one — would
+  have made every older artifact fail to load, contradicting §2's additive
+  promise. The gate now requires only the 104-byte BASE PREFIX
+  (`Layouts.MANIFEST_BASE_BYTES`); later fields are read only when
+  `size_of_manifest` covers them AND the minor is high enough.
+- **Gates:** Rust 134 lib tests, fmt + clippy `-D warnings` clean; Java
+  **304** checks (`AllTests`, was 288 — `CarvingTableTest` adds 16);
+  `OldAbiCompatTest` green against all four historical `.so`s (minors
+  1-4). Four disable-runs, each red-then-green: swapped packed axes,
+  reversed sort, a mismatched Java arity (fires BOTH membership
+  directions), and the restored full-layout gate (minor-4 library fails to
+  load).
+- **Docs:** `docs/abi.md` §17 (new), §2 (load-gate prefix), §14's table
+  regraded DESCRIPTIVE rather than normative.
+- Stacked on PR #30 (minor 7); board entry in `PR_ARC_INVENTORY.md`,
+  finding in `EPIPHANIES.md`
+  (`E-LGJ-A-CONSTANT-COPIED-THREE-TIMES-HAS-NO-FALSIFIER-1`).
+
 ## 2026-08-18 — PR-W8b (FACADE + GRAPH MIGRATION) — the mask-native correction reaches the Java surface
 
 ### Current surface changes (java/ + consumers/graph)

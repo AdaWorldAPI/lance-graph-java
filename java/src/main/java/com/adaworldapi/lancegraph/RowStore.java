@@ -1,6 +1,7 @@
 package com.adaworldapi.lancegraph;
 
 import com.adaworldapi.lancegraph.internal.ffm.Engine;
+import com.adaworldapi.lancegraph.internal.ffm.Layouts;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -89,6 +90,28 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new RowStore(h, Engine.rowCount(h));
     }
 
+    /**
+     * Open a facet-major COLUMNAR store (docs/abi.md §18; ABI minor &ge; 10): the SAME logical
+     * content as {@link #openWithEdges} — same generator, same draws, same pinned hop counts —
+     * arranged so every single-field native sweep is contiguous. Java cannot tell the layouts
+     * apart except by speed: every read on this class goes through the lane descriptors the
+     * membrane serves, never through hand-computed offsets, so the answers are layout-blind by
+     * construction (root CLAUDE.md, E3).
+     */
+    public static RowStore openColumnar(long nRows, long seed, int edgeClassid,
+                                        long edgeGateMask, int edgeRadius) {
+        if (nRows < 0) {
+            throw new IllegalArgumentException("nRows must be >= 0, was " + nRows);
+        }
+        long h = Engine.openRowStoreColumnar(nRows, seed, edgeClassid, edgeGateMask, edgeRadius);
+        return new RowStore(h, Engine.rowCount(h));
+    }
+
+    /** {@link #openColumnar} with no structured edges (edge classid outside the 0..16 range). */
+    public static RowStore openColumnar(long nRows, long seed) {
+        return openColumnar(nRows, seed, 16, 0x0L, 1);
+    }
+
     /** How many rows this resource holds. */
     @Override
     public long rowCount() {
@@ -125,6 +148,102 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * For every facet, which register grouping this selection's rows carry (abi.md §16) — the
+     * whole-row alignment answer, in ONE crossing.
+     *
+     * <p>Use this to ask "is this population layout-aligned?" before sweeping it, or to discover
+     * which facets a heterogeneous selection can still be swept on. Asking {@link #facetSum} per
+     * facet to find out would be 32 crossings and would fail on the misaligned ones rather than
+     * reporting them.
+     *
+     * @param selection the rows to probe; must belong to this store
+     */
+    public RowLayout layout(Mask selection) {
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("layout()");
+        return new RowLayout(Engine.rowLayoutProbe(handle, selection.handle(), FacetId.COUNT));
+    }
+
+    /**
+     * Sum one facet's 12-byte register under the grouping the SELECTION ITSELF resolves to
+     * (abi.md §15, ABI minor 6) — the verified sibling of {@link #facetSumAs}.
+     *
+     * <p>This is the shape {@code facetSumAs} could only name: for every selected row the native
+     * side resolves {@code facet classid → ClassId → ClassView::cascade_shape} and requires every
+     * row to agree, then sweeps monomorphically under that answer.
+     *
+     * <pre>
+     *   classid → ClassView → ResolvedCarving → (population + its grouping) → sum
+     * </pre>
+     *
+     * <p>The question is asked ONCE at the population's edge, never inside the sweep — resolving
+     * per row would be the defect this whole path exists to avoid.
+     *
+     * <p>Throws when the selection does not resolve to one grouping: it spans classes that read
+     * the register differently, a row's classid has no ClassView answer, or it is <em>empty</em>
+     * (zero rows carry zero classes, so any answer would be invented).
+     *
+     * @param facet     which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param selection the rows to sum over; must belong to this store
+     * @return the sum, and the grouping it was resolved under
+     */
+    public FacetSum facetSum(FacetId facet, Mask selection) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("facetSum()");
+        long[] r = Engine.facetSumResolved(handle, facet.index(), selection.handle());
+        return new FacetSum(r[0], Carving.ofWire((int) r[1]));
+    }
+
+    /**
+     * Sum one facet's 12-byte register, <strong>reinterpreted as</strong> {@code carving}, over the
+     * rows {@code selection} selects — the mask-native sweep (abi.md §14, ABI minor 5).
+     *
+     * <p><strong>This is a raw reinterpretation primitive, and the {@code As} in its name is the
+     * honest part.</strong> It applies the carving you name to every selected row. It does NOT
+     * verify that the carving is the one those rows' classes actually specify — it cannot: the
+     * mask is an opaque population (it may be a {@link #importRows} union spanning several
+     * classids), and the fixture {@code ClassView} carries no carving resolver at all today. So
+     * this method claims no ClassView authority; the caller supplies the reading and owns its
+     * correctness.
+     *
+     * <p>The stronger shape — binding the resolved answer to the population ONCE, so the sweep
+     * receives an answer rather than a promise — is a named seam, not something this method
+     * pretends to be:
+     *
+     * <pre>
+     *   classid → ClassView → ResolvedCarving → (population + its carving) → sum
+     * </pre>
+     *
+     * <p>That preserves the property this whole path exists for (the ALU gets the answer, not the
+     * question) while making the binding checkable. It needs a real ClassView carving resolver
+     * upstream, which does not exist yet — so it is recorded as the next rung rather than faked
+     * with a per-row consult, which would put the entropy straight back into the loop.
+     *
+     * <p>This is the execution half of the mask path whose build half is
+     * {@link #maskOfFacetClass}. Together they are the whole shape: classid becomes a mask once,
+     * then the sweep runs over a population that no longer carries the classid question. The
+     * population never leaves mask form — there is no row-id list, no index array, no per-row Java
+     * object anywhere on this path.
+     *
+     * <p>One native crossing, and its work is proportional to the mask's <em>popcount</em> rather
+     * than to the row count, so a narrow selection over a large store is cheap and an empty one
+     * costs only the mask scan.
+     *
+     * @param facet     which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param carving   the reading to apply — supplied by the caller, NOT verified against the
+     *                  selected rows' classes
+     * @param selection the rows to sum over; must belong to this store
+     */
+    public long facetSumAs(FacetId facet, Carving carving, Mask selection) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        java.util.Objects.requireNonNull(carving, "carving");
+        java.util.Objects.requireNonNull(selection, "selection");
+        requireOpen("facetSumAs()");
+        return Engine.facetSumAs(handle, facet.index(), carving.wire(), selection.handle());
+    }
+
+    /**
      * For every row, which of its 32 facets carry {@code classId} as their classid — one native
      * crossing ({@code lgj_row_facet_match}, abi.md §11).
      *
@@ -136,7 +255,17 @@ public final class RowStore implements NativeResource, AutoCloseable {
         requireOpen("facetMatches()");
         MemorySegment out = arena.allocate(ValueLayout.JAVA_INT, rowCount);
         Engine.rowFacetMatch(handle, classId, out, rowCount);
-        return new FacetMatchView(this, out, rowCount);
+        return new FacetMatchView(this, out, rowCount, classId);
+    }
+
+    /**
+     * Package-private bridge for {@link FacetMatchView#cardinality()}: the native slot count for
+     * {@code classId}, one crossing. Not public API — the public surface for this answer is the
+     * view, so the question and its projection stay together.
+     */
+    long facetMatchCount(int classId) {
+        requireOpen("facetMatchCount()");
+        return Engine.rowstoreFacetMatchCount(handle, classId);
     }
 
     /**
@@ -218,42 +347,37 @@ public final class RowStore implements NativeResource, AutoCloseable {
         return new Mask(this, dst);
     }
 
-    private static final long ROW_BYTES = 512;
-    private static final long FACET_BYTES = 16;
 
     /**
-     * The raw lane-0 window (docs/abi.md §11), resolved once via {@code lgj_lane_describe} (ABI
-     * minor &ge; 1 — already required by every {@code RowStore}) and cached: this is a
-     * <strong>lifecycle</strong> crossing, per abi.md §6, not a bulk one, and every read through
-     * {@link #classidAt}/{@link #payloadLow64At}/{@link #payloadHi32At} afterward is an
-     * in-process segment read with no further crossing at all — exports.rs's own doctrine, applied:
-     * "if Java wants one row it reads the MemorySegment in-process, with no crossing at all."
+     * Lazily-resolved lane windows, keyed by ABI lane id (docs/abi.md §11/§18) — the SERVED
+     * geometry. Each resolve is one lifecycle crossing ({@code lgj_lane_describe}); every read
+     * after it is an in-process segment access at {@code row * strideBytes}, which is correct
+     * under EITHER layout because the stride comes from the descriptor, never from Java. This is
+     * root CLAUDE.md E3 carried to its end: after minor 10 no Java code computes a row-store
+     * offset from a constant — the membrane answers, Java reads.
      */
-    private MemorySegment rawLane;
+    private final Engine.LaneWindow[] lanes = new Engine.LaneWindow[3 * FacetId.COUNT + 1];
 
-    private MemorySegment rawLane() {
+    private Engine.LaneWindow lane(int laneId) {
         requireOpen("row read");
-        if (rawLane == null) {
-            rawLane = Engine.describeLane(handle, 0).segment();
+        Engine.LaneWindow w = lanes[laneId];
+        if (w == null) {
+            w = Engine.describeLane(handle, laneId);
+            lanes[laneId] = w;
         }
-        return rawLane;
+        return w;
     }
 
-    private long rowOffset(long row, FacetId facet) {
-        // No requireOpen() here -- rawLane() (evaluated first, as the receiver, in every one of
-        // this method's three callers) already owns that check. Pure arithmetic, touches nothing,
-        // needs no guard of its own; duplicating it here would be a second lock on a door only one
-        // key opens.
-        java.util.Objects.requireNonNull(facet, "facet");
+    private long checkedRow(long row) {
         if (row < 0 || row >= rowCount) {
             throw new IndexOutOfBoundsException(
                     "row " + row + " is out of range [0, " + rowCount + ")");
         }
-        return row * ROW_BYTES + facet.index() * FACET_BYTES;
+        return row;
     }
 
     /**
-     * The classid at {@code (row, facet)} — a zero-copy, in-process read (see {@link #rawLane()}'s
+     * The classid at {@code (row, facet)} — a zero-copy, in-process read through the SERVED classid lane (see {@code lane(int)}'s
      * doc for why this never crosses the membrane after the first call on this store).
      *
      * <p>This is the per-row escape hatch the bulk predicates exist alongside, not a replacement
@@ -268,7 +392,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public int classidAt(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet));
+        java.util.Objects.requireNonNull(facet, "facet");
+        Engine.LaneWindow w = lane(Layouts.LANE_FACET_BASE + facet.index());
+        return w.segment().get(ValueLayout.JAVA_INT_UNALIGNED, checkedRow(row) * w.strideBytes());
     }
 
     /**
@@ -286,7 +412,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public long payloadLow64At(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_LONG_UNALIGNED, rowOffset(row, facet) + 4);
+        java.util.Objects.requireNonNull(facet, "facet");
+        Engine.LaneWindow w = lane(Layouts.LANE_LO64_BASE + facet.index());
+        return w.segment().get(ValueLayout.JAVA_LONG_UNALIGNED, checkedRow(row) * w.strideBytes());
     }
 
     /**
@@ -302,7 +430,9 @@ public final class RowStore implements NativeResource, AutoCloseable {
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
      */
     public int payloadHi32At(long row, FacetId facet) {
-        return rawLane().get(ValueLayout.JAVA_INT_UNALIGNED, rowOffset(row, facet) + 12);
+        java.util.Objects.requireNonNull(facet, "facet");
+        Engine.LaneWindow w = lane(Layouts.LANE_HI32_BASE + facet.index());
+        return w.segment().get(ValueLayout.JAVA_INT_UNALIGNED, checkedRow(row) * w.strideBytes());
     }
 
     /**

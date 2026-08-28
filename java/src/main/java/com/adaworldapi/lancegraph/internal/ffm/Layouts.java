@@ -112,6 +112,15 @@ public final class Layouts {
     /** Length of the manifest's {@code build_profile} byte array. */
     public static final int BUILD_PROFILE_BYTES = 16;
 
+    /**
+     * Slots in the manifest's {@code carvings} table (ABI minor 8).
+     *
+     * <p>A fixed-width array, not a pointer, because the whole table is 16 bytes and a pointer
+     * would add a lifetime question to a struct that deliberately has none. {@code carving_count}
+     * says how many slots are populated; the rest are zero.
+     */
+    public static final int CARVING_SLOTS = 8;
+
     public static final StructLayout MANIFEST = MemoryLayout.structLayout(
             ValueLayout.JAVA_LONG.withName("magic"),
             ValueLayout.JAVA_INT.withName("abi_major"),
@@ -129,7 +138,13 @@ public final class Layouts {
             MemoryLayout.sequenceLayout(SIMD_NAME_BYTES, ValueLayout.JAVA_BYTE)
                     .withName("simd_backend_name"),
             MemoryLayout.sequenceLayout(BUILD_PROFILE_BYTES, ValueLayout.JAVA_BYTE)
-                    .withName("build_profile"))
+                    .withName("build_profile"),
+            // ── added at ABI minor 8 ──
+            ValueLayout.JAVA_INT.withName("carving_count"),
+            MemoryLayout.sequenceLayout(CARVING_SLOTS, ValueLayout.JAVA_SHORT)
+                    .withName("carvings"),
+            // repr(C) rounds the struct up to its 8-byte alignment: 108 + 16 = 124 -> 128.
+            MemoryLayout.paddingLayout(4))
             .withName("LgjAbiManifest");
 
     // The manifest is read by OFFSET rather than through a struct VarHandle, and that is a
@@ -153,6 +168,21 @@ public final class Layouts {
     public static final long OFF_SIMD_BACKEND = off("simd_backend");
     public static final long OFF_SIMD_BACKEND_NAME = off("simd_backend_name");
     public static final long OFF_BUILD_PROFILE = off("build_profile");
+    public static final long OFF_CARVING_COUNT = off("carving_count");
+    public static final long OFF_CARVINGS = off("carvings");
+
+    /**
+     * Bytes of the manifest a MINOR-1 library is guaranteed to carry — everything through
+     * {@code build_profile}.
+     *
+     * <p>This is the prefix the load gate may require, and requiring more would break docs/abi.md
+     * §2's additive promise in the direction that matters here: a library OLDER than this Java
+     * build still loads, and each later minor gates independently at its own call site
+     * ({@code Abi.requireMinor}). Gating the load on the FULL layout size would have turned every
+     * future manifest field into a hard incompatibility with every older artifact — including the
+     * ones {@code OldAbiCompatTest} runs against.
+     */
+    public static final long MANIFEST_BASE_BYTES = OFF_BUILD_PROFILE + BUILD_PROFILE_BYTES;
 
     private static long off(String name) {
         return MANIFEST.byteOffset(PathElement.groupElement(name));
@@ -250,6 +280,47 @@ public final class Layouts {
      */
     public static final ValueLayout.OfInt FACET_MATCH_ELEM = ValueLayout.JAVA_INT;
 
+    // ── the row geometry, DERIVED — never a second spelling ─────────────────────────────────
+    //
+    // These four numbers used to exist twice: declared here as layouts, and hand-written again as
+    // private constants + literal `+ 4` / `+ 12` offsets in RowStore's accessors, with nothing
+    // binding the two spellings (SELF_CHECK proves the LAYOUT is 512 bytes; it proves nothing
+    // about arithmetic written elsewhere). Same drift class as the three hand-written Carving
+    // copies ABI minor 8 collapsed into one served table — and the same fix: ONE source (the
+    // layout), everywhere else a name. The simd.rs isomorphism (root CLAUDE.md) states the rule:
+    // the polyfill layer owns the geometry; the facade only names it.
+
+    /** Lane id of the raw whole-buffer lane (abi.md §11). */
+    public static final int LANE_RAW = 0;
+    /** Facet {@code f}'s classid lane id is {@code LANE_FACET_BASE + f} (abi.md §11). */
+    public static final int LANE_FACET_BASE = 1;
+    /** Facet {@code f}'s payload-low64 lane id is {@code LANE_LO64_BASE + f} (abi.md §18). */
+    public static final int LANE_LO64_BASE = 33;
+    /** Facet {@code f}'s payload-hi32 lane id is {@code LANE_HI32_BASE + f} (abi.md §18). */
+    public static final int LANE_HI32_BASE = 65;
+
+    /** Bytes per row — {@link #ROW_LAYOUT}{@code .byteSize()}, not a literal. */
+    public static final long ROW_BYTES = ROW_LAYOUT.byteSize();
+
+    /** Bytes per facet — {@link #ROW_FACET}{@code .byteSize()}, not a literal. */
+    public static final long FACET_BYTES = ROW_FACET.byteSize();
+
+    /**
+     * Byte offset of the 12-byte payload within a facet — where the structured-edge target's low
+     * 64 bits begin (docs/abi.md §12). Derived from the layout's own field position.
+     */
+    public static final long FACET_PAYLOAD_OFFSET =
+            ROW_FACET.byteOffset(PathElement.groupElement("payload"));
+
+    /**
+     * Byte offset of the payload's high {@code u32} within a facet — {@code 0} there marks a
+     * structured edge (docs/abi.md §12; mirrors Rust's {@code FACET_PAYLOAD_HI32_OFFSET}). The
+     * high word sits after the low 64 bits, and the {@code u64}'s width comes from its layout,
+     * not a literal 8.
+     */
+    public static final long FACET_PAYLOAD_HI32_OFFSET =
+            FACET_PAYLOAD_OFFSET + ValueLayout.JAVA_LONG.byteSize();
+
     /**
      * Compile-time-ish self check: the byte sizes the ABI document states in prose, checked against
      * the sizes these layouts actually derive. If a layout is edited wrongly this fails at class
@@ -278,6 +349,10 @@ public final class Layouts {
         // silently disagree.
         expect("LgjAbiManifest simd_backend_name offset", 56, OFF_SIMD_BACKEND_NAME);
         expect("LgjAbiManifest build_profile offset", 88, OFF_BUILD_PROFILE);
+        expect("LgjAbiManifest base prefix bytes", 104, MANIFEST_BASE_BYTES);
+        expect("LgjAbiManifest carving_count offset", 104, OFF_CARVING_COUNT);
+        expect("LgjAbiManifest carvings offset", 108, OFF_CARVINGS);
+        expect("LgjAbiManifest size", 128, MANIFEST.byteSize());
         expect("LgjAbiManifest align", 8, MANIFEST.byteAlignment());
         return true;
     }

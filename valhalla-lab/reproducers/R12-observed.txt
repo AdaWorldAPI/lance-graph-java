@@ -1,0 +1,49 @@
+R12 — Ghidra's P-code vocabulary against the 8-byte array-flattening cliff
+JDK: openjdk version "27-jep401ea3" 2026-09-15
+VM element sizes shown via -XX:+PrintFlatArrayLayout.
+
+R12 ? Ghidra's P-code vocabulary against the 8-byte array-flattening cliff
+
+shape                             nonAtomic  atomic   transcribed from
+--------------------------------  ---------  -------  ------------------------------
+VarnodePayload(int,int,long)      false      false    Varnode.java:51-54, refs deleted
+PcodeOpPayload(int,long)          false      false    PcodeOp.java:102-105, refs deleted
+Flat Type Array: [LR12_GhidraPcodeVocabularyVsCliff$VarnodeNarrow; {0x000000002d042d20}
+ - element klass: 'R12_GhidraPcodeVocabularyVsCliff$VarnodeNarrow'
+ - layout kind: NULL_FREE_ATOMIC_FLAT
+ - array properties: NULL_RESTRICTED ATOMIC 
+ - element size 8 aligned layout size 8
+VarnodeNarrow(8B packed)          true       true     narrowed content
+Flat Type Array: [LR12_GhidraPcodeVocabularyVsCliff$VarnodeRef; {0x000000002d0433b0}
+ - element klass: 'R12_GhidraPcodeVocabularyVsCliff$VarnodeRef'
+ - layout kind: NULL_FREE_NON_ATOMIC_FLAT
+ - array properties: NULL_RESTRICTED NON_ATOMIC 
+ - element size 8 aligned layout size 8
+VarnodeRef(long)                  true       true     ordinal into a lane
+Flat Type Array: [LR12_GhidraPcodeVocabularyVsCliff$PcodeOpRef; {0x000000002d043a40}
+ - element klass: 'R12_GhidraPcodeVocabularyVsCliff$PcodeOpRef'
+ - layout kind: NULL_FREE_NON_ATOMIC_FLAT
+ - array properties: NULL_RESTRICTED NON_ATOMIC 
+ - element size 8 aligned layout size 8
+PcodeOpRef(long)                  true       true     ordinal into a lane
+Flat Type Array: [LR12_GhidraPcodeVocabularyVsCliff$InstructionRef; {0x000000002d044230}
+ - element klass: 'R12_GhidraPcodeVocabularyVsCliff$InstructionRef'
+ - layout kind: NULL_FREE_NON_ATOMIC_FLAT
+ - array properties: NULL_RESTRICTED NON_ATOMIC 
+ - element size 8 aligned layout size 8
+InstructionRef(long)              true       true     ordinal into a lane
+
+Reading the table:
+  * The two *Payload rows are the OPTIMISTIC lower bound for Ghidra's real
+    types ? every reference deleted. The real Varnode additionally holds an
+    Address, and the real PcodeOp a SequenceNumber, a Varnode[] and a Varnode.
+  * A 2-input PcodeOp is therefore FIVE heap objects: the op, its
+    SequenceNumber, the input array, and one Varnode per operand.
+
+  refs flat: 3/3    payloads flat: 0/2
+
+  VERDICT: the facade must ADDRESS the vocabulary, not CARRY it.
+  Ordinals flatten; Ghidra's payloads do not, even at their lower bound.
+  This is the same result LaneId/Ordinal/MaskId already rely on, and the
+  same reason RowRange (16 B) does not flatten. Nothing new is needed ?
+  the existing descriptor discipline already answers it.

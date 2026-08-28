@@ -35,6 +35,9 @@ public final class Engine {
         // explicit lifetime to get wrong, and no leak because the ThreadLocal holds exactly one.
         private final Arena arena = Arena.ofAuto();
         private final MemorySegment out = arena.allocate(OUT_BYTES, 8);
+        // A SECOND out slot, for the one op that returns two scalars
+        // (lgj_reduce_facet_sum_resolved: the sum AND the grouping it resolved).
+        private final MemorySegment out2 = arena.allocate(OUT_BYTES, 8);
         private final MemorySegment info = arena.allocate(Layouts.RESOURCE_INFO);
         private final MemorySegment desc = arena.allocate(Layouts.LANE_DESC);
         private MemorySegment ops = arena.allocate(Layouts.OP_DESC, 8);
@@ -199,6 +202,41 @@ public final class Engine {
     }
 
     /**
+     * Sum one facet's 12-byte register, reinterpreted as {@code carving}, over the rows
+     * {@code mask} selects (abi.md §14, ABI minor 5). Cost is
+     * {@code O(mask words + popcount * groups)}. Requires ABI minor &gt;= 5.
+     */
+    /**
+     * Sum one facet's register under the grouping the POPULATION resolves to (abi.md §15, ABI
+     * minor 6), returning {@code [sum, carvingWire]}. Requires ABI minor &gt;= 6.
+     */
+    /**
+     * For every facet, the set of groupings its selected rows carry (abi.md §16, ABI minor 7).
+     * Requires ABI minor &gt;= 7.
+     */
+    public static byte[] rowLayoutProbe(long store, long mask, int facets) {
+        Abi.requireMinor(7);
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(facets);
+            Downcalls.rowLayoutProbe(store, mask, out, facets);
+            return out.toArray(ValueLayout.JAVA_BYTE);
+        }
+    }
+
+    public static long[] facetSumResolved(long store, int facet, long mask) {
+        Abi.requireMinor(6);
+        Scratch s = SCRATCH.get();
+        long sum = Downcalls.reduceFacetSumResolved(store, facet, mask, s.out, s.out2);
+        return new long[] {sum, s.out2.get(ValueLayout.JAVA_INT, 0)};
+    }
+
+    public static long facetSumAs(long store, int facet, int carving, long mask) {
+        Abi.requireMinor(5);
+        Scratch s = SCRATCH.get();
+        return Downcalls.reduceFacetSum(store, facet, carving, mask, s.out);
+    }
+
+    /**
      * Overwrite {@code dstMask} with {@code classid(facet, row) == classId} for every row of
      * {@code store} (docs/abi.md §11). {@code facet} is a facet index {@code 0..32} into the row's
      * 32 facet lanes, not a lane id. Requires ABI minor &gt;= 2.
@@ -221,6 +259,36 @@ public final class Engine {
     public static void rowFacetMatch(long store, int classId, MemorySegment out, long outLenElems) {
         Abi.requireMinor(2);
         Downcalls.rowFacetMatch(store, classId, out, outLenElems);
+    }
+
+    /**
+     * Total {@code (row, facet)} slots of {@code store} carrying {@code classId} — the reduction
+     * over {@link #rowFacetMatch}'s answer, computed where the data is (docs/abi.md §11).
+     * Requires ABI minor &gt;= 9. One crossing; Java receives ONE number and learns nothing about
+     * how the answer decomposes.
+     */
+    /**
+     * Open a facet-major columnar row store (abi.md §18). Requires ABI minor &ge; 10. Same
+     * logical content as {@link #openRowStoreWithEdges}; only the byte arrangement differs, and
+     * ONLY Rust knows it — every Java read goes through served lane descriptors.
+     */
+    public static long openRowStoreColumnar(long nRows, long seed, int edgeClassid,
+            long edgeGateMask, int edgeRadius) {
+        Abi.requireMinor(10);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG);
+            Downcalls.rowstoreOpenColumnar(nRows, seed, edgeClassid, edgeGateMask, edgeRadius, out);
+            return out.get(ValueLayout.JAVA_LONG, 0);
+        }
+    }
+
+    public static long rowstoreFacetMatchCount(long store, int classId) {
+        Abi.requireMinor(9);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG);
+            Downcalls.rowstoreFacetMatchCount(store, classId, out);
+            return out.get(ValueLayout.JAVA_LONG, 0);
+        }
     }
 
     // ── mask complement + hop (docs/abi.md §13, ABI minor ≥ 4) ─────────────────────────────

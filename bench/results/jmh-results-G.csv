@@ -1,0 +1,13 @@
+"Benchmark","Mode","Threads","Samples","Score","Score Error (99.9%)","Unit","Param: frontierPct","Param: rows"
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_classidScan","avgt",1,5,25.639505,61.918845,"us/op",1,4096
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_classidScan","avgt",1,5,180.563246,70.114359,"us/op",1,65536
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_classidScan","avgt",1,5,269.635512,229.450931,"us/op",25,4096
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_classidScan","avgt",1,5,6943.313461,1755.024200,"us/op",25,65536
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_facetMatches","avgt",1,5,500.512270,170.638166,"us/op",1,4096
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_facetMatches","avgt",1,5,9215.489321,3935.414475,"us/op",1,65536
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_facetMatches","avgt",1,5,570.724283,526.047273,"us/op",25,4096
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.java_scalar_facetMatches","avgt",1,5,10674.616011,2590.280567,"us/op",25,65536
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.native_hop","avgt",1,5,1.945347,0.344690,"us/op",1,4096
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.native_hop","avgt",1,5,34.425630,8.069149,"us/op",1,65536
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.native_hop","avgt",1,5,61.030395,6.963998,"us/op",25,4096
+"com.adaworldapi.lancegraph.bench.G_HopExecutionBoundary.native_hop","avgt",1,5,3534.089985,841.958023,"us/op",25,65536

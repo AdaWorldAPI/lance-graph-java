@@ -4,6 +4,916 @@
 > `**Status:**`/`**Confidence:**` line. A correction gets its own new,
 > dated entry that references the one it corrects — the storno rule.
 
+## 2026-08-28 — E-ZERO-COPY-MEMORY-SAFETY-OVERCLAIM-CORRECTION-1
+
+**Status:** CORRECTS `E-ZERO-COPY-MEMORY-SAFETY-AUDITED-CLEAN-1` (below) —
+that entry's "no gap found" verdict itself overclaimed. Storno entry per
+board README's append-only rule; the corrected entry's prose is left
+untouched below except this note and its own Status/Confidence lines.
+**Confidence:** High — every correction below is a five-savant-verified,
+three-reviewer-ratified finding (5+3 council, PR #45 as target, run
+2026-08-28), not a single-pass re-read.
+
+The prior entry's single-pass audit (a general-purpose lens, not a
+council) confirmed all 9 doctrine bullets by citation but did not
+independently RE-DERIVE several claims — a 5+3 council convened
+specifically because that audit was the only review PR #45 got
+(CodeRabbit's own comment was just its auto-summary, "Review failed — the
+pull request is closed"; Bugbot hit its usage limit twice and never ran).
+The council found 5 real overclaims in the CLAUDE.md doctrine text,
+fixed in the same commit as this entry:
+
+1. **"a stale generation fails closed before dereference"** was stated as
+   universal; it is false for the cached-descriptor path
+   (`lgj_lane_describe`/`lgj_mask_describe` hand Java a raw `addr` once,
+   read directly thereafter with no further registry call — guarded only
+   by a Java `closed` boolean, not the generation registry). Fixed:
+   scoped to "handle-mediated" operations; the cached-descriptor gap
+   named explicitly, its `epoch` re-check tracked as `ISS-LGJ-EPOCH-
+   UNCHECKED`.
+2. **"an older library fails cleanly at the call, not at load"** was
+   stated as blanket; false for ABI minors 2-4 (row store/edges/hop),
+   which fail at `Downcalls.<clinit>` via eager `MethodHandle` resolution
+   — a gap `Downcalls.java`'s own comment already tracked, that the new
+   doctrine text presented as already closed. Fixed: scoped to the
+   minor-5+ lazy-holder pattern; minors 2-4 named as the tracked
+   exception.
+3. **"checked_mul/checked_add throughout rowstore.rs and kernels.rs"**
+   overclaimed uniform coverage: `kernels.rs` has zero occurrences (it
+   bounds against an already-allocated slice's real `.len()` via
+   `assert_eq!`, a sound but DIFFERENT mechanism); `rowstore.rs` has
+   exactly two, both at the two allocation sites. Fixed: scoped to "at
+   the point n_rows is first derived", with `kernels.rs`'s actual
+   mechanism named rather than left silent.
+4. **"never `segment.set(...)`"** was contradicted by the already-named
+   Import exception (`RowStore.importRows` → `Engine.setU64` →
+   `segment.set(...)`, on a lane the ABI marks `LGJ_FLAG_WRITABLE` by
+   design). Fixed: the bullet now cross-references the exception it
+   already names elsewhere in this file, rather than reading as an
+   absolute the codebase visibly violates.
+5. **The materialization list was a closed enumeration missing two real
+   call sites** (`Abi.java`'s `readCarvings`, `Engine.facetSumResolved`'s
+   `long[2]`) — both bounded/non-population-proportional, so the
+   underlying property held even though the list didn't. The council's
+   reviewers split on the fix shape (overclaim-auditor favored converting
+   to a property claim; dilution-collapse-sentinel BLOCKed that as a
+   collapse — a checkable exhaustive list has real falsifiability value a
+   property claim loses) — the stricter verdict won: the list is now
+   five items, kept exhaustive, not converted to prose.
+
+**Process finding, not a doctrine-text issue:** PR #45 itself had no
+`PR_ARC_INVENTORY.md` entry — a real board-hygiene gap independent of the
+doctrine overclaims, caught by this council's `firewall-warden` pass and
+backfilled in this same commit (see that file).
+
+## 2026-08-27 — E-ZERO-COPY-MEMORY-SAFETY-AUDITED-CLEAN-1
+
+**Status:** CORRECTED 2026-08-28 by `E-ZERO-COPY-MEMORY-SAFETY-OVERCLAIM-
+CORRECTION-1` (above) — a 5+3 council found 5 real overclaims in the
+doctrine text this entry certified. Originally: "AUDITED CLEAN — pinned
+as normative doctrine in root `CLAUDE.md`, same commit."
+**Confidence:** Medium — the single-pass audit's citation checks were
+individually accurate (every named function/test does exist), but the
+"no gap found" verdict overclaimed; it verified citations, not universal
+scope. See the correction entry for what was actually wrong.
+
+Operator issued a 32-point normative zero-copy/memory-safety addendum
+(merge-gating). Ran it mechanically against the tree rather than
+redesigning from taste, per the session's standing method:
+
+- Provenance-bound generation-checked handles: `registry.rs` —
+  `fabricated_handles_are_rejected_not_dereferenced`,
+  `a_reused_slot_invalidates_the_old_handle` (already present).
+- Checked-overflow bounds arithmetic: `checked_mul`/`checked_add`
+  throughout `rowstore.rs`/`kernels.rs` (already present).
+- Alignment/endianness as explicit contract fields (never inferred):
+  `LgjAbiManifest.align_of_*` filled from `core::mem::align_of` on the
+  real types; `Abi.java` rejects non-little endianness before any
+  projection (already present).
+- Manifest-first handshake ordering (magic → major → minor → sizes →
+  endianness, `requireMinor(N)` gating): `Abi.java` (already present).
+- FFM quarantine: zero `java.lang.foreign`/`java.lang.invoke` in any
+  public signature; internal use in `RowStore.java`/`FacetMatchView.java`
+  is private-field-only (verified by grep for `public .*MemorySegment/
+  Arena/ValueLayout/MethodHandle` — zero hits).
+- Named/bounded materialization only: every production `long[]`/
+  `copyOf`/`toArray` traces to `Mask.materializeRows()`, the manifest
+  handshake's own name-string read, or `rowLayoutProbe`'s ≤32-byte
+  diagnostic — no hidden proportional-to-n_rows copy.
+- Independently-derived layout parity (not self-compared):
+  `AbiContractTest`, with a deliberately-impossible-expectation arm
+  proving the check can fail.
+- SIMD backend diagnostic-only: `NativeRuntime.simdBackend()` is a
+  manifest string; zero `if` branches on it in `src/main`.
+- Worker topology substrate-private: zero `workers(`/`workerCount`/
+  `parallelism(`/`threads(` in production Java/ABI/exports (reconfirmed
+  from the prior turn's audit, unchanged).
+
+**Verdict: no gap found, nothing redesigned.** The addendum's own
+mandatory checklist (§32) is answered YES on every line by structure
+already in the tree — this entry and the CLAUDE.md section exist to
+PIN the doctrine as merge-gating going forward, not to fix a defect
+found today. Any future PR touching the membrane is reviewed against
+this section directly.
+
+## 2026-08-27 — E-EXP-KIA-A2-64K-CONVERGENCE-TAIL-DOMINATES-1
+
+**Status:** MEASURED — in-tree, reproducible, this run banked verbatim at
+`.claude/board/exp-kia-a2-64k-fresh-run.txt`.
+**Confidence:** High for this host/harness; explicitly NOT the operator's
+out-of-tree 125ms/233ms weather prior (different workload, per
+`mask-native-navigation-correction-v1.md` §8.3 — that gap stays open).
+
+Fresh `lance-graph-supervisor/examples/measure_wal_curve` release run
+(lance-graph@1d7bc1b1), answering "measure the 64k execution end first"
+before any `BatchWriter`/kanban seam design: the EXP-KIA-A2-64K arm's
+**compute** phase parallelizes as documented (21.8ms seq → 6.68ms @
+workers=8, 3.27x, matching the plan's own "~3.2-3.5x on 4 cores" prior
+exactly) — but compute is the SMALL part of a cycle. Per-cycle steady-state
+total (build/population excluded, sequential vs best-parallel):
+
+```
+workers=1: think 21.81 + cast 21.52 + collect 10.06 + wal 14.62 + apply 17.73 = 85.74 ms
+workers=8: think  6.68 + cast 20.83 + collect  9.45 + wal 15.62 + apply 15.87 = 68.44 ms
+```
+
+**The cast/collect/wal/apply tail is FLAT across every worker count
+(1/2/4/8/16) — it does not shrink when compute parallelizes** — and it is
+~64-65ms of every cycle regardless: ~90% of the workers=8 total, ~10%
+compute. Sequential-vs-parallel sealed-cycle digests MATCH at every worker
+count (correctness holds; this is a WHERE-does-the-time-go finding, not a
+correctness one).
+
+Consequence for the seam question root `CLAUDE.md` names ("64K COMPUTE WAS
+PARALLEL … not yet the production loop"): parallelizing compute alone
+recovers at most ~15ms of an ~85ms cycle in this harness. The convergence
+boundary this repo's own maxims already flag as sequential-by-design
+(ONE COMPUTATION IS NOT ONE LANCE WRITE; the SOLE native writer) is where
+the time actually is — any seam design that only speeds up compute is
+optimizing the part that was never the bottleneck on this measurement.
+Cross-ref `CLAUDE.md`'s compute-model maxims and the GridLake block
+(deterministic-landing-identity gate) — this measurement is evidence FOR
+prioritizing that gate's resolution over a parallel-compute seam, not
+against parallel compute itself.
+
+## 2026-08-27 — E-JAVA-IS-SIMD-RS-VALHALLA-PANAMA-IS-THE-POLYFILL-1
+
+**Status:** DOCTRINE — [OPERATOR-FRAMED]. Pinned as the ENFORCEMENT LAYER in
+root `CLAUDE.md` (rules E1–E6), same commit.
+**Confidence:** High — the grounding is measured in-tree, not argued.
+
+The operator's frame, verbatim intent: *"look at ndarray. Java is like
+simd.rs. Valhalla/Panama is the polyfill. Rust is like
+simd_{AMX,avx512,avx2,neon,wasm}.rs."*
+
+Verified against the actual tree before pinning: `ndarray/src/simd.rs` is
+**37 functions and zero shipping instructions** — every raw intrinsic in the
+file sits inside `#[cfg(test)]`, where `_mm256_unpacklo_epi32` appears only
+as the oracle a wrapper is checked against. `simd_avx512.rs` alone carries
+**488** intrinsics. And the detail that seals it: `simd_scalar.rs` is a
+**backend, below the facade** — the fallback is never written inline in
+`simd.rs`. The facade is pure vocabulary; the backends are pure machinery;
+the dispatch is free at compile time.
+
+**Why this is a doctrine and not an analogy.** Every violation this session
+found reads as a breach of the isomorphism, at the layer it names:
+
+- `FacetMatchView.cardinality`'s Java popcount loop = an inline scalar
+  fallback in `simd.rs` (three strikes: the loop, then 32 composed counts
+  summed in Java, then a proposed buffer-popcount symbol — each still Java
+  holding a moving part; ABI minor 9 is the lawful shape).
+- J2's hand-written `ROW_BYTES = 512` beside the declared `ROW_LAYOUT` =
+  the facade carrying a second spelling of a backend constant (fixed this
+  commit: `Layouts` derives, `RowStore` names).
+- The Vector API question resolves permanently: a backend inside Java, and
+  Java has no backends — lab arm forever.
+
+**The polyfill reading is precise, not poetic.** Valhalla's A/B types
+compile as ordinary records pre-JEP-401 exactly the way `simd.rs` code runs
+on the scalar backend off-x86: one source, zero cost where the platform
+provides it, still CORRECT where it does not. Panama likewise —
+`JAVA_INT_UNALIGNED` works everywhere and JITs to a mov where it can.
+Degradation without a second source is the definition of a polyfill.
+
+**The stack nests.** lgj's bottom is ndarray's top: `lgj_hop` →
+`kernels.rs` → `ndarray::simd` → `simd_avx512.rs` is facade → polyfill →
+backend twice over, self-similar. Cross-refs: root `CLAUDE.md` E1–E6;
+`E-BINDING-A-REAL-PROVIDER-MEASURES-THE-FIXTURE-1` (the ClassView half of
+the same session); minor-9 arc entry in `LATEST_STATE.md`.
+
+## 2026-08-27 — E-BINDING-A-REAL-PROVIDER-MEASURES-THE-FIXTURE-1
+
+**Status:** FINDING — measured, pinned by a test rather than asserted.
+**Confidence:** High. Both halves are numbers, and the disable-run is
+red-then-green on five tests.
+
+Binding the real `ClassView` provider (`OgarClassView`) behind
+`--features ogar-classview` did not make the hop *better*. It made the hop
+*empty* — and that emptiness is the most useful thing the wiring produced.
+
+The provider itself is correct and discriminating: 98 registered classes,
+**12 distinct** participation masks where the fixture answered one. But the
+generated row store's classid domain is `0..16`
+(`ROWSTORE_CLASS_CARDINALITY`) while every vocabulary classid is `>= 0x0100`
+— **disjoint**. So a generated store under a real provider traverses nothing,
+for every classid in its own domain.
+
+**The generalizable part.** A fixture with a plausible answer for every input
+(`FieldMask::FULL`) is indistinguishable from a bound provider until you bind
+one. `FULL` is the answer that never disagrees, which is exactly why it
+cannot be falsified in place. The measurement that mattered was not "does
+the provider work" — it was **binding it and reading what the rest of the
+system then failed to do**. The seam was declared closed-enough for two
+waves because nothing in the suite could tell the two providers apart.
+
+**Consequence, stated rather than fixed here:** the remaining fixture is the
+row CONTENT, not the layout or the kernels. Replacing `RowStore::generate`
+with Lance-loaded SoA rows is what makes the bound provider observable
+end-to-end; until then the feature is a correct provider over rows it has no
+classes for.
+
+**Discipline note.** Two fixture-semantics tests had to be gated OFF under
+the feature. Neither was deleted: each got a paired ON twin asserting the
+CONTRASTING fact on the same inputs (all-32 vs none; 19/29 vs empty), so the
+gate reads as evidence of a changed answer rather than as a suppressed
+failure.
+
+## 2026-08-26 — E-ONE-SUBSTRATE-FIVE-GLOVES-GHIDRA-IS-THE-GLOVE-NOT-THE-MODEL-1
+
+**Status:** DOCTRINE — [OPERATOR-FRAMED]. The "what is it FOR" that the
+r2il/r2conc/ogar-loco arc has been building toward, named so it does not
+dilute across sessions. Cross-refs: this repo's
+`E-LGJ-GHIDRAS-SEAM-IS-AN-INTERFACE-AND-ITS-VOCABULARY-CANNOT-FLATTEN-1`
+(R12, PR #34); lance-graph `r2il-machine-semantic-contract-v1.md` §7.8
+(V4 = V3 + executable content; the zipper isomorphism; three-tier JIT).
+**Confidence:** High on the framing and on R12's measured seam; the
+throughput figure is a single-CPU lab measurement (see below).
+
+### The operation, and the five faces of it
+
+Every product framing the operator named is the SAME three steps:
+
+```
+lower arbitrary code → R2IL/p-code   (INTAKE: r2sleigh lift, once, C++ allowed)
+address it in ogar-loco               (classid + lane ordinal; zipper: address IS program)
+execute zero-copy through the mask     (RUNTIME: r2conc, pure Rust, N-lane sweep)
+```
+
+They are one substrate with a policy/render GLOVE on top; only the glove
+differs:
+
+- **"Bring your own code" Foundry-aspiring substrate** — glove = ingest +
+  ontology UI.
+- **RE / security-analyst platform** — glove = the analyst UI (Java).
+- **Zero-trust sandbox** (whitelist-only execution; every binary
+  pattern-scanned for malware before it runs; autonomous alerting) —
+  glove = a POLICY MASK. Whitelisting is a mask AND; malware detection is
+  a masked pattern-match over the lifted R2IL BEFORE `step`; alerting is
+  the alpha plane firing on an anomaly. The §7.8 hexagon-proposes /
+  table-verifies machinery, pointed at "is this a known-bad shape" instead
+  of "which op is this." Defensive by construction.
+- **The C64 dream** — lower a game (Giana Sisters) into ogar-loco; glove =
+  a2ui-paint `Skin::Tile` over the game's addressed state (Mario-editor
+  flavor).
+- **Stone-age Java bare-metal** (TinkerPop, EDI) — glove = NONE; Java
+  stops carrying objects and addresses lanes.
+
+The zero-trust face is the proof it is one substrate: the security product
+is the cognitive substrate wearing a policy glove. Nothing new is built.
+
+### "Ghidra as Java" resolves against R12, and the answer is brutal
+
+R12 measured it: **Ghidra's own p-code vocabulary cannot flatten** —
+payloads 0/2, ordinals 3/3. A 2-input `PcodeOp` is five heap objects. So
+"Ghidra as Java" does NOT mean porting Ghidra's object model to Valhalla
+value classes. It means the inversion the stack keeps re-deriving:
+
+> **Java STEERS** (analyst UI, whitelist policy, alerting, the Mario
+> editor). **Rust DECODES + EXECUTES** (r2sleigh lift + r2conc). **The
+> seam carries ORDINALS, never objects.**
+
+That is W5 already specced, the lance-graph-java mask-native law, and the
+zipper isomorphism — three independent derivations of one seam. Ghidra's
+Java is the glove; Ghidra's decompiler object graph is exactly what we
+throw away. (r2sleigh already reimplements the downstream arms in Rust:
+r2ssa = heritage, r2dec = decompiler, r2types = type inference, r2sym +
+r2conc = emulation. What remains of Ghidra at runtime is ONE arm: `libsla`
+decode. §7.8's hexagon is that arm's replacement path — learn the byte→op
+map, exact-table as authority, libsla as the 0.4% fallback while muscle
+memory grows.)
+
+### The throughput, and the one thing that IS banked about it
+
+**What is banked** (R7, committed, `R7_BillionOpsZeroAlloc.java` +
+`R7-observed.txt`): 10^9 group projections allocate **exactly 960 B**,
+byte-identical across all three runs — fixed scaffolding, not a per-op
+cost (a 1 B/op survivor would have shown a gigabyte). That is the
+ordinal-seam payoff stated safely: **zero per-op allocation**, addressing
+lanes instead of carrying objects (R5's hydrating path at the same op
+shape is 32–104 B/row = 32–104 GB at this scale).
+
+**What is NOT banked, and must not be pinned:** a throughput number. R7's
+own runs span **1.76–3.48 s (287–567 M ops/s), a 2× spread — too wide to
+pin**, and R7 says so in as many words. The operator's spoken "~2 s /
+2.1 ns" lands inside that spread but is a point in a noisy cloud, not a
+result. And R7's `sweep` is pure in-JVM `MemorySegment.get` — **no FFI,
+no ndarray call** — so it cannot support an "into ndarray" claim at all.
+
+(Corrected 2026-08-26 after a codex P2 on PR #36 caught the first draft
+banking the 2.1 ns figure and attributing it to a Panama→ndarray path.
+The doctrine is unchanged — R12's flatten measurement is the load-bearing
+evidence, and zero-alloc is the safe throughput-adjacent claim. If a real
+ndarray-through-Panama throughput is wanted as evidence, it needs its own
+committed reproducer; it does not exist yet.)
+
+### The one invariant to fix before any glove is built
+
+The zero-trust glove lowers UNTRUSTED, possibly hostile binaries. That
+turns r2conc's existing loud-refusal discipline (`Unsupported`,
+`PcodeRelativeBranch`, `OutOfBounds`) from a correctness boundary into a
+SECURITY boundary. The invariant, stated now so a future session cannot
+wire it backwards: **the malware-scan mask runs on the lifted R2IL BEFORE
+`step`; the sandbox executes only `lifted ∩ whitelist`; a lifted op never
+reaches a real effect without passing the policy mask first.** Scan-then-
+execute, never execute-then-scan.
+
+
+## 2026-08-25 — E-LGJ-GHIDRAS-SEAM-IS-AN-INTERFACE-AND-ITS-VOCABULARY-CANNOT-FLATTEN-1
+
+**Status:** MEASURED — R12 + the Ghidra source trace. No code swapped yet.
+**Confidence:** High on both halves; each is a citation or a VM-reported number.
+
+Starting the `r2il-machine-semantic-contract-v1` arc from the GHIDRA end
+while a sibling session drives W0-W4. Two findings, and they point the
+same way.
+
+**1. The seam is an interface, and no core fork is required.** Traced:
+
+```
+Language (INTERFACE, model/lang/Language.java:29)
+  .parse(MemBuffer, ProcessorContext, boolean)
+      -> InstructionPrototype (INTERFACE, :35)
+           .getPcode(context, override)  -> PcodeOp[]
+```
+
+`InstructionDB.getPcode()` (`:608-628`) does nothing but delegate to
+`proto.getPcode(...)`. `InstructionPrototype` has exactly TWO
+implementations — `SleighInstructionPrototype` and `InvalidPrototype` —
+and `SleighLanguage` constructs the former at exactly ONE site
+(`SleighLanguage.java:392`). `Instruction` is itself an interface with an
+`InstructionStub` already in tree, so alternative implementations are an
+established pattern rather than a hack.
+
+This was an OPEN UNKNOWN that had been flagged twice this session and
+never checked; it gates the whole Java half, and the answer is favourable.
+
+**2. Ghidra's P-code vocabulary cannot be carried as value classes — its
+identity can.** R12, field shapes transcribed from
+`Varnode.java:51-54` / `PcodeOp.java:102-105`, run on the JEP 401 EA build
+with the VM reporting element sizes:
+
+| shape | flat? |
+|---|---|
+| `VarnodePayload(int,int,long)` 16 B | **no** |
+| `PcodeOpPayload(int,long)` 12 B | **no** |
+| `VarnodeRef` / `PcodeOpRef` / `InstructionRef` (`long`) | **yes**, element size 8 |
+
+And those Payload rows are the OPTIMISTIC bound — every reference deleted.
+The real `Varnode` holds an `Address`; the real `PcodeOp` holds a
+`SequenceNumber`, a `Varnode[]` and a `Varnode`, so **a 2-input `PcodeOp`
+is five heap objects**. That is "ONE ROW IS NOT ONE JAVA OBJECT" at its
+worst: one instruction becomes a small object graph.
+
+**Why this needs nothing new.** The verdict — *address the vocabulary,
+don't carry it* — is the same result `LaneId`/`Ordinal`/`MaskId` already
+rely on, and the same reason `RowRange` (16 B) does not flatten. The
+existing descriptor discipline answers W5's central question before W5
+starts.
+
+**The unanticipated part, recorded so it is not lost.** `VarnodeNarrow`
+(`spaceId:u8`, `size:u8`, 48-bit offset) ALSO flattens. So 8 bytes is
+enough to carry a varnode's real CONTENT, not merely a pointer to it — a
+content-bearing descriptor that reads space and size without a lane
+round-trip. Bounded by exactly one condition: a 48-bit offset. Whether
+that suffices is a W0/W1 address-space question, not a Valhalla one.
+**Named as an option, NOT proposed as the design** — pre-empting W1's
+tenant carving from this side is precisely what the plan's R1 rule
+("no private object graph then serialize") forbids one layer up.
+
+Cross-ref: `.claude/plans/r2il-machine-semantic-contract-v1.md` §2 (the
+facade-not-data-model correction) and §6 W5, both in lance-graph.
+
+## 2026-08-25 — E-LGJ-A-CONSTANT-COPIED-THREE-TIMES-HAS-NO-FALSIFIER-1
+
+**Status:** SHIPPED — ABI minor 8, docs/abi.md §17.
+**Confidence:** High on the mechanism; every guard disable-verified.
+
+The §14 carving wire encoding lived in three places: a Rust `match`, a
+Java `enum`, and abi.md's own table. Each was correct. Nothing anywhere
+would have failed if one had stopped agreeing with the others.
+
+**That is the finding, and it generalises past this constant.** Three
+copies of one fact is not a documentation problem to be tidied — it is a
+correctness problem with NO falsifier, and its failure mode is silent:
+a variant added or reordered upstream re-maps one copy, a sweep then
+reads the same 12 bytes under the wrong grouping, and returns a
+plausible number. "Keep them in sync" is not a mechanism.
+
+The fix is not a fourth copy that checks the others. It is ONE source
+(`CascadeShape::ROTATIONS`, the contract's) and two DERIVATIONS: the ABI
+computes the encoding from it by a RULE (group count, descending) rather
+than by declaration position, and the manifest serves the result to Java
+so Java restates nothing. A reorder upstream cannot re-map the wire; an
+addition upstream propagates.
+
+**The two corollaries worth keeping:**
+
+1. **Derive by a rule, not by position.** Had the order been "declaration
+   order of the enum", the derivation would have been just as automatic
+   and just as fragile — the drift would simply have moved upstream.
+2. **Meaning is declared; encoding is served.** `RAILS_6X2` keeps its
+   arity as a literal, because the arity IS the constant's identity and a
+   name that lies about it is worse than a hardcode. Only the encoding —
+   which carries no meaning — became data.
+
+**And the change surfaced a latent defect one layer down**, which is the
+usual reward for touching a boundary: Java's load gate required the FULL
+manifest layout, so the first growth of that struct would have made every
+older artifact fail to load, in flat contradiction of §2's additive
+promise. It had been written that way since minor 1 and was unreachable
+until now. Measured: restoring the full-layout gate makes all four
+historical libraries fail outright.
+
+Cf. `E-LGJ-THE-RESOLVER-WAS-UPSTREAM-ALL-ALONG-1` — same shape one rung
+up (the answer was already in the contract; the local version was the
+copy).
+
+## 2026-08-25 — E-LGJ-THE-RESOLVER-WAS-UPSTREAM-ALL-ALONG-1
+
+**Status:** SHIPPED — ABI minor 6 + the contract accessor + the ndarray
+primitive. All three open followups closed.
+**Confidence:** High; every guard disable-verified, both directions.
+
+### The finding, again before the code
+
+`facetSumAs` was named honestly because "the fixture ClassView carries no
+carving resolver at all". That was true of the FIXTURE and false of the
+CONTRACT: `lance_graph_contract::facet::CascadeShape` has carried the three
+groupings (`G6D2` rails / `G4D3` triplets / `G3D4` quads, each `G·D = 12`), the
+full algebra, and its own sentence that the grouping is *"class-conditioned:
+`classid` selects it from the inherited schema"* all along. **The local
+`Carving` enum was a re-mint of an existing contract type** — the
+parallel-object-model anti-pattern in miniature, committed while writing a note
+about not claiming authority.
+
+What genuinely did not exist: a `ClassView` method RETURNING one. That is
+substrate-tier, so it landed upstream first per the Missing-capability STOP
+rule.
+
+Two near-misses worth recording, because both LOOKED like the answer:
+
+- `ClassView::rail_carving` returns `RailCarving` — but that is rail-path
+  geometry per axis (`InterleavedPairs` / `AxisSlab`), a different question.
+- `FacetSchema::of_classid` is classid-selected and three-way — but its third
+  reading is `Pair48` (`2 × 48-bit`), NOT the le-contract L6 quads
+  (`3 × (8:8:8:8)` SPOG, operator-RULED 2026-07-06). It answers "which payload
+  FORMAT", not "which `G·D = 12` grouping". **That divergence between the ruled
+  doc and the shipped enum is real and is left as an upstream observation, not
+  silently reconciled.**
+
+### What landed
+
+1. **contract**: `ClassView::cascade_shape(class)`, zero-fallback `G3D4`, same
+   registry-resolution pattern as its four siblings.
+2. **lgj-abi minor 6**: `lgj_reduce_facet_sum_resolved` — resolves every
+   selected row's `classid → ClassId → cascade_shape`, requires agreement, then
+   sweeps monomorphically and REPORTS the grouping back. `Carving` is now
+   `pub type Carving = CascadeShape`; only the u32 wire encoding stays local,
+   pinned BY GROUP COUNT so an upstream variant reorder cannot re-map it.
+   G11 fence widened by one module (`facet`), deliberately.
+3. **Java**: `RowStore.facetSum → FacetSum(sum, carving)`. `facetSumAs` remains
+   the deliberate reinterpretation escape hatch.
+
+**The question is asked once at the population's edge, never inside the sweep.**
+Resolution is `O(mask_words + popcount)`; the sweep carries no per-row dispatch.
+The fix for "unverified" was never "consult more often".
+
+### The fixture had to be made able to FAIL
+
+`FixtureClassView::cascade_shape` returns `class % 3` rather than the trait's
+constant. A constant answer makes every population trivially homogeneous, so the
+"does this resolve to ONE grouping" guard could never fire and its test would
+pass for an implementation that never checked. Varying makes both outcomes
+reachable on real fixture data — and the paired half matters as much: classids 3
+and 6 SHARE a grouping and must still resolve, or the refusal would just be
+"reject every multi-class population".
+
+Empty resolves to `None`, deliberately: zero rows carry zero classes, so
+reporting the zero-fallback would be inventing an answer.
+
+### Followup 2 — does `sum` earn ABI vocabulary? RETAINED, with a real reason
+
+§14's justification was weak (a benchmark's checksum). The better one, now in
+`abi.md` §15: it is the only mask-CONSUMING operation over the register, so
+without it the mask path has a build half and no execution half; and it is the
+cheapest operation that cannot be faked from outside, since any correct
+implementation must visit exactly the selected rows and decode exactly the
+resolved grouping — which is why it doubles as the parity oracle for both.
+
+**The condition to revisit is stated so it can fire:** a second reduction
+(min/max/count-distinct) must NOT become a second symbol. That is the point to
+generalise to an op-code parameter on one reduce symbol, mirroring
+`lgj_plan_eval`'s `LgjOpDesc`, with `sum` as op-code 0.
+
+### Followup 3 — the ndarray gap, closed at the right layer
+
+`ndarray::simd::masked_strided_group_sum`. The consumer's hand-rolled loop is
+now one delegating call. The upstream kernel is scalar and says why with the
+reasoning: one small register per record at a large stride is memory-bound,
+records are not adjacent so several cannot be vector-loaded, and widening six
+`u16`s inside one record optimises the part that is already free. A contiguous
+variant would genuinely vectorise and is named as a DIFFERENT primitive rather
+than a flag.
+
+## 2026-08-25 — E-LGJ-THE-GATE-NOW-HOLDS-AT-EVERY-MINOR-1
+
+**Status:** SHIPPED — the minors-2-4 half of the eager-init defect, closed.
+**Confidence:** High — reproduced at every historical minor against REAL
+libraries before the fix, verified after, and disable-verified per minor.
+
+Closes the gap `E-LGJ-A-FEATURE-GATE-DEFEATED-BY-EAGER-CLASS-INIT-1` left open
+and explicitly tracked ("minors 2-4 share the defect and are NOT fixed here").
+
+### The defect was worse at the older minors than at minor 5
+
+Built four real libraries from this repo's own history — `bd92c58` (minor 1),
+`beac5de` (2), `92a0e55` (3), `e8f0ce6` (4) — and ran the CURRENT Java against
+each. `SmokeTest`, which uses nothing newer than minor 1, died every time on the
+first symbol from a LATER minor:
+
+| library | died on | which is |
+|---|---|---|
+| minor 1 | `lgj_rowstore_open` | a minor-**2** symbol |
+| minor 2 | `lgj_rowstore_open_with_edges` | minor 3 |
+| minor 3 | `lgj_mask_andnot` | minor 4 |
+| minor 4 | `lgj_reduce_facet_sum` | minor 5 (already fixed) |
+
+**Against the minor-1 library, minor-1 operations could not run.** The additive-
+minor promise was not merely unenforced in that direction — it was inverted.
+
+### The fix, and the line that is deliberately NOT moved
+
+One lazy holder per minor (`Minor2`/`Minor3`/`Minor4`, joining `Minor5`),
+initialised on first ACCESS. **The 14 minor-1 base handles stay eager on
+purpose:** a library missing any of them is not an older library, it is a wrong
+one, and that failure should be immediate and total. Laziness is the right answer
+for "this library predates the feature", not a general policy.
+
+### The falsifier now checks both directions, per minor
+
+`OldAbiCompatTest` was minor-5-only and one-directional. It now gates each minor
+in whichever direction the loaded library calls for: **available ⇒ the feature
+must actually work; absent ⇒ `AbiMismatchException` naming that minor.** Both
+halves are needed — a gate that rejected everything would satisfy a
+rejection-only test, which is exactly the vacuity trap this session has now hit
+often enough to check for by reflex.
+
+Measured after the fix: minor 1 → 4 checks, minors 2/3/4 → 6 checks each, all
+green, with each minor reporting the right verdict for that library.
+
+Disable-verified per minor rather than in aggregate: reverting ONLY minor 2 to
+eager, leaving 3/4/5 lazy, reproduces the `<clinit>` crash against the minor-1
+library. A single minor regressing is caught.
+
+### What this leaves
+
+The compat suite needs artifacts this repo does not ship, so it stays out of
+`AllTests` and skips loudly without `-Dlgj.oldlibrary` — a suite that silently
+passes when its subject is absent is worse than one that is absent. The four
+libraries are reproducible from the commits named above; the recipe is in the
+test's own javadoc and in `abi.md` §2.
+
+## 2026-08-25 — E-LGJ-A-FEATURE-GATE-DEFEATED-BY-EAGER-CLASS-INIT-1
+
+**Status:** SIX REVIEW FINDINGS, ALL CONFIRMED AND FIXED (PR #26, pre-merge).
+**Confidence:** High — each was reproduced before being fixed, and the two
+substantive ones are disable-verified.
+
+Operator review of the minor-5 work found six things **117 Rust + 263 Java green
+gates did not falsify.** Recorded because the pattern is the lesson: every one
+sat in a place no test was pointed at.
+
+### 1. The guard was defeated by the class it guards (the serious one)
+
+`Abi.requireMinor(N)`'s own javadoc promises it "fails loudly, **before any
+downcall for the feature is attempted**". It could not: every handle in
+`Downcalls` is a `static final` resolved in `<clinit>`, and `mh()` throws on an
+absent symbol. Reproduced against a REAL ABI 0.4 library built from merged
+`main`: `SmokeTest` — which touches nothing newer than minor 1 — died in
+`Downcalls.<clinit>` on the missing `lgj_reduce_facet_sum`. The guard never ran.
+
+Fixed with a nested `Minor5` holder (initialised on first ACCESS, not with
+`Downcalls`), and `OldAbiCompatTest` now proves BOTH halves against the real 0.4
+`.so`: a minor-1 fluent count still succeeds, and `facetSumAs` alone fails with
+`AbiMismatchException` naming the minor. Disable-verified — reverting the holder
+reproduces the `<clinit>` crash.
+
+**The same latent defect applies to minors 2-4** and is NOT fixed here: their
+handles are still eager. Pre-existing, not introduced by this PR, and its own
+change with its own falsifier. Recorded so it is tracked rather than rediscovered.
+
+### 2. The normative ledger contradicted itself on a membrane change
+
+`abi.md` still said `LGJ_ABI_MINOR = 4`, "currently 21 symbols", a history
+stopping at minor 4, and a status table stopping at `-14` — while §14 and the §7
+header had been updated to 22 symbols and `-15`. The one document that must never
+self-contradict on a membrane change did. Now consistent at minor 5.
+
+### 3. Claimed ClassView authority the symbol cannot verify
+
+`Carving`'s doc said the reading "is resolved through its ClassView", and the
+method took any `(FacetId, Carving, Mask)` triple. But a mask is an **opaque
+population** — the test itself unions rows from classids 1 and 2 and applies one
+carving to all of them — and the fixture ClassView has **no carving resolver at
+all**. The primitive cannot check what it claimed.
+
+Fixed by naming it honestly rather than faking the authority: **`facetSumAs`**, a
+raw reinterpretation primitive whose caller owns correctness. The stronger shape
+is recorded as the next rung, not pretended:
+`classid → ClassView → ResolvedCarving → (population + its carving) → sum` —
+binding the answer to the population ONCE, which keeps the ALU receiving an
+answer rather than a question while making the binding checkable. Deliberately
+NOT a per-row consult, which would put the entropy straight back in the loop.
+
+### 4. `i64` is not closed under the reduction
+
+The kernel used `wrapping_add`. Under quads one row contributes up to
+`3 × (2³² − 1)`, so `i64::MAX` falls after ~715 827 882 maximum-valued rows —
+about 341 GiB of 512-byte rows, INSIDE this substrate's contemplated scale, not
+safely beyond it. §14 merely said "widened to i64" and defined no wrapping
+semantics. Now accumulates in `i128`, range-checks once, and returns
+`LGJ_ERR_SUM_OVERFLOW` (-16) with `out_sum` untouched. Silent wrapping is exactly
+the plausible-but-wrong result this ABI otherwise works to prevent.
+
+### 5-8. Four cleanups, each a small untruth
+
+Rust export doc named `LGJ_ERR_INVALID_ARGUMENT` while the code returned
+`LGJ_ERR_UNSUPPORTED_CARVING`; `Downcalls`' header still counted 20 handles;
+`Engine.java` stranded `eqClassid`'s javadoc above the new method; and the
+complexity claim said "proportional to popcount" when the implementation scans
+every mask word regardless — now `O(mask_words + popcount × groups)`.
+
+### 9. An overclaimed reachability, corrected
+
+The early-break test called an overlong mask-word slice ABI-reachable. It is not:
+`registry` allocates at exactly `mask_words_for(n_rows)` and boxes that slice.
+Test kept — a kernel correct only on well-formed input is a latent bug, and the
+`rlib` has callers other than `exports.rs` — but reclassified as internal kernel
+robustness rather than a membrane case.
+
+### The open question this review left standing
+
+**Is `sum` the first product operation, or R8's checksum escaping the lab?** The
+ABI's own law says symbol growth is a design smell needing justification. R8
+proved the *execution shape*; it did not prove that "sum packed rails/triplets/
+quads" deserves permanent ABI vocabulary. If no consumer needs facet sum, the
+honest move is to keep the shape and drop the operation. Left open deliberately —
+it is a product question, not an engineering one.
+
+## 2026-08-25 — E-LGJ-THE-MASK-PATH-WAS-HALF-WIRED-ALL-ALONG-1
+
+**Status:** SHIPPED — ABI minor 5, `lgj_reduce_facet_sum` (`docs/abi.md` §14).
+**Confidence:** High. 117 Rust + 263 Java checks green; every guard disable-verified
+red-then-green on both sides of the membrane.
+
+### The finding, before the code
+
+"Wire the mask path into lgj-abi" turned out to be **half a task**, and reading the
+membrane before writing to it is what showed that:
+
+- **The BUILD half has existed since ABI minor 2.** `lgj_op_eq_classid` already turns a
+  classid column into a mask, and already routes through
+  `ndarray::simd::eq_u32_strided_to_mask` — the *same* primitive R8 arm E' measured. The
+  whole mask algebra (`create`/`and`/`or`/`andnot`/`count`/`describe`) was already there,
+  and `lgj_mask_create` already accepted a row store as parent.
+- **The EXECUTION half was the gap.** Nothing could CONSUME a mask against the 12-byte
+  facet register. `lgj_reduce_sum_i32` sums a contiguous `I32` *pattern* lane — not a
+  strided facet register under a carving. So a consumer wanting the R8 E' shape had to
+  leave the membrane, which is exactly the pressure the Missing-capability STOP rule
+  exists to relieve.
+
+Recording this because the pre-reading is the reusable part: the instinct was to build a
+mask surface, and the mask surface was already 80% shipped.
+
+### What landed
+
+`lgj_reduce_facet_sum(res, facet, carving, mask, out_sum)` — sums every group of one
+facet's 12-byte register, under `carving`, over the rows a mask selects. Work is
+proportional to the mask's POPCOUNT, so §6's bulk-or-lifecycle rule holds by construction
+and an empty mask costs O(words).
+
+**The carving is a caller-supplied, VALIDATED parameter, not a ClassView consult — and
+that is the load-bearing design decision.** It follows `lgj_hop`'s `decode_mode`
+precedent (§13) rather than `edge_participation`'s consult, because the reading is what
+the caller already resolved from the ClassView *before* crossing. Re-resolving it per row
+inside the sweep would put the question back in the hot loop — which is the exact thing
+the symbol exists to take out of it. A per-row ClassView consult here would be the
+mask-native law's own defect, one layer down.
+
+New status `LGJ_ERR_UNSUPPORTED_CARVING` (-15), checked FIRST so `out_sum` is provably
+untouched on rejection. Deliberately not a reuse of `-14`: that names the edge-decode
+axis, and an unknown register reading must never alias a known one.
+
+### SIMD provenance: a NAMED GAP, not a quiet scalar
+
+The kernel is **scalar, deliberately.** `ndarray::simd` has no primitive for "gather a
+sub-word group out of a 512-byte-strided register under a runtime grouping and
+widen-accumulate" — `masked_sum_i32` is contiguous `i32`, `eq_u32_strided_to_mask` reads
+ONE aligned `u32` per row, not six unaligned `u16`s. Writing raw intrinsics here would
+create precisely the second SIMD surface §8 exists to prevent. So the vector form belongs
+in `ndarray::simd` under the W1a consumer contract — added THERE, consumed here, never
+re-implemented at this layer. Stated in the kernel doc, in `abi.md` §14, and here, so it
+is a tracked gap rather than an unexamined choice.
+
+(Sub-word loads are byte-wise rather than `u16`/`u32` reads because a group's offset is
+`facet*16 + 4 + g*group_bytes`, not guaranteed aligned for the 3-byte reading — and an
+unaligned wide read is UB in Rust even where the hardware tolerates it.)
+
+### A vacuous test, caught by its own disable-run
+
+`an_empty_mask_never_touches_the_buffer` claimed to cover BOTH the mask-selection property
+and the `base_row >= n_rows` early break. The disable-run proved it covered only the
+first: with all-zero words the inner loop never runs either way, so removing the break
+changed nothing. The break's real job is preventing `n_rows - base_row` from UNDERFLOWING
+for a word beginning past the row count — a reachable input, since `lgj_mask_create`
+rounds up to whole words. Split into a second test with a set bit in a word starting at
+row 128 over a 64-row store; that one goes red under the disable.
+
+**Five Rust disables and two Java disables, all red-then-green:** ignore the carving,
+ignore the mask, drop the tail clamp, drop the early break, accept any carving wire value;
+and through the membrane, ignore the carving argument and accept a foreign-parent mask.
+
+### Java surface
+
+`RowStore.facetSum(FacetId, Carving, Mask)` beside its build-half partner
+`maskOfFacetClass`, plus a public `Carving` enum whose wire encoding is package-private —
+a consumer names the reading, never its encoding. `FacetSumParityTest` recomputes every
+expected value **in Java from the public per-row accessors** (`payloadLow64At` +
+`payloadHi32At`, reassembled into the 12 bytes and re-carved), never by calling
+`facetSum` twice. The two paths share no code, so agreement is evidence rather than
+tautology.
+
+## 2026-08-25 — E-LGJ-THE-MEASUREMENT-LEDGER-DRIFTED-TWICE-SO-THE-REPORT-IS-NOW-GENERATED-1
+
+**Status:** DEFECT FOUND TWICE, REPAIRED STRUCTURALLY (R7, R8; merged in PR #24).
+**Confidence:** The defect and its repair are certain. The measurements are ranges,
+regenerable, and deliberately not pinned as absolutes — see below.
+
+### The defect
+
+`R7-observed.txt` shipped with its READING prose quoting a throughput range its OWN pinned
+raw runs contradicted (prose said 369-439 M ops/s; the three pinned runs said 1.76-3.48 s,
+i.e. 287-567). Operator review caught it. It was repaired — and then **R8 committed the
+identical defect one commit later**: prose quoting 2417-2479 / 3959-4014 / 41.01 ms while
+its own regenerated raw block held 3172-3248 / 3841-3946 / 40.36 ms.
+
+**Root cause is mechanical, not attentional.** The prose was hand-copied from run N while
+the raw block was regenerated at run N+1. Every artifact built that way is one
+regeneration away from lying about itself. "Be more careful" does not fix a method that
+produces the defect by construction — twice in two consecutive commits is the proof.
+
+### The repair
+
+`valhalla-lab/reproducers/r8_report.py` GENERATES the report: it runs every arm, parses
+the output it just captured, and derives every quoted range, ratio, per-pass cost and
+break-even from that same output. Raw block and prose come from one subprocess result and
+cannot disagree. The generated file states this at its head and instructs regeneration
+rather than hand-editing.
+
+The README's R8 section was also rewritten to stop duplicating absolute figures at all: it
+states structural results and ratios, and names the generated file as the authority.
+
+### Why that turned out to be the right shape, not merely a safer one
+
+The first regeneration produced materially different absolutes — B' moved ~25% — while
+EVERY structural conclusion held identically: B ~ standalone, D > B falsified, C ~30x,
+the B' collapse, the ~4.8x D'/E' recovery, the end-to-end E' win. **The stability of the
+conclusions under unstable absolutes is itself the result**, and it is only visible
+because the numbers are regenerable rather than pinned. A hand-pinned artifact would have
+hidden it.
+
+### Two further corrections from the same review, both real
+
+1. **Toolchain was not unified.** The native kernels and standalone baseline built with
+   rustc 1.94.1 while the ndarray crate required 1.97.1. That left an escape hatch on the
+   load-bearing "one bulk FFI crossing costs nothing measurable" claim, since the control
+   and the arm were not the same compiler. All three artifacts now build with 1.97.1,
+   `-O -Ctarget-cpu=x86-64-v4 -Cdebuginfo=0`.
+2. **Sweep-only comparison understated the lawful shape.** R8 first reported E' (masks) as
+   "2-3% slower" than D' (index lists). That compares SWEEPS, and the sweeps are tied. The
+   whole difference is BUILDING the population, which must be counted:
+   `ndarray::simd::eq_u32_strided_to_mask` (one bulk call) is an order of magnitude cheaper
+   than the Java scalar partition scan, so **E' wins END-TO-END on the first execution**,
+   moving break-even from ~120 passes to ~10 — and leaves behind a reusable mask where D'
+   leaves a materialized population the mask-native law forbids as internal currency.
+   Obeying the law is the fast path, not a tax on it.
+
+### The measured architecture (R6-R8), for the record
+
+- **R6:** the 8-byte cliff is JEP 401 BY DESIGN, not a version gap and not a flag. These
+  already are the JDK 27 numbers (27-jep401ea3); forcing all five flattening flags changes
+  nothing (`UseArrayFlattening`/`UseFieldFlattening` are `false` by DEFAULT in that build,
+  which is why the flags-on run had to be done rather than assumed). JEP 401 states the
+  cause: flattened references must be read/written atomically, capping mutable flattened
+  fields at 64 bits. The exemption it names is for value-class FIELDS; SoA lanes are
+  ARRAYS, whose elements are mutable by definition. Its speculative 128-bit note would move
+  the cliff to 16 B — the 12-byte register would fit, the 512-byte row would not.
+- **R7:** 10^9 projections allocate 960 B TOTAL. Against R5's 65,536 ops at 800 B:
+  operations grew 15,000x, allocation grew 160 B — fixed scaffolding, not per-op cost.
+- **R8:** five arms, checksum-identical including a standalone Rust process. Bulk FFI is
+  free; per-projection FFI is ~30x (the anti-JNI rule, quantified); specialization buys
+  NOTHING when dispatch is branch-predictable (part 1 is the control that keeps part 2
+  honest); under random classids the split architecture wins ~4.8x because the selector
+  layer creates the information once, before the sweep.
+
+**Not "Java is faster than Rust"** — the winning kernels ARE Rust and so is the mask
+builder. The win is specialization PLACEMENT. The durable principle: **entropy belongs
+outside the hot loop**, and its scope leg — when there is no entropy, moving it buys
+nothing.
+
+## 2026-08-25 — E-LGJ-LAYOUT-AUTHORITY-IS-TRANSFERABLE-BUT-ONLY-ABOVE-8-BYTES-1
+
+**Status:** MEASURED (R4, R5, `valhalla-lab/reproducers/`, JDK 27 EA).
+**Confidence:** High for the measurements; the division-of-authority rule
+below is the reading of them and is open to a counter-measurement.
+
+**Board-discipline note, first:** the R4/R5 code landed in `6828f4a` WITHOUT
+this entry, which breaks this repo's own same-commit rule. Recorded here
+rather than quietly back-dated.
+
+### What was asked
+
+Can the three V3 carvings (`6x(u8:u8)` / `4x(u8:u8:u8)` / `3x(u8:u8:u8:u8)`)
+dodge the R2 8-byte array-flattening cliff? And can a `classid`-dependent
+layout be expressed at all?
+
+### What was measured
+
+1. **The cliff is on TOTAL PAYLOAD.** Every real width is non-flat in all
+   three array kinds — `Reg12AsRails/Triplets/Quads`, `Facet16As*` — and the
+   monolithic control `Reg12Flat` behaves identically. The carving changes
+   nothing.
+2. **Nesting costs flatness even UNDER the budget** (`Nest7` false vs `Flat7`
+   true), because a record component is nullable by default and stored in its
+   nullable flat layout (`Pair` 2->4, `Quad` 4->8). Confirmed by mechanism,
+   not inferred: `@NullRestricted` flips all three predicted failures
+   false->true. Removing the inflation still does not rescue 12/16 B.
+3. **`isFlatArray()` alone is not a sufficient test.** `Four8AsTwo8`, a
+   32-byte record, reports flat at VM **element size 8** — its
+   `@NullRestricted Two8` components are themselves non-flattenable and are
+   stored as REFERENCES. A flat array of pointers is the opposite of the
+   property being sought. `Nest8Single` is the inverse hazard: 8 B payload,
+   element size 16. R4-observed.txt now pins element sizes beside every
+   boolean. Answering the operator's `32x(2x8 byte)` question from the
+   boolean alone would have shipped a false positive.
+4. **Neither mechanism can express a runtime-selected layout.** A Panama
+   `VarHandle` binds its path at construction; a value class is a static type.
+   The carving choice is a Java-side switch in every possible design.
+5. **Cost of giving Java a row type, 65,536 rows:** project (no element type)
+   800 B total / 0.01 B/row, identical every run. Hydrate (16-byte `Facet`)
+   32-104 B/row, varying by run because escape analysis is best-effort. The
+   3x spread across identical runs is the finding, not noise.
+
+### The reading — authority is transferable, and Valhalla is not crippled by it
+
+Java's layout authority engages ONLY on types Java instantiates. The projecting
+path never gives it one, so the authority never engages: that is why its cost is
+both zero and *stable*, while the hydrating path's cost is decided by the
+compiler per run.
+
+So the division is measurable rather than aesthetic:
+
+- **payload > 8 B** — Rust/the contract holds layout authority. Java sees a
+  descriptor, a handle, or a mask. This is the row, the facet, the register,
+  the 512-byte canonical stride.
+- **payload <= 8 B, unnested** — measured flat, so Java may hold it: `Pair`
+  2 B, `Triplet` 3 B, `Quad` 4 B, `Lane8` 8 B are all `true`. Handles,
+  versions, coordinate pairs, a single rail value.
+
+Valhalla keeps a real, measured domain; it simply was never the right tool for
+the ROW. **The move that would cripple both is the opposite one** — trying to
+make a value class express the 12/16/512-byte payload, which R4 shows cannot
+work and which costs the stability measured in R5.
+
+### Consequences
+
+- The carving is sound **as SoA and only as SoA**: N parallel rail arrays,
+  each element under the budget, never one `Facet[]`.
+- Do NOT change the substrate layout to chase Java flatness. Past 8 bytes the
+  width is irrelevant to Java's decision, which is exactly what leaves the
+  substrate free to choose its stride for cache/Morton reasons.
+- Never report `isFlatArray()` without the VM element size beside it.
+
 ## 2026-08-18 — E-LGJ-ERGONOMICS-MUST-NOT-LEAK-INTO-CURRENCY-1 (STORNO, operator-ruled, council-ratified)
 
 **Status:** RULED — operator CORRECTION WAVE + RULING CLARIFICATION +

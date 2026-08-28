@@ -850,14 +850,390 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
             Some(g) => g,
             None => return LGJ_ERR_WRONG_RESOURCE_KIND,
         };
+        let (off, stride) = store.layout.classid_lane(store_entry.n_rows, facet);
         kernels::simd_rowstore_classid_mask(
             store.as_bytes(),
-            facet as usize * crate::rowstore::FACET_BYTES as usize,
+            off,
+            stride,
             store_entry.n_rows as usize,
             needle,
             &mut g.words,
         );
         clear_tail_bits(&mut g.words, store_entry.n_rows);
+        LGJ_OK
+    })
+}
+
+/// Sum one facet's 12-byte register, under a caller-supplied CARVING, over
+/// the rows a mask selects — the mask-native sweep (ABI minor >= 5,
+/// `docs/abi.md` §14).
+///
+/// This is the execution half of the mask path whose BUILD half
+/// ([`lgj_op_eq_classid`]) has existed since minor 2. Together they are the
+/// shape measured as R8 arm E': classid -> mask (one bulk call, via
+/// `ndarray::simd::eq_u32_strided_to_mask`) -> homogeneous sweep, with the
+/// population never leaving mask form. It is the lawful counterpart to
+/// materialising per-carving row-index lists, which the mask-native law
+/// forbids as internal currency (root `CLAUDE.md`).
+///
+/// `carving` is a caller-supplied, VALIDATED wire value — `0` rails
+/// (`6*(u8:u8)`), `1` triplets (`4*(u8:u8:u8)`), `2` quads
+/// (`3*(u8:u8:u8:u8)`). Anything else is `LGJ_ERR_UNSUPPORTED_CARVING`, never a
+/// silent default. This follows [`lgj_hop`]'s `decode_mode` precedent
+/// (spec §3.4) rather than `edge_participation`'s ClassView consult: the
+/// register's reading is what the CALLER resolved from the ClassView before
+/// the crossing — resolving it again per row inside the sweep would put the
+/// question back in the hot loop, which is precisely what this symbol exists
+/// to take out of it.
+///
+/// Cost is `O(mask_words + popcount * groups)` — the mask scan is
+/// unconditional, so an empty mask still costs one pass over the mask words
+/// rather than nothing. §6's bulk-or-lifecycle rule holds either way: no term
+/// is per-crossing-per-element.
+///
+/// Overflow is REPORTED (`LGJ_ERR_SUM_OVERFLOW`), never wrapped — `i64` is not
+/// closed under this reduction.
+///
+/// # Safety
+///
+/// A null `out_sum` is *handled*, not UB: `NULL_ARGUMENT`. Otherwise
+/// `out_sum` must point at one writable, 8-byte-aligned `i64`; it is written
+/// only on `LGJ_OK`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_reduce_facet_sum(
+    res: u64,
+    facet: u32,
+    carving: u32,
+    mask: u64,
+    out_sum: *mut i64,
+) -> i32 {
+    guard(|| {
+        if out_sum.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let carving = match kernels::carving_from_wire(carving) {
+            Some(c) => c,
+            None => return LGJ_ERR_UNSUPPORTED_CARVING,
+        };
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // Register sweeps read the 12-byte payload as ONE contiguous register;
+        // FacetMajor deliberately splits it into per-field regions. Refuse with
+        // the layout status rather than gathering it back together per row.
+        if store.layout != crate::rowstore::RowLayout::AosRows {
+            return LGJ_ERR_UNSUPPORTED_LAYOUT;
+        }
+        if facet >= crate::rowstore::ROW_FACETS {
+            return LGJ_ERR_INVALID_LANE;
+        }
+        let (maskr, parent) = match registry::resolve_mask_with_parent(mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        // A mask over a different resource is a different population wearing
+        // the right size. The mask algebra already rejects that pairing with
+        // MASK_LENGTH_MISMATCH (see `lgj_mask_and`'s parent check) rather
+        // than minting a parent-specific code, so this matches it instead of
+        // inventing a second spelling for the same rejection.
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        if maskr.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let sum = match kernels::masked_facet_sum(
+            store.as_bytes(),
+            facet as usize * crate::rowstore::FACET_BYTES as usize,
+            crate::rowstore::ROW_BYTES as usize,
+            store_entry.n_rows as usize,
+            carving,
+            &g.words,
+        ) {
+            Some(v) => v,
+            // i64 is not closed under this reduction (see the kernel's own
+            // doc). Report it; never write a wrapped value.
+            None => return LGJ_ERR_SUM_OVERFLOW,
+        };
+        drop(g);
+        // SAFETY: non-null, checked above; written only on success.
+        unsafe { *out_sum = sum };
+        LGJ_OK
+    })
+}
+
+/// Test-only: how many times the resolved sweep has run a full ClassView
+/// resolution. A memo that never hits is pure overhead; a memo that hits when
+/// the population CHANGED is a wrong answer. This counter is what makes both
+/// observable instead of asserted.
+#[cfg(test)]
+pub static RESOLUTIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Sum one facet's register under the grouping the POPULATION ITSELF resolves
+/// to — the verified sibling of [`lgj_reduce_facet_sum`] (ABI minor >= 6,
+/// `docs/abi.md` §15).
+///
+/// `lgj_reduce_facet_sum` applies a grouping the caller asserts. This one
+/// DERIVES it: for every selected row it resolves `facet classid -> ClassId ->
+/// ClassView::cascade_shape` and requires every row to agree, then sweeps
+/// monomorphically under that answer. The resolved grouping is reported back
+/// through `out_carving`, so a caller learns what it got rather than assuming.
+///
+/// This is the `ResolvedCarving` shape: `classid -> ClassView -> (population +
+/// its grouping) -> sum`. The question is asked ONCE at the population's edge
+/// and never inside the sweep, so the hot loop still carries no dispatch —
+/// resolving per row would be the defect this whole path exists to avoid.
+///
+/// # Failure is the interesting case
+///
+/// `LGJ_ERR_UNRESOLVED_CARVING` when the population does not resolve to one
+/// grouping: it spans classes that read the register differently, or a row's
+/// classid has no `ClassView` answer, or it is EMPTY (zero rows carry zero
+/// classes — reporting the zero-fallback there would be inventing an answer).
+/// Neither output is written in that case.
+///
+/// # Safety
+///
+/// Null `out_sum`/`out_carving` are *handled*, not UB: `NULL_ARGUMENT`.
+/// Otherwise each must point at one writable, correctly-aligned slot; both are
+/// written only on `LGJ_OK`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_reduce_facet_sum_resolved(
+    res: u64,
+    facet: u32,
+    mask: u64,
+    out_sum: *mut i64,
+    out_carving: *mut u32,
+) -> i32 {
+    guard(|| {
+        if out_sum.is_null() || out_carving.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // Register sweeps read the 12-byte payload as ONE contiguous register;
+        // FacetMajor deliberately splits it into per-field regions. Refuse with
+        // the layout status rather than gathering it back together per row.
+        if store.layout != crate::rowstore::RowLayout::AosRows {
+            return LGJ_ERR_UNSUPPORTED_LAYOUT;
+        }
+        if facet >= crate::rowstore::ROW_FACETS {
+            return LGJ_ERR_INVALID_LANE;
+        }
+        let (maskr, parent) = match registry::resolve_mask_with_parent(mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        if maskr.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        // The memo lives with the words, so it is read under the SAME lock that
+        // guards them — a resolution can never be observed against a population
+        // it was not computed from.
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // Keyed by facet: facet 3's answer must never be served for facet 7.
+        let cached = g
+            .cached_carving(facet)
+            .and_then(|wire| kernels::carving_from_wire(u32::from(wire)));
+        let facet_off = facet as usize * crate::rowstore::FACET_BYTES as usize;
+        let stride = crate::rowstore::ROW_BYTES as usize;
+        let n = store_entry.n_rows as usize;
+
+        // The ClassView consult, once per selected row, BEFORE any sweep — and
+        // only when the memo misses. Each consult is itself a lookup into the
+        // DATASET's own classid -> grouping table (built once, `RowStore::carving_of`),
+        // so a repeated sweep over a stable population does no ClassView work at
+        // all and a first sweep does none per row beyond a byte read.
+        let carving = match cached {
+            Some(c) => c,
+            None => {
+                #[cfg(test)]
+                RESOLUTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                match kernels::resolve_population_carving(
+                    store.as_bytes(),
+                    facet_off,
+                    stride,
+                    n,
+                    &g.words,
+                    |classid| {
+                        // The process-global LAYOUT table. A classid is a global
+                        // address — the same classid means the same class in
+                        // every SoA — so this answer is dataset-independent and
+                        // the table is built once for the process, not per store.
+                        crate::class_view_provider::carving_wire_of(classid)
+                            .and_then(|w| kernels::carving_from_wire(u32::from(w)))
+                    },
+                ) {
+                    Some(c) => {
+                        // Filled while still holding the read guard, so the
+                        // population it describes cannot have changed underneath it.
+                        g.set_cached_carving(facet, kernels::carving_to_wire(c) as u8);
+                        c
+                    }
+                    None => return LGJ_ERR_UNRESOLVED_CARVING,
+                }
+            }
+        };
+
+        let sum = match kernels::masked_facet_sum(
+            store.as_bytes(),
+            facet_off,
+            stride,
+            n,
+            carving,
+            &g.words,
+        ) {
+            Some(v) => v,
+            None => return LGJ_ERR_SUM_OVERFLOW,
+        };
+        drop(g);
+        // SAFETY: both non-null, checked above; written only on success.
+        unsafe {
+            *out_sum = sum;
+            *out_carving = kernels::carving_to_wire(carving);
+        }
+        LGJ_OK
+    })
+}
+
+/// The whole-row layout probe: for EVERY facet, the set of register groupings
+/// the selected rows carry (ABI minor >= 7, `docs/abi.md` §16).
+///
+/// One crossing covers all 32 facets, which is the point — a caller asking
+/// "is this population layout-aligned?" should not pay 32 crossings, and asking
+/// per facet is how a consumer ends up writing the per-element loop §6 forbids.
+///
+/// Each output byte is a SET: bit `w` set means some selected row resolves to
+/// grouping `w`; bit 3 (`LAYOUT_UNANSWERABLE`) means some row's classid has no
+/// `ClassView` answer. A facet is aligned exactly when its byte has a single bit
+/// set and bit 3 clear — an arithmetic test, not a scan. A facet with no
+/// selected rows reports `0`: the empty set, which is neither aligned nor
+/// unanswerable.
+///
+/// Work is `O(mask_words + popcount × facets)` with one `or` per (row, facet).
+///
+/// # Safety
+///
+/// A null `out` is *handled*, not UB: `NULL_ARGUMENT`. Otherwise `out` must
+/// point at `out_len` writable bytes, and `out_len` must be at least the store's
+/// facet count — checked BEFORE anything is written.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_row_layout_probe(
+    res: u64,
+    mask: u64,
+    out: *mut u8,
+    out_len: u64,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let facets = crate::rowstore::ROW_FACETS as usize;
+        if out_len < facets as u64 {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // Register sweeps read the 12-byte payload as ONE contiguous register;
+        // FacetMajor deliberately splits it into per-field regions. Refuse with
+        // the layout status rather than gathering it back together per row.
+        if store.layout != crate::rowstore::RowLayout::AosRows {
+            return LGJ_ERR_UNSUPPORTED_LAYOUT;
+        }
+        let (maskr, parent) = match registry::resolve_mask_with_parent(mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) || maskr.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // SAFETY: non-null and long enough, both checked above.
+        let slice = unsafe { std::slice::from_raw_parts_mut(out, facets) };
+        kernels::facet_layout_sets(
+            store.as_bytes(),
+            crate::rowstore::ROW_BYTES as usize,
+            store_entry.n_rows as usize,
+            facets,
+            crate::rowstore::FACET_BYTES as usize,
+            &g.words,
+            crate::class_view_provider::carving_wire_of,
+            slice,
+        );
+        LGJ_OK
+    })
+}
+
+/// Open a FACET-MAJOR COLUMNAR row store (ABI minor >= 10, docs/abi.md §18) —
+/// the SAME logical content as [`lgj_rowstore_open_with_edges`] (same
+/// generator, same draws, same pinned 10 → 19 → 29 hop counts), arranged so
+/// every single-field sweep is CONTIGUOUS. A layout is a schema over the same
+/// 512 bytes per row (R11), so this is a CONSTRUCTOR, not a new resource
+/// kind: every mask/hop/count op accepts the handle unchanged, and the lane
+/// table serves the columnar geometry through the same lane ids.
+///
+/// `edge_classid` outside `0..16` reproduces the plain generator exactly,
+/// mirroring the AoS constructor's own convention.
+///
+/// # Safety
+///
+/// `out_resource` must be null or a valid, writable `u64`. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_rowstore_open_columnar(
+    n_rows: u64,
+    seed: u64,
+    edge_classid: u32,
+    edge_gate_mask: u64,
+    edge_radius: u32,
+    out_resource: *mut u64,
+) -> i32 {
+    guard(|| {
+        if out_resource.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let handle = match registry::open_rowstore_with_edges_in(
+            n_rows,
+            seed,
+            edge_classid,
+            edge_gate_mask,
+            edge_radius,
+            crate::rowstore::RowLayout::FacetMajor,
+        ) {
+            Ok(h) => h,
+            Err(e) => return e,
+        };
+        // SAFETY: non-null, checked above; written only on success.
+        unsafe { *out_resource = handle };
         LGJ_OK
     })
 }
@@ -913,7 +1289,94 @@ pub unsafe extern "C" fn lgj_row_facet_match(
         // segment whose element count it allocated. The slice is built over
         // exactly the prefix this call overwrites.
         let out_slice = unsafe { std::slice::from_raw_parts_mut(out, n) };
-        kernels::simd_rowstore_facet_match(&store.bytes_arc(), n, needle, out_slice);
+        match store.layout {
+            crate::rowstore::RowLayout::AosRows => {
+                kernels::simd_rowstore_facet_match(&store.bytes_arc(), n, needle, out_slice);
+            }
+            crate::rowstore::RowLayout::FacetMajor => {
+                // 32 CONTIGUOUS eq passes (the layout's native shape), then the
+                // matching rows — already a mask — set bit `f` of their bitset.
+                // The walk emits from a RESULT, never decides membership.
+                out_slice.fill(0);
+                let n_words = mask_words_for(store_entry.n_rows) as usize;
+                let mut m = vec![0u64; n_words];
+                let bytes = store.as_bytes();
+                for facet in 0..crate::rowstore::ROW_FACETS {
+                    let (off, stride) = store.layout.classid_lane(store_entry.n_rows, facet);
+                    kernels::simd_rowstore_u32_eq_mask(bytes, off, stride, n, needle, &mut m);
+                    for (w, &mw) in m.iter().enumerate() {
+                        let mut bits = mw;
+                        while bits != 0 {
+                            let bit = bits.trailing_zeros();
+                            bits &= bits - 1;
+                            let row = w * 64 + bit as usize;
+                            if row < n {
+                                out_slice[row] |= 1u32 << facet;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        LGJ_OK
+    })
+}
+
+/// How many `(row, facet)` slots of the store carry `needle` as classid —
+/// the reduction over [`lgj_row_facet_match`]'s answer, computed WHERE THE
+/// DATA IS (ABI minor >= 9, `docs/abi.md` §11).
+///
+/// One crossing in, one `u64` back. The decomposition (32 facet predicates,
+/// popcount each, sum) happens entirely on this side of the membrane: Java
+/// neither iterates facets nor sums partial counts — it does not even learn
+/// that the answer HAS parts. Selection is the same strided-equality mask the
+/// classid ops use ([`kernels::simd_rowstore_u32_eq_mask`]); the reduction is
+/// the sanctioned `ndarray::simd` popcount. No scalar path exists.
+///
+/// Cannot overflow: at most `n_rows * 32` slots, and `n_rows` is far below
+/// `u64::MAX / 32` for any resolvable store.
+///
+/// # Safety
+///
+/// `out_count` must be null or a valid, writable `u64`. Null is rejected with
+/// `LGJ_ERR_NULL_ARGUMENT`; written only on success.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_rowstore_facet_match_count(
+    res: u64,
+    needle: u32,
+    out_count: *mut u64,
+) -> i32 {
+    guard(|| {
+        if out_count.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let n_rows = store_entry.n_rows;
+        let n = match usize::try_from(n_rows) {
+            Ok(n) => n,
+            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+        };
+        let n_words = mask_words_for(n_rows) as usize;
+        let bytes = store.as_bytes();
+
+        // Σ_f popcount(class_f) — mask ops only. The eq kernel guarantees
+        // trailing bits zero, so the popcount needs no tail masking.
+        let mut scratch = vec![0u64; n_words];
+        let mut total = 0u64;
+        for facet in 0..crate::rowstore::ROW_FACETS {
+            let (off, stride) = store.layout.classid_lane(n_rows, facet);
+            kernels::simd_rowstore_u32_eq_mask(bytes, off, stride, n, needle, &mut scratch);
+            total += kernels::simd_popcount(&scratch);
+        }
+        // SAFETY: non-null, checked above; written only on success.
+        unsafe { *out_count = total };
         LGJ_OK
     })
 }
@@ -1210,13 +1673,39 @@ fn resolve_rowstore_and_hop_masks(
 /// `n_rows` as a `u64` BEFORE any `as usize` cast, so an out-of-range
 /// `u64` target can never reach an indexing operation.
 ///
-/// **Kernel composition.** The classid-match sub-step for each
-/// participating facet routes through the EXISTING sanctioned primitive
-/// ([`kernels::simd_rowstore_classid_mask`], the same kernel
-/// [`lgj_op_eq_classid`] uses) into a scratch word buffer that is REUSED
-/// across every participating facet, never reallocated per facet. Only
-/// the resulting set-bit walk + payload decode + scatter is scalar —
-/// there is no `ndarray::simd` primitive for gather-decode-scatter.
+/// **Shape: gather, not sweep.** The hop reads ONLY the rows `src`
+/// names. For each such row it walks its participating facets in place
+/// out of that row's own 512 bytes — classid compare, payload decode and
+/// scatter together, one row's cache lines at a time.
+///
+/// It did not always. Two earlier shapes swept the WHOLE population and
+/// then intersected with `src`: first one full-width
+/// `simd_rowstore_classid_mask` pass PER FACET (32 passes), then one
+/// `simd_rowstore_facet_match` pass answering all 32 at once. Both were
+/// replaced on measurement, not taste
+/// (`ISS-LGJ-HOP-SWEEPS-FULL-POPULATION`).
+///
+/// The crossover a sweep would need in order to win does not exist.
+/// `examples/hop_gather_vs_sweep.rs` measured both shapes over four
+/// populations (1 024 … 262 144) × twelve frontier densities, asserting
+/// byte-identical output at every point: gather wins EVERY configuration,
+/// by 2 612× at the sparsest and still **1.7×** at 100 % density. The
+/// mechanism is why it holds even when every row is in the frontier — a
+/// sweep MATERIALISES an `n`-element per-row intermediate that each row
+/// reads exactly once, so the cost is never amortised, while the gather
+/// computes the same answer inline. A sweep is strictly more work at
+/// every density, not merely more work at sparse ones.
+///
+/// Consequence worth stating plainly: this scalar gather beats a
+/// vectorised `ndarray::simd` sweep. The win is in NOT DOING THE WORK,
+/// not in the vector width — so no SIMD primitive is called here, and
+/// none is missing. (`simd_rowstore_facet_match` remains the kernel
+/// behind [`lgj_row_facet_match`]; it is not orphaned.)
+///
+/// The one shape that could still favour a precomputed mask is REUSE —
+/// memoising the per-row answer across many hops on the same
+/// `(store, classid)`. That is a caching design with its own
+/// invalidation questions, and is deliberately not this function's.
 ///
 /// `docs/abi.md` §13 is the full normative statement.
 #[no_mangle]
@@ -1269,51 +1758,86 @@ pub extern "C" fn lgj_hop(
         }
 
         let mut out = vec![0u64; n_words];
-        // One scratch buffer for the classid-match sub-step, reused across
-        // every participating facet — never allocated per facet.
-        let mut classid_scratch = vec![0u64; n_words];
         let bytes = rowstore.as_bytes();
+
+        // SELECTION IS MASK ALGEBRA.
+        //
+        //   selected_f = src ∧ class_f ∧ struct_f
+        //   dst        = ⋁_{f ∈ participation} scatter(selected_f)
+        //
+        // Both predicates are the SAME strided-equality primitive
+        // (`simd_rowstore_u32_eq_mask`) at two offsets into the facet — the
+        // classid at +0, the structured-edge gate at +12 — and the two ANDs
+        // are word-parallel over 64 rows at a time. No row is examined to
+        // decide whether it participates; participation is computed for the
+        // whole population and intersected.
+        //
+        // Three shapes preceded this one and each traded the algebra for
+        // arithmetic:
+        //
+        //   1. PR #22 — mask-shaped selection (`src_word & classid_word`),
+        //      but the structured-edge gate was an `if` inside the walk and
+        //      the classid sweep ran once PER FACET over a 512-strided store.
+        //   2. PR #40 — deleted the classid mask outright and compared per
+        //      row inside a `trailing_zeros` walk of `src`. Faster, and the
+        //      predicate stopped being a mask at all.
+        //   3. PR #41 — restored an AND, but SCALAR and per-row, over a
+        //      memoised `facet_bits` buffer: the op survived as a symbol
+        //      while the algebra did not, and the memo stored a projection
+        //      of bytes already resident.
+        //
+        // What remains a walk is the SCATTER alone, and only because the
+        // destination row index is DECODED from the selected row's payload —
+        // it is the operand of a permutation, not a decision about which rows
+        // take part. Making that a semiring product (`dst = src ⊗ A`) is the
+        // next rung and needs an adjacency operand this ABI does not carry.
+        let mut selected = vec![0u64; n_words];
+        let mut structured = vec![0u64; n_words];
 
         for facet in 0..crate::rowstore::ROW_FACETS {
             if (effective >> facet) & 1 == 0 {
                 continue;
             }
-            kernels::simd_rowstore_classid_mask(
+            // Both predicates through the layout's OWN lane geometry — under
+            // FacetMajor each is a CONTIGUOUS pass (stride 4), which is the
+            // whole point of that layout; under AosRows the same calls are the
+            // stride-512 passes the columnar store exists to retire.
+            let (c_off, c_stride) = rowstore.layout.classid_lane(n_rows, facet);
+            let (h_off, h_stride) = rowstore.layout.hi32_lane(n_rows, facet);
+
+            // class_f — which rows carry this class in THIS facet.
+            kernels::simd_rowstore_u32_eq_mask(
                 bytes,
-                facet as usize * crate::rowstore::FACET_BYTES as usize,
+                c_off,
+                c_stride,
                 n,
                 edge_classid,
-                &mut classid_scratch,
+                &mut selected,
             );
-            // Walk the set bits of (src ∩ classid-mask) — decode + scatter
-            // has no ndarray primitive (spec §3.4 / council S2-2), so this
-            // half stays scalar; the compare above already ran through the
-            // sanctioned SIMD kernel.
-            for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()).enumerate() {
-                let mut bits = sw & cw;
+            // ∧ src — narrow to the frontier.
+            kernels::simd_mask_and_assign(&mut selected, &src_snapshot);
+            // struct_f — payload_hi32 == 0 marks a structured edge.
+            kernels::simd_rowstore_u32_eq_mask(bytes, h_off, h_stride, n, 0, &mut structured);
+            // ∧ — the gate that used to be an `if`.
+            kernels::simd_mask_and_assign(&mut selected, &structured);
+
+            // Emit from the SELECTED set. Every row reached here has already
+            // satisfied all three predicates; the walk decides nothing.
+            for (w, &sw) in selected.iter().enumerate() {
+                let mut bits = sw;
                 while bits != 0 {
                     let bit = bits.trailing_zeros();
                     bits &= bits - 1;
                     let row = (w as u64) * ROWS_PER_WORD + bit as u64;
                     // Defensive: a conformant mask's tail is always zero, so
-                    // this is unreachable for a well-formed src_mask — but
-                    // guards against a deliberately corrupted snapshot
-                    // rather than letting the byte-offset math below run
-                    // past the buffer.
+                    // this is unreachable for a well-formed src_mask.
                     if row >= n_rows {
                         continue;
                     }
-                    let base = (row * crate::rowstore::ROW_BYTES
-                        + facet as u64 * crate::rowstore::FACET_BYTES)
-                        as usize;
-                    let payload_hi32 =
-                        u32::from_le_bytes(bytes[base + 12..base + 16].try_into().unwrap());
-                    if payload_hi32 != 0 {
-                        continue; // not a structured edge (gate failed at generation)
-                    }
+                    let lo = rowstore.layout.lo64_offset(n_rows, row, facet);
                     // Bounds check on u64, BEFORE any `as usize` cast
                     // (council S3-6, normative ordering).
-                    let target = u64::from_le_bytes(bytes[base + 4..base + 12].try_into().unwrap());
+                    let target = u64::from_le_bytes(bytes[lo..lo + 8].try_into().unwrap());
                     if target < n_rows {
                         let t = target as usize;
                         out[t / 64] |= 1u64 << (t % 64);
@@ -2336,7 +2860,12 @@ mod tests {
 
     // ── hop (ABI minor ≥ 4) ─────────────────────────────────────────────────
 
+    /// The FIXTURE's pinned answer. Gated OFF under `ogar-classview`: with a
+    /// real provider bound, edge classid 0 is UNREGISTERED, so participation
+    /// narrows to nothing and 19/29 is no longer the truth. The contrasting
+    /// fact is pinned by `hop_under_the_real_provider_narrows_by_class`.
     #[test]
+    #[cfg(not(feature = "ogar-classview"))]
     fn hop_matches_the_pinned_rowstore_regression_10_19_29() {
         let n = 2000u64;
         let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
@@ -2366,6 +2895,244 @@ mod tests {
         lgj_close(dst1);
         lgj_close(src);
         lgj_close(store);
+    }
+
+    /// The CONTRAST to `hop_matches_the_pinned_rowstore_regression_10_19_29`.
+    ///
+    /// Same store, same seeds, same call — a different answer, because
+    /// participation is now a per-class fact instead of a constant. Two
+    /// halves, and both are needed: the hop must yield EMPTY (narrowing is
+    /// real), and the provider must still answer non-empty for a classid
+    /// that IS in the vocabulary (the emptiness is the store's classid
+    /// domain, not a provider that answers empty to everything).
+    ///
+    /// DISABLE: return `FieldMask::FULL` from the `ogar-classview` arm of
+    /// `edge_participation` and the first half fails — 19 rows come back
+    /// where the real provider says none should.
+    #[test]
+    #[cfg(feature = "ogar-classview")]
+    fn hop_under_the_real_provider_narrows_by_class() {
+        let n = 2000u64;
+        let seed_rows: Vec<u64> = (0..10u64).map(|i| i * 37 + 5).collect();
+
+        // (a) classid 0 is unregistered -> participates in nothing -> EMPTY.
+        let store0 = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let src0 = mask(store0, LGJ_MASK_INIT_EMPTY);
+        // dst starts ALL, so EMPTY proves an overwrite rather than a default.
+        let dst0 = mask(store0, LGJ_MASK_INIT_ALL);
+        set_rows(src0, &seed_rows);
+        assert_eq!(lgj_hop(store0, 0, 0xFFFF_FFFF, 0, src0, dst0), LGJ_OK);
+        assert_eq!(
+            count(dst0),
+            0,
+            "an unregistered edge classid must traverse nothing (the fixture \
+             answered 19 here)"
+        );
+        lgj_close(dst0);
+        lgj_close(src0);
+        lgj_close(store0);
+
+        // (b) ...and emptiness here is the STORE's doing, not a dead
+        // provider. `RowStore::generate*` draws classids from `0..16`
+        // (`ROWSTORE_CLASS_CARDINALITY`), while every classid registered in
+        // `ogar_vocab` is >= 0x0100 — the two domains are DISJOINT, so under
+        // a real provider a generated store hops nothing for ANY classid in
+        // its own domain. That is the honest state of the seam: the fixture
+        // ROWS are what remain to be replaced with Lance-loaded SoA rows.
+        //
+        // Two-sided: the same provider DOES admit facets for a classid that
+        // is actually in the vocabulary, so the emptiness above is a
+        // property of the store's classid domain and not of a provider that
+        // answers empty to everything.
+        for c in 0..crate::rowstore::ROWSTORE_CLASS_CARDINALITY as u32 {
+            assert_eq!(
+                crate::class_view_provider::edge_participation(c).count(),
+                0,
+                "classid {c} is in the store's domain but not the vocabulary"
+            );
+        }
+        assert_eq!(
+            crate::class_view_provider::edge_participation(0x0103).count(),
+            13,
+            "the provider is not answering empty to everything"
+        );
+    }
+
+    /// The minor-9 count against TWO independent oracles: the buffer-popcount
+    /// of `lgj_row_facet_match` (the very reduction Java used to do), and a
+    /// scalar recompute from the public per-row accessor. All three paths
+    /// share no code beyond the store itself.
+    #[test]
+    fn facet_match_count_agrees_with_the_buffer_and_the_scalar_oracle() {
+        let n = 2000u64;
+        let store = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let entry = registry::resolve_kind(store, LGJ_RESOURCE_ROWSTORE).unwrap();
+        let rs = entry.rowstore().unwrap();
+
+        for needle in [0u32, 7, 15] {
+            let mut count = 0u64;
+            assert_eq!(
+                unsafe { lgj_rowstore_facet_match_count(store, needle, &mut count) },
+                LGJ_OK
+            );
+
+            // Oracle 1: the buffer popcount.
+            let mut buf = vec![0u32; n as usize];
+            assert_eq!(
+                unsafe { lgj_row_facet_match(store, needle, buf.as_mut_ptr(), n) },
+                LGJ_OK
+            );
+            let buffer_total: u64 = buf.iter().map(|w| u64::from(w.count_ones())).sum();
+            assert_eq!(count, buffer_total, "needle {needle}: buffer oracle");
+
+            // Oracle 2: scalar recompute, no kernel involved.
+            let mut scalar_total = 0u64;
+            for row in 0..n {
+                for facet in 0..crate::rowstore::ROW_FACETS {
+                    if rs.classid_at(row, facet) == needle {
+                        scalar_total += 1;
+                    }
+                }
+            }
+            assert_eq!(count, scalar_total, "needle {needle}: scalar oracle");
+
+            // Anti-vacuity: a needle in the generated 0..16 range matches a
+            // non-trivial, non-total slot count.
+            assert!(count > 0 && count < n * 32, "needle {needle}: {count}");
+        }
+
+        // A needle outside the generator's classid range matches NOTHING —
+        // the can-it-stay-silent half.
+        let mut absent = u64::MAX;
+        assert_eq!(
+            unsafe { lgj_rowstore_facet_match_count(store, 999, &mut absent) },
+            LGJ_OK
+        );
+        assert_eq!(absent, 0);
+
+        // Null out-param is rejected, nothing written.
+        assert_eq!(
+            unsafe { lgj_rowstore_facet_match_count(store, 0, std::ptr::null_mut()) },
+            LGJ_ERR_NULL_ARGUMENT
+        );
+
+        lgj_close(store);
+    }
+
+    /// Minor 10, the columnar store through the WHOLE ABI surface: the same
+    /// logical content answers identically under both layouts — the pinned
+    /// 10 → 19 → 29 hop, eq-classid counts, facet-match bitsets and the
+    /// native slot count — while the register-sweep family refuses with the
+    /// LAYOUT status instead of reading a register that is no longer
+    /// contiguous. A layout is a schema; the answers belong to the content.
+    #[test]
+    #[cfg(not(feature = "ogar-classview"))]
+    fn columnar_store_answers_identically_and_register_sweeps_refuse() {
+        let n = 2000u64;
+        let aos = rowstore_with_edges(n, 0xF00D_CAFE, 0, 0x0, 25);
+        let mut col_h = 0u64;
+        assert_eq!(
+            unsafe { lgj_rowstore_open_columnar(n, 0xF00D_CAFE, 0, 0x0, 25, &mut col_h) },
+            LGJ_OK
+        );
+
+        // The pinned hop, on the columnar store, via the SAME export.
+        let seed_rows: Vec<u64> = (0..10u64).map(|i| i * 37 + 5).collect();
+        for (store, label) in [(aos, "aos"), (col_h, "columnar")] {
+            let src = mask(store, LGJ_MASK_INIT_EMPTY);
+            let dst1 = mask(store, LGJ_MASK_INIT_EMPTY);
+            let dst2 = mask(store, LGJ_MASK_INIT_EMPTY);
+            set_rows(src, &seed_rows);
+            assert_eq!(
+                lgj_hop(store, 0, 0xFFFF_FFFF, 0, src, dst1),
+                LGJ_OK,
+                "{label}"
+            );
+            assert_eq!(count(dst1), 19, "{label}: 1-hop");
+            assert_eq!(
+                lgj_hop(store, 0, 0xFFFF_FFFF, 0, dst1, dst2),
+                LGJ_OK,
+                "{label}"
+            );
+            assert_eq!(count(dst2), 29, "{label}: 2-hop");
+            lgj_close(dst2);
+            lgj_close(dst1);
+            lgj_close(src);
+        }
+
+        // eq-classid per facet: identical counts (the contiguous stride-4 lane
+        // and the stride-512 lane select the same rows).
+        for facet in [0u32, 7, 31] {
+            for needle in [0u32, 9, 15] {
+                let ma = mask(aos, LGJ_MASK_INIT_EMPTY);
+                let mc = mask(col_h, LGJ_MASK_INIT_EMPTY);
+                assert_eq!(lgj_op_eq_classid(aos, facet, needle, ma), LGJ_OK);
+                assert_eq!(lgj_op_eq_classid(col_h, facet, needle, mc), LGJ_OK);
+                assert_eq!(count(ma), count(mc), "facet {facet} needle {needle}");
+                assert!(
+                    count(ma) > 0,
+                    "vacuity guard: facet {facet} needle {needle}"
+                );
+                lgj_close(mc);
+                lgj_close(ma);
+            }
+        }
+
+        // facet-match bitsets: byte-identical buffers, and the native count
+        // agrees on both.
+        let mut buf_a = vec![0u32; n as usize];
+        let mut buf_c = vec![0u32; n as usize];
+        assert_eq!(
+            unsafe { lgj_row_facet_match(aos, 9, buf_a.as_mut_ptr(), n) },
+            LGJ_OK
+        );
+        assert_eq!(
+            unsafe { lgj_row_facet_match(col_h, 9, buf_c.as_mut_ptr(), n) },
+            LGJ_OK
+        );
+        assert_eq!(buf_a, buf_c);
+        let (mut ca, mut cc) = (0u64, 0u64);
+        assert_eq!(
+            unsafe { lgj_rowstore_facet_match_count(aos, 9, &mut ca) },
+            LGJ_OK
+        );
+        assert_eq!(
+            unsafe { lgj_rowstore_facet_match_count(col_h, 9, &mut cc) },
+            LGJ_OK
+        );
+        assert_eq!(ca, cc);
+        assert!(ca > 0);
+
+        // The register-sweep family REFUSES on columnar — the deferral is a
+        // status, never a silently wrong sum over scrambled bytes.
+        let m = mask(col_h, LGJ_MASK_INIT_ALL);
+        let mut sum = 0i64;
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum(col_h, 0, 0, m, &mut sum) },
+            LGJ_ERR_UNSUPPORTED_LAYOUT
+        );
+        let mut carving_out = 0u32;
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum_resolved(col_h, 0, m, &mut sum, &mut carving_out) },
+            LGJ_ERR_UNSUPPORTED_LAYOUT
+        );
+        let mut probe_out = vec![0u8; 32];
+        assert_eq!(
+            unsafe { lgj_row_layout_probe(col_h, m, probe_out.as_mut_ptr(), 32) },
+            LGJ_ERR_UNSUPPORTED_LAYOUT
+        );
+        // …and the SAME calls succeed on AoS (the gate discriminates by
+        // layout, not by rejecting everything).
+        let ma = mask(aos, LGJ_MASK_INIT_ALL);
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum(aos, 0, 0, ma, &mut sum) },
+            LGJ_OK
+        );
+        lgj_close(ma);
+        lgj_close(m);
+
+        lgj_close(col_h);
+        lgj_close(aos);
     }
 
     #[test]
@@ -2563,5 +3330,73 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), len, "status codes must be distinct");
         assert!(all.iter().skip(1).all(|&s| s < 0));
+    }
+
+    /// The memo must actually HIT — otherwise it is pure overhead — and must
+    /// MISS after the population changes, otherwise it is a wrong answer.
+    /// Both halves are needed: a memo that never hits passes the second alone,
+    /// and a memo that never invalidates passes the first alone.
+    #[test]
+    fn the_carving_memo_hits_on_repeat_and_misses_after_a_write() {
+        use std::sync::atomic::Ordering;
+        let store = lgj_rowstore_open_handle(256, 0x5EED);
+        let mut mask = 0u64;
+        assert_eq!(unsafe { lgj_mask_create(store, 0, &mut mask) }, LGJ_OK);
+        assert_eq!(lgj_op_eq_classid(store, 0, 3, mask), LGJ_OK);
+
+        let (mut sum, mut carv) = (0i64, 0u32);
+        let before = RESOLUTIONS.load(Ordering::Relaxed);
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum_resolved(store, 0, mask, &mut sum, &mut carv) },
+            LGJ_OK
+        );
+        let after_first = RESOLUTIONS.load(Ordering::Relaxed);
+        assert_eq!(after_first, before + 1, "the first sweep must resolve");
+
+        // Repeat over the SAME population: the memo must serve it.
+        let first_sum = sum;
+        for _ in 0..5 {
+            assert_eq!(
+                unsafe { lgj_reduce_facet_sum_resolved(store, 0, mask, &mut sum, &mut carv) },
+                LGJ_OK
+            );
+            assert_eq!(sum, first_sum);
+        }
+        assert_eq!(
+            RESOLUTIONS.load(Ordering::Relaxed),
+            after_first,
+            "repeat sweeps over an unchanged population must NOT re-resolve"
+        );
+
+        // A different FACET must not be served the cached answer.
+        let n = RESOLUTIONS.load(Ordering::Relaxed);
+        let _ = unsafe { lgj_reduce_facet_sum_resolved(store, 1, mask, &mut sum, &mut carv) };
+        assert!(
+            RESOLUTIONS.load(Ordering::Relaxed) > n,
+            "a different facet must resolve rather than reuse facet 0's answer"
+        );
+
+        // Change the population: the next sweep must resolve again.
+        assert_eq!(lgj_op_eq_classid(store, 0, 4, mask), LGJ_OK);
+        let n = RESOLUTIONS.load(Ordering::Relaxed);
+        assert_eq!(
+            unsafe { lgj_reduce_facet_sum_resolved(store, 0, mask, &mut sum, &mut carv) },
+            LGJ_OK
+        );
+        assert!(
+            RESOLUTIONS.load(Ordering::Relaxed) > n,
+            "a rewritten population must invalidate the memo"
+        );
+        assert_ne!(sum, first_sum, "and it really is a different population");
+
+        assert_eq!(lgj_close(mask), LGJ_OK);
+        assert_eq!(lgj_close(store), LGJ_OK);
+    }
+
+    /// Small helper: open a row store and return its handle.
+    fn lgj_rowstore_open_handle(n: u64, seed: u64) -> u64 {
+        let mut h = 0u64;
+        assert_eq!(unsafe { lgj_rowstore_open(n, seed, &mut h) }, LGJ_OK);
+        h
     }
 }

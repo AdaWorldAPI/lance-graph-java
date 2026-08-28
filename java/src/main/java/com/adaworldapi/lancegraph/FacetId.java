@@ -20,6 +20,10 @@ package com.adaworldapi.lancegraph;
  */
 public record FacetId(int index) {
 
+    /** Facets per row — 32, the canonical `32 × 16 B = 512 B` row (abi.md §11). */
+    public static final int COUNT = 32;
+
+
     public FacetId {
         if (index < 0 || index > 31) {
             throw new IllegalArgumentException("facet index must be in 0..31, was " + index);

@@ -1,0 +1,72 @@
+JDK: openjdk 27-jep401ea3 2026-09-15
+
+=== (2) is the cliff a tunable? R4's real widths, ALL five flattening flags forced on ===
+type               payload  NR-nonAtomic     NR-atomic        nullable-atomic
+Reg12AsRails          12 B  false            false            false
+Reg12AsTriplets       12 B  false            false            false
+Reg12AsQuads          12 B  false            false            false
+Reg12Flat             12 B  false            false            false
+Facet16AsRails        16 B  false            false            false
+Facet16AsQuads        16 B  false            false            false
+Reg12AsQuadsNR        12 B  false            false            false
+Reg12AsRailsNR        12 B  false            false            false
+Facet16AsQuadsNR      16 B  false            false            false
+Lane8                  8 B  true             true             false
+Two8                  16 B  false            false            false
+Two8NR                16 B  false            false            false
+Four8AsTwo8           32 B  true             true             false
+Blk64AsTwo8           64 B  false            false            false
+  -> byte-identical to the default-flags run in R4-observed.txt. Not a policy knob.
+
+=== (3) arrays vs value-class FIELDS: does the JEP's distinction lift 12 B? ===
+Layout of class R6_WhyEightBytes$HoldsQuad@0x7fa910117140 extends java/lang/Record@0x7fa910095910
+Instance fields:
+ @0 RESERVED 12/-
+ @12 PADDING 4/1
+ @16 FLAT 4/4 "q" LR6_WhyEightBytes$Quad; R6_WhyEightBytes$Quad@0x7fa910117140 NULL_FREE_ATOMIC_FLAT
+ @20 NULL_MARKER 1/1 
+Static fields:
+--
+Layout of class R6_WhyEightBytes$Reg12@0x7fa910117140 extends java/lang/Record@0x7fa910095910
+Instance fields:
+ @0 RESERVED 12/-
+ @12 FLAT 4/4 "q0" LR6_WhyEightBytes$Quad; R6_WhyEightBytes$Quad@0x7fa910117140 NULL_FREE_ATOMIC_FLAT
+ @16 FLAT 4/4 "q1" LR6_WhyEightBytes$Quad; R6_WhyEightBytes$Quad@0x7fa910117140 NULL_FREE_ATOMIC_FLAT
+ @20 FLAT 4/4 "q2" LR6_WhyEightBytes$Quad; R6_WhyEightBytes$Quad@0x7fa910117140 NULL_FREE_ATOMIC_FLAT
+ @24 NULL_MARKER 1/1 
+--
+Layout of class R6_WhyEightBytes$HoldsReg12@0x7fa910117140 extends java/lang/Record@0x7fa910095910
+Instance fields:
+ @0 RESERVED 12/-
+ @12 PADDING 4/1
+ @16 REGULAR 4/4 "r" LR6_WhyEightBytes$Reg12;
+ @20 NULL_MARKER 1/1 
+Static fields:
+
+READING
+  Reg12       : its three Quad fields are each FLAT 4/4 inline -- 4-byte values DO flatten
+                into a value class's fields.
+  HoldsQuad.q : FLAT -- the 4-byte control flattens as a field, as expected.
+  HoldsReg12.r: REGULAR 4/4 -- a REFERENCE. The 12-byte value did NOT flatten into a
+                value-class field either, in this EA, with field + non-atomic flattening on.
+
+So JEP 401's "fields of a value class do not have this atomicity limitation" did not, in
+this build, translate into a larger flattenable payload. Whether that is an EA
+implementation gap or a further constraint is NOT determined here -- it is an open item,
+not a conclusion.
+
+WHAT IS DETERMINED
+  - This is JDK 27 (the JEP 401 EA). There is no later JDK to upgrade to for this.
+  - The limit is not a flag.
+  - The JEP states the cause: flattened references must be read/written atomically, and on
+    common hardware that caps mutable flattened fields at 64 bits.
+  - The JEP leaves the door open, in speculative terms: "Future enhancements may enable
+    more flattening of references to 64-bit and even larger value objects... perhaps
+    128-bit atomic mutable fields will become viable on some hardware architectures."
+
+WHY THIS DOES NOT RESCUE SoA EVEN IF IT LANDS
+  The exemption the JEP names is for value-class FIELDS, on the grounds that they are never
+  observed to be mutated. SoA lanes are ARRAYS, and array elements are mutable by
+  definition -- squarely inside the constraint, not the exemption. A future 128-bit atomic
+  would move the cliff from 8 to 16 bytes; the 12-byte register would fit and the 512-byte
+  row still would not.

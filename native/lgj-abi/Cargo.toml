@@ -43,6 +43,12 @@ ndarray = { path = "../../../ndarray", default-features = false, features = ["st
 # this crate consumes, and the crate compiles fine without them.
 lance-graph-contract = { path = "../../../lance-graph/crates/lance-graph-contract", default-features = false }
 
+# The REAL ClassView provider (OGAR Core). `FixtureClassView` answers the same
+# 32 facets for every classid; `OgarClassView` walks `ogar_vocab`'s promoted
+# classes and gives a genuine per-class field basis -- attributes AND
+# associations -- which is what makes `edge_participation` discriminate.
+ogar-class-view = { path = "../../../OGAR/crates/ogar-class-view", optional = true }
+
 [profile.release]
 opt-level = 3
 lto = "thin"
@@ -55,3 +61,18 @@ codegen-units = 1
 
 [profile.dev]
 # Same rule as release: no panic = "abort".
+
+[features]
+# Bind the real OGAR ClassView instead of the fixture. OFF by default: the
+# generated row store's classid domain (0..16) is disjoint from the
+# vocabulary's (>= 0x0100), so binding it changes what every hop answers --
+# see `class_view_provider`'s module docs.
+ogar-classview = ["dep:ogar-class-view"]
+
+# ogar-class-view pulls `lance-graph-contract` by git branch; this crate pulls
+# it by path. Cargo does NOT unify a git source with a path source, so without
+# this patch the build carries TWO `lance-graph-contract` crates and therefore
+# two incompatible `ClassView` traits -- the same SourceId trap recorded in
+# tesseract-rs for `ogar-doc-ir`. The patch collapses both onto the local path.
+[patch."https://github.com/AdaWorldAPI/lance-graph"]
+lance-graph-contract = { path = "../../../lance-graph/crates/lance-graph-contract" }

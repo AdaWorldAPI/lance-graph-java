@@ -1,5 +1,297 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — OPEN
+
+**Found.** By the 5+3 council's `handle-lifecycle-auditor` pass on PR #45
+(the zero-copy/memory-safety doctrine review). `LgjLaneDesc`/`LgjMaskDesc`
+carry an `epoch` field (`exports.rs`, lane/mask describe exports)
+specifically so a Java-side holder of a cached descriptor address could
+re-validate it against the live resource. Grepped `epoch` across
+`java/src/main` — it appears only in layout/record construction
+(`Engine.java`'s `LaneWindow`), never in a comparison. The re-check the
+field exists for is unwired; the only guard on the cached-descriptor path
+is a Java `closed` boolean (weaker: it does not detect a slot that closed
+and was reused for a different resource within the same process, the way
+a generation comparison would).
+
+**Not urgent, not silent-corruption-shaped today**: `RowStore`/`Mask`
+mark themselves permanently closed on `close()` (no slot reuse observed
+from the Java facade's own lifecycle — a `RowStore` handle is never
+recycled to address a different resource while a `lanes[]` cache still
+points at the old one, per `RowStoreLifetimeTest`). The gap is real but
+currently unreachable through the facade's own public API; it becomes
+load-bearing only if a future capability lets a Java-held descriptor
+outlive a same-slot resource swap. Filed so it is not silently assumed
+covered by the generation-registry claim in `CLAUDE.md`'s zero-copy
+section (see that section's "Pointer value is not provenance" bullet,
+corrected 2026-08-28 to name this gap explicitly rather than imply
+`epoch` is checked).
+
+**Next step, not yet scheduled**: wire `epoch` comparison into
+`RowStore`/`Mask`'s per-access path (`lane(int)`, `checkedRow`), or, if
+measurement shows the facade's own close-discipline makes it provably
+unreachable, downgrade this entry to a documented invariant rather than
+a live gap — either resolution needs the measurement, not assumption.
+
+## ISS-LGJ-HOP-LAYOUT-BLOCKS-THE-ALGEBRA (2026-08-27) — RESOLVED (same day; ABI minor 10)
+
+**Found.** By landing R1 (selection as mask algebra) and measuring it.
+
+**Measured.** 65 536 rows, all densities: the lawful shape costs
+**~40 600 µs** where the shipped one-pass sweep costs ~2 100 µs — a **19×
+regression** — because 32 facets × 2 predicates is 64 whole-population passes
+at **stride 512**, ~2 GB of memory traffic to read 512 KB of classids. Scaling
+is worse than linear (1 024 rows → 144 µs; 65 536 rows → 40 632 µs, 282× for
+64× the rows), the signature of cache and TLB failing together.
+
+**Root cause is the layout, not the algebra** — and it was priced before this
+arc started. R11 (#31) measured AoS 512-stride at 12–13 ns/row against an SoA
+facet lane at ~1.3 ns/row (**9.2×**) and found the layout already *data* at
+every boundary except the store's constructor, with the kernels already
+stride-parameterized. PR #40 then banked the opposite as a law — *"a scalar
+gather beats a vectorised sweep; the win is in not doing the work"* — a
+measurement taken inside the defect and generalised as a property of the
+operation. That claim is superseded; see the storno on #40's arc entry.
+
+**The fix is measured, not proposed.** A columnar `(row × facet)` plane —
+same bytes, field-major — runs the identical algebra at **902–2 271 µs**,
+~40× the AoS mask shape and 2.3–5.7× the sweep it replaces, with cost tracking
+the canvas rather than the frontier (2.5× across a 10 000× density range).
+Banked: `.claude/board/hop-mask-algebra-vs-columnar.txt`.
+
+**RESOLVED — ABI minor 10 landed the columnar store**, exactly the shape
+R11 priced: an additive constructor (`lgj_rowstore_open_columnar`, facet-
+major: contiguous per-facet classid/lo64/hi32 blocks, same 512n bytes, same
+draws) plus lane descriptors (33 → 97 lanes so every field is served).
+Measured THROUGH THE ABI at 65 536 rows: hop **3.3–4.8×** over AoS at every
+frontier arm, byte-identical answers, the pinned 10 → 19 → 29 on both
+layouts. The register-sweep family refuses facet-major with the new
+`UNSUPPORTED_LAYOUT` (-18) — a row-major operation stays honest about being
+one — pinned two-sided (same calls succeed on AoS). Java is proven
+LAYOUT-BLIND: its accessors read through served descriptors, and the
+disable-run (stride hard-coded 512) fails the columnar store at the first
+row where the layouts' addresses diverge. Remaining headroom, named not
+hidden: the lab's single-plane pass measured a further ~10× beyond the
+per-facet columnar sweep — a fused whole-region kernel is the next rung,
+not this one.
+
+## ISS-LGJ-ARC-INVENTORY-STOPPED-AT-32 (2026-08-27) — RESOLVED
+
+**Found.** While landing PR #42's own arc entry, per the board README's
+rule (`PR_ARC_INVENTORY.md` — "every PR, at open").
+
+**Measured, and the first count was wrong.** The entry as first filed said
+"entries run `#1..#20`, then `#32`" and "nineteen PRs". Enumerating rather
+than eyeballing the range gives a different and less tidy answer:
+
+- entries present: `#1`–`#12`, `#14`, `#16`, `#18`, `#20`, `#32`;
+- **missing: `#13`, `#22`–`#31`, `#33`–`#41` — twenty PRs**, not nineteen,
+  and the gap starts at `#13`, well inside the range the first count read
+  as complete;
+- `#15`, `#17`, `#19`, `#21` are also absent and are **correctly** absent —
+  each is itself an arc-entry-only PR, exempt under the termination clause;
+- `#32`'s entry read `(draft, opened 2026-08-25)` with no merge sha, so the
+  newest entry in the file was also stale.
+
+The first count was a range subtraction over a file that has holes. Stated
+here rather than silently corrected, because "I checked" and "I enumerated"
+are different claims and only the second one was ever load-bearing.
+
+**Why it mattered.** `LATEST_STATE.md` answers *what exists*; the arc
+answers *why*. As it stood, a future session read this repo as going from
+ABI minor 8 straight to a ClassView provider — the whole hop arc (the
+32-sweep root cause, the gather rewrite, the measured absence of a
+crossover, the memoisation and its cold regression) absent from the record
+that exists to carry exactly that.
+
+**Resolved.** All twenty entries written, plus `#32`'s header corrected to
+name its merge and the fact that it reached `main` only via `#33`. Method,
+which was the whole point: each entry drafted from **that PR's own body and
+diff** — five parallel agents, four PRs each, none permitted to work from a
+later session's recall. Every backfilled entry ends its **Confidence:**
+bullet with `Backfilled 2026-08-27 from the PR body and diff, not written at
+merge time`, so a reader can tell at a glance which entries were written at
+merge time and which were reconstructed; several say plainly which of their
+claims are the PR body's own and were not re-verified.
+
+**What the backfill itself turned up** (each recorded in the entry it
+belongs to, not only here): #25's PR body asserts "no code, no reproducer
+changes" and its own diff contradicts it — a second commit landed on the
+branch after the body was written; #39 left its `lgj_hop` doc comment
+describing the pre-change design, caught one PR later by #40; #34's banked
+evidence file did not identify its own JDK, corrected same-day by #35; and
+#41 is merged on `main` while its own title reads `[DO NOT MERGE AS-IS]`,
+which the entry records as unresolved disposition rather than an
+endorsement.
+
+**Standing rule, unchanged and now the live one:** the entry goes in at
+open, in the PR's own commit. The backfill is the repair, not the process.
+
+## ISS-LGJ-HOP-SWEEPS-FULL-POPULATION (2026-08-27) — RESOLVED
+
+**Found.** By running bench Component G — the F-PARITY harness — for the
+first time. `lgj_hop` is the slowest of three arms at every configuration in
+the §3.8-mandated sweep (2 row counts × 2 frontier densities), by 2.6× to
+165× against the best scalar oracle.
+
+**Root cause, localized.** `exports.rs:1589-1599` builds the classid mask
+across the WHOLE population, once per participating facet — 32 full-width
+sweeps per hop — and only then intersects with `src`:
+
+```rust
+for facet in 0..ROW_FACETS {
+    if (effective >> facet) & 1 == 0 { continue }
+    kernels::simd_rowstore_classid_mask(bytes, …, n, …)   // n = ALL rows
+    for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()) { … }
+}
+```
+
+The decode/scatter half IS frontier-bounded; the sweep preceding it is not.
+
+**The measurement's shape is the evidence, not just its ranking.** Native cost
+is flat in frontier density (479 → 521 µs at 4096 rows; 24 798 → 23 634 µs at
+65 536 — a 25× larger frontier costs nothing) and ~linear in population
+(16× the rows → ~52× the time). A hop whose cost tracks the population it
+ignores rather than the frontier it starts from is doing full-population work.
+
+**Remedy shape (NOT implemented here).** `src_snapshot` is known before the
+loop, so the sweep can be bounded to the words where `src` has bits, or
+skipped for a facet whose intersection is empty. That is a kernel change and
+W8's F-PARITY scope is "seeds the HARNESS only" (§12) on a component §3.8
+declares non-gating — landing a kernel rewrite in a bench commit would widen
+the PR past what the measurement authorises.
+
+**Not a verdict on mask-native execution.** Allocation independence is pinned
+separately and is unaffected (`GraphHopTest` G3, flat 10-vs-500 rows); the
+no-row-id guarantees are structural. This is the throughput-placement axis
+§3.8 says a measurement decides — and it now has one.
+
+**Caveats carried, not buried.** The per-call `Engine.createMask` + close has
+no scalar analogue and was NOT isolated (implausible as the story at 470 µs on
+4096 rows, and it would not scale with `rows`; named anyway). Native absolutes
+are noisy — ±12 844 on 24 798 µs — on a shared 4-vCPU container; the ordering
+is robust, the absolutes are not. One machine, one run.
+
+**Resolved in part, same day.** `lgj_hop` now calls
+`simd_rowstore_facet_match` ONCE — all 32 facets per row in a single
+`MultiLaneColumn` pass — and walks src's set rows instead of every row ×
+facet. No new kernel; that function already existed and is the same
+sanctioned `ndarray::simd` surface, it was just being consumed the wrong way
+round. Measured **1.28×–3.48×**, largest at scale (24 798 → 7 120 µs at
+1 %/65 536). The untouched scalar arms are the control and moved <9 %, so the
+gain is not a faster host.
+
+**What remains OPEN, and it is structural.** `simd_rowstore_facet_match`
+still sweeps the whole population, so at a 1 % frontier native is still 43×
+the best scalar arm (7 120 µs vs 164 µs): the DECODE half is now
+frontier-bounded, the COMPARE half is not. The next rung — gather per src row
+— is O(frontier) but is NOT obviously better, because a dense frontier should
+favour the sweep's sequential access. That crossover is a measurement, not a
+judgement call, and Component G is the instrument for it.
+
+**Why this was not one bigger change.** The one-pass fix is bounded, needs no
+new kernel, has no density crossover, and is strictly less work at every
+point in the measured space. The gather rewrite is none of those things.
+Landing them together would have made a regression in either impossible to
+attribute.
+
+**RESOLVED, same day, second pass.** The remaining structural half is gone:
+`lgj_hop` no longer sweeps at all. It gathers — touching only the rows `src`
+names, reading each one's participating facets in place out of that row's own
+512 bytes.
+
+**The crossover this issue predicted does not exist.**
+`examples/hop_gather_vs_sweep.rs` measured both shapes over five populations
+(1 024 … 262 144) × twelve densities — 60 configurations, byte-identical
+output asserted at every one, plus an anti-vacuity empty-hop guard. **Gather
+wins all 60**, from 2 754× at 0.01 % density to **1.73× at 100 %**.
+
+The prediction was that a dense frontier would favour the sweep's sequential
+vectorised access. Wrong, and the mechanism is the correction: a sweep
+MATERIALISES an `n`-element per-row intermediate that each row reads exactly
+once, so it is never amortised — at full density it does everything the gather
+does PLUS allocate, zero, write and re-read `n` u32s. Strictly more work at
+every density. The reasoning had been about access PATTERN and missed that one
+shape simply does MORE.
+
+Consequence for the design: **no threshold, no dispatch, no heuristic gate.**
+A crossover would have required one, with the two-sided evidence such a gate
+demands; its absence makes the change unconditional and much simpler.
+
+End to end through Component G, the independent instrument: native_hop
+24 798 → 34.4 µs at 1 %/65 536 (**720×**), and the ordering inverted — native
+is now FASTEST at every configuration, 2.0×–13× ahead of the best scalar arm,
+having started this arc slowest at every configuration.
+
+**Still open, and named rather than hidden:** the one shape that could favour
+a precomputed per-row mask is REUSE — memoising it across many hops on the
+same `(store, classid)`. That is a caching design with its own invalidation
+questions and is deliberately not this function's.
+
+Raw probe output: `.claude/board/hop-gather-vs-sweep-crossover.txt`.
+Data: `bench/results/jmh-results-G.csv`; narrative: `bench/RESULTS.md` § G.
+
+
+## ISS-LGJ-STACK-TAIL-STRANDED-MINOR-8 (2026-08-25) — RESOLVED same day
+
+**Found.** PR #32 (ABI minor 8) was opened against
+`claude/layout-probe` — PR #30's branch — because #30 (minor 7) was still
+open and a same-numbered minor in two PRs would have been a real
+collision. Correct at the time. But #30 merged to `main` FIRST, and #32
+then merged into a branch that had already been absorbed. Net effect:
+`main` sat at `LGJ_ABI_MINOR = 7` while the minor-8 commit, the
+`CarvingTable`/`CarvingTableTest` pair, the load-gate prefix fix,
+`abi.md` §17 and three board entries lived only on `claude/layout-probe`,
+two commits ahead of main.
+
+**Nothing was lost and nothing was broken** — `main` was a strict
+ancestor with no divergence — but the work was reviewed, merged, and
+still absent from the branch anyone would build.
+
+**Why it is worth an entry rather than a quiet fix.** The failure is
+generic to STACKED PRs and has no signal of its own: both PRs report
+"merged", both are green, and GitHub says nothing. It surfaced only
+because a wake event prompted a `git log origin/main` check rather than
+trusting the merge notification. A session that trusted the notification
+would have moved on believing minor 8 shipped.
+
+**Rule adopted:** when a PR's base is another PR's branch, the merge of
+the CHILD is not the end of the arc — verify the content reached `main`
+(`git log origin/main..origin/<base>` must be empty), and if the base
+merged first, land the tail explicitly.
+
+**Resolved** by the same PR that carries this entry: `claude/board-hygiene`
+→ `main`, carrying the stranded minor-8 commits plus this board work.
+
+---
+
+## ISS-LGJ-FACETSCHEMA-PAIR48 (2026-08-25) — OPEN, upstream-owned
+
+`lance_graph_contract::facet_schema::FacetSchema`'s third reading is
+`Pair48` (`2 × 48-bit`, two 6-byte codes — `facet_schema.rs:34`), NOT the
+operator-ruled L6 quads (`3 × (u8:u8:u8:u8)`) that
+`CascadeShape::G3D4` carries and that `le-contract.md` §3 names. The
+contract itself flags the tension at `class_view.rs:1168`.
+
+Both are legal readings of the same 12 bytes and both have real consumers
+(`Pair48` serves `helix` `Signed360` and `cam_pq` `[u8; 6]`, which are
+genuinely 48-bit), so this is **not** obviously a defect — it may be two
+different axes that happen to partition the same register. What is
+unresolved is whether `FacetSchema` and `CascadeShape` are meant to be the
+same question asked twice, or two questions that must both be answerable
+per class.
+
+**Deliberately NOT resolved here.** This repo consumes the contract; it
+does not arbitrate it (root `CLAUDE.md`: the contract is THE semantic
+law). Flagged during the minor-6 work, carried through minors 7 and 8
+untouched, and named in every PR body of the arc rather than left silent.
+
+Closes when upstream rules the relationship — or when a lance-graph-java
+consumer actually needs `Pair48` across the membrane, at which point the
+question stops being academic.
+
+---
+
 ## ISS-LGJ-CLASSID-WIDTH-PIN (2026-08-18) — OPEN, upstream-owned
 
 The lgj wire carries u32 classids (canon 8-hex; `lgj_op_eq_classid`,

@@ -62,7 +62,11 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 21 symbols (minor 4; the "14" this line carried
+- It is **small** — currently 26 symbols (minor 10's one addition — the
+  columnar constructor — is argued in §18; 25 at minor 9, whose one addition is argued
+  in §11: a reduction Java was performing on the wrong side of the membrane,
+  moved to where the data is; 24 at minor 8, which adds
+  manifest FIELDS and no symbol; the "14" this line carried
   at minor 1 was arithmetic drift — the §7 list it referred to already
   enumerated 15). Growth is a design smell to be argued for, not a default;
   minor 2's three additions are argued in §11, minor 3's one addition in
@@ -79,7 +83,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 4    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 8    // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -90,13 +94,95 @@ The magic doubles as an endianness probe: read as a `u64` little-endian it yield
 a known constant; anything else means the library was built for a different byte
 order and every subsequent read would be garbage.
 
+### Backward compatibility is enforced, not merely promised
+
+§2's additive-minor promise ("an older Java build against a newer `.so` always
+loads") has a second direction the promise itself does not cover: a **newer Java
+against an older `.so`**. That case is governed by `Abi.requireMinor(N)`, whose
+contract is to fail before the feature's downcall is attempted, naming the
+minor.
+
+The **load gate itself** requires only the manifest's BASE PREFIX — everything
+through `build_profile`, 104 bytes, the field set minor 1 defined
+(`Layouts.MANIFEST_BASE_BYTES`). Requiring the full layout this Java build knows
+about would make every future manifest field a hard incompatibility with every
+older artifact, in flat contradiction of the promise above. It was written that
+way until minor 8 grew the struct and the contradiction became reachable;
+measured, restoring the full-layout gate makes all four historical libraries
+fail to load outright. Fields past the base prefix are read only when the
+library's own `size_of_manifest` covers them AND its minor is high enough — both
+conditions, because a manifest that claims a minor it is too short to carry is a
+broken artifact and reading it would produce plausible garbage.
+
+**That guard was defeated by eager class initialization until 2026-08-25.**
+Every downcall handle was resolved in `Downcalls.<clinit>`, so a single absent
+symbol broke the whole class and the guard never ran. Measured with the Java of
+that day against real libraries built from this repo's own history:
+
+| library | `SmokeTest` (uses nothing newer than minor 1) died on |
+|---|---|
+| minor 1 | `lgj_rowstore_open` — a **minor-2** symbol |
+| minor 2 | `lgj_rowstore_open_with_edges` — minor 3 |
+| minor 3 | `lgj_mask_andnot` — minor 4 |
+| minor 4 | `lgj_reduce_facet_sum` — minor 5 |
+
+Note the severity: against the minor-1 library, **minor-1 operations could not
+run either.**
+
+The fix is one lazy holder class per minor (`Minor2`/`Minor3`/`Minor4`/`Minor5`
+in `Downcalls`), initialised on first *access*. The minor-1 base surface stays
+eager deliberately — a library missing any of it is not an older library, it is
+a wrong one, and that failure should be immediate and total.
+
+`OldAbiCompatTest` is the falsifier. It takes
+`-Dlgj.oldlibrary=…` and checks each minor **in whichever direction the loaded
+library calls for**: available ⇒ the feature must actually work; absent ⇒
+`AbiMismatchException` naming that minor, never a bare missing-symbol failure
+and never a failure of some *other* minor's feature. Both directions are
+required — a gate that rejected everything would satisfy a rejection-only test.
+
 ### Minor version history
 
+- **Minor 10** (2026-08-27) — `lgj_rowstore_open_columnar` (§18): the
+  facet-major columnar store. A layout is a SCHEMA over the same 512 bytes
+  per row (R11), so it is a CONSTRUCTOR, not a resource kind: every mask,
+  hop and count op takes the handle unchanged and answers identically
+  (pinned: the 10 → 19 → 29 hop on both layouts, byte-identical facet-match
+  buffers). The lane table grows 33 → 97 (payload lo64 + hi32 lanes join
+  classid), so a consumer reads EVERY field through a served descriptor —
+  which is what lets Java stay layout-blind. New status `-18`
+  (`UNSUPPORTED_LAYOUT`) for the register-sweep family on a facet-major
+  store. Measured through this ABI at 65 536 rows, all 32 facets:
+  hop 3.3–4.8× over AoS at every frontier arm.
+- **Minor 9** (2026-08-27) — `lgj_rowstore_facet_match_count` (§11): the
+  total `(row, facet)` slot count for a classid, computed natively. The
+  operator's placement rule made explicit as ABI: Java hands the question
+  through Panama and receives ONE number; the decomposition (32 facet
+  predicates, popcount, sum) never crosses. Exists because the reduction was
+  found executing in Java twice — first as a segment loop, then as 32
+  composed mask counts summed Java-side — each lawful-looking, each still
+  Java holding a moving part. No new status.
 - **Minor 2** (2026-08-17) — the SoA row store (§11).
 - **Minor 3** (2026-08-18) — the edge-bearing row store (§12).
 - **Minor 4** (2026-08-18, D-LGJ-W8) — `lgj_mask_andnot` (mask complement)
   and `lgj_hop` (one-hop graph traversal, gated by the
   `lance-graph-contract` `ClassView`/`FieldMask` LAW — §13).
+- **Minor 8** (2026-08-25) — the manifest carries the register groupings as
+  DATA (§17): `carving_count` + `carvings`. **No new symbol** and no new
+  status; it is the first growth of the manifest STRUCT, which is why it is
+  also the change that made Java's load gate require only the base 104-byte
+  prefix rather than the full layout.
+- **Minor 7** (2026-08-25) — `lgj_row_layout_probe` (§16): the whole-row
+  alignment answer, all 32 facets in one crossing. No new status.
+- **Minor 6** (2026-08-25) — `lgj_reduce_facet_sum_resolved` (§15): the same
+  sweep, but under the grouping the POPULATION resolves to via
+  `ClassView::cascade_shape`, rather than one the caller asserts. One new
+  status: `UNRESOLVED_CARVING` (-17).
+- **Minor 5** (2026-08-25) — `lgj_reduce_facet_sum` (§14): the mask path's
+  missing EXECUTION half. The build half (`lgj_op_eq_classid`) has existed
+  since minor 2; nothing could consume a mask against the 12-byte facet
+  register until now. Two new statuses: `UNSUPPORTED_CARVING` (-15) and
+  `SUM_OVERFLOW` (-16).
 
 ## 3. Status codes
 
@@ -120,6 +206,10 @@ are no error strings across the membrane and no `errno` dependence.
 | `-12` | `ALLOCATION_FAILED` | the allocator refused |
 | `-13` | `READ_ONLY` | write attempted against a read-only lane |
 | `-14` | `UNSUPPORTED_DECODE_MODE` | `lgj_hop` called with a `decode_mode` this build does not yet implement (§13, ABI minor ≥ 4) |
+| `-15` | `UNSUPPORTED_CARVING` | `lgj_reduce_facet_sum` called with a `carving` outside `0..=2` (§14, ABI minor ≥ 5) |
+| `-17` | `UNRESOLVED_CARVING` | `lgj_reduce_facet_sum_resolved`'s population does not resolve to one grouping — mixed classes, an unanswerable classid, or empty (§15, ABI minor ≥ 6) |
+| `-18` | `UNSUPPORTED_LAYOUT` | the operation needs a byte arrangement this store's layout does not provide — the 12-byte-register sweeps (§14/§15) and the whole-row probe (§16) are row-major operations, and a facet-major store (§18) splits the register into per-field regions. A deferral stated as a status, never a silently wrong sum (ABI minor ≥ 10) |
+| `-16` | `SUM_OVERFLOW` | `lgj_reduce_facet_sum`'s accumulator exceeded `i64`; `out_sum` is NOT written (§14, ABI minor ≥ 5) |
 
 `INVALID_HANDLE` is deliberately the response to *use-after-close*, not a crash.
 See §4.
@@ -250,6 +340,10 @@ pub struct LgjAbiManifest {
     pub simd_backend:           u32,   // LgjSimdBackend
     pub simd_backend_name:      [u8; 32],  // NUL-terminated, human-readable
     pub build_profile:          [u8; 16],  // "release" | "debug"
+    // ── minor 8; everything above is the 104-byte BASE PREFIX the load gate
+    //    requires, and all a pre-minor-8 artifact carries (§17) ──
+    pub carving_count:          u32,
+    pub carvings:               [u16; 8],  // (groups << 8) | group_bytes, wire order
 }
 ```
 
@@ -279,7 +373,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (21 symbols)
+## 7. The function surface (24 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -363,6 +457,10 @@ This single call is what makes the Java fluent chain cost one crossing.
 
 ```
 i32 lgj_reduce_sum_i32(u64 res, u32 lane_id, u64 mask, i64* out_sum)
+i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
+                         u64 mask, i64* out_sum)      // ABI minor >= 5, see §14
+i32 lgj_reduce_facet_sum_resolved(u64 res, u32 facet, u64 mask,
+                                  i64* out_sum, u32* out_carving)  // minor >= 6, §15
 ```
 
 Sums the `I32` lane over set mask bits into a widened `i64` (no overflow for
@@ -681,15 +779,36 @@ against `n_rows` as a `u64` BEFORE any `t as usize` cast — the ordering is
 part of the contract, not an implementation detail, so an out-of-range
 `u64` target can never reach an indexing operation.
 
-**Kernel composition.** The classid-match sub-step for each participating
-facet routes through the EXISTING sanctioned primitive
-(`kernels::simd_rowstore_classid_mask`, `ndarray::simd::eq_u32_strided_to_mask`
-— the same kernel `lgj_op_eq_classid` uses, §11) into a scratch word
-buffer that is REUSED across every participating facet, never reallocated
-per facet. Only the resulting set-bit walk + payload decode + scatter is
-scalar: there is no `ndarray::simd` primitive for gather-decode-scatter,
-and duplicating the classid compare in scalar Rust would be exactly the
-polyfill bypass §8 forbids.
+**Kernel composition.** Selection is mask algebra —
+`src ∧ class_f ∧ struct_f` per participating facet, accumulated into `dst`:
+
+| operand | how it is produced |
+|---|---|
+| `class_f` | facet `f` carries the edge class |
+| `struct_f` | facet `f`'s `payload_hi32 == 0`, i.e. a structured edge |
+| `src` | the caller's frontier, snapshotted under a read lock |
+
+Both predicates are the SAME sanctioned primitive at two offsets into the
+16-byte facet — `kernels::simd_rowstore_u32_eq_mask`,
+`ndarray::simd::eq_u32_strided_to_mask` (the kernel `lgj_op_eq_classid` also
+uses, §11) — with `first_offset = f*16 + 0, needle = classid` for the class
+and `first_offset = f*16 + 12, needle = 0` for the gate. The ANDs are
+`ndarray::simd::mask_and_assign`, word-parallel over 64 rows at a time. Two
+scratch word buffers are REUSED across every participating facet, never
+reallocated per facet.
+
+**No row is examined to decide whether it participates.** Only the
+resulting set-bit walk + payload decode + scatter is scalar, and only
+because the destination row index is DECODED from the selected row's
+payload: that is the operand of a permutation, not a decision about
+membership. There is no `ndarray::simd` primitive for decode-scatter, and
+duplicating either predicate in scalar Rust would be exactly the polyfill
+bypass §8 forbids.
+
+> The structured-edge gate was an `if` inside the row walk until 2026-08-27
+> — in every earlier shape of this function, including the first mask-shaped
+> one. It was always this call; the kernel already took an arbitrary
+> `first_offset`.
 
 ### Bulk-rule conformance (§6, applied)
 
@@ -699,3 +818,456 @@ that doubles `n_rows` observes roughly double the work in both — for
 scanned per participating facet. Both therefore satisfy §6's anti-JNI rule
 by the same test every existing symbol satisfies it by: work proportional
 to `n_rows`, never one crossing per element.
+
+## 14. The mask-native sweep (ABI minor ≥ 5)
+
+One symbol, and it is the **execution half of a mask path whose build half has
+existed since minor 2**. That framing matters more than the addition: before
+this minor the membrane could already turn a classid column into a mask
+(`lgj_op_eq_classid` → `ndarray::simd::eq_u32_strided_to_mask`, §11) and could
+already compose masks (`and`/`or`/`andnot`/`count`, §7/§13) — what it could not
+do was *consume* a mask against the 12-byte facet register. That gap is why a
+consumer wanting the shape had to leave the membrane.
+
+```
+i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
+                         u64 mask, i64* out_sum)
+```
+
+Sums every group of `facet`'s 12-byte register, under `carving`, over the rows
+`mask` selects. Cost is **`O(mask_words + popcount × groups)`** — the mask-word
+scan is unconditional, so an empty mask costs one pass over the mask rather than
+nothing. §6's bulk-or-lifecycle rule holds either way: no term is
+per-crossing-per-element.
+
+### Overflow is reported, never wrapped
+
+`i64` is **not closed** under this reduction. Under the quads reading one row
+contributes up to `3 × (2³² − 1) = 12 884 901 885`, so `i64::MAX` is exceeded
+after ~715 827 882 maximum-valued selected rows — about 341 GiB of 512-byte
+rows, which is inside the scale this substrate contemplates rather than safely
+beyond it. The kernel accumulates in `i128` (which cannot overflow: the per-row
+bound × `u64::MAX` rows still fits) and range-checks once, returning
+`LGJ_ERR_SUM_OVERFLOW` with `out_sum` untouched. A silent wrap would be exactly
+the plausible-but-wrong answer this ABI otherwise works to prevent.
+
+### The carving is a caller-supplied, validated parameter — not a ClassView consult
+
+`carving` selects one of `le-contract.md` §3's three readings of the *same* 12
+bytes:
+
+| wire | reading | groups × bytes |
+|---|---|---|
+| `0` | rails | `6 × (u8:u8)`, LE `u16` |
+| `1` | SPO triplets | `4 × (u8:u8:u8)`, LE `u24` zero-extended |
+| `2` | odoo quads | `3 × (u8:u8:u8:u8)`, LE `u32` zero-extended |
+
+**Since minor 8 this table is DESCRIPTIVE, not normative** — see §17. The
+encoding is derived from the contract's `CascadeShape::ROTATIONS` (group count,
+descending) and SERVED in the manifest; a reader that needs the authoritative
+answer reads `carvings`, and this row set is what that derivation currently
+produces. Before minor 8 it was one of three hand-written copies, which is the
+problem §17 exists to remove.
+
+Anything else is `LGJ_ERR_UNSUPPORTED_CARVING` (`-15`), checked **first**,
+before the store or mask are resolved, so `out_sum` is provably untouched on a
+rejected call. An unknown reading must never alias a known one.
+
+This follows `lgj_hop`'s `decode_mode` precedent (§13, spec §3.4) rather than
+`edge_participation`'s ClassView consult. Re-resolving the reading per row
+inside the sweep would put the question back in the hot loop — exactly what this
+symbol exists to take out of it, and a per-row ClassView consult here would be
+the mask-native law's own defect one layer down.
+
+**But be precise about what that does and does not establish.** This symbol is a
+RAW REINTERPRETATION primitive. It applies the carving it is handed to every
+selected row; it does not — and cannot — verify that this is the reading those
+rows' classes specify. A mask is an opaque population (it may be an
+`lgj_mask_or`/import union spanning several classids), and the fixture
+`ClassView` carries no carving resolver at all today. The Java surface is named
+`facetSumAs` for exactly this reason: the caller supplies the reading and owns
+its correctness.
+
+The stronger shape binds the answer to the population ONCE, so the sweep
+receives an answer rather than a promise:
+
+```
+classid → ClassView → ResolvedCarving → (population + its carving) → sum
+```
+
+That keeps the property this path exists for (the ALU gets the answer, not the
+question) while making the binding checkable. It needs a real ClassView carving
+resolver upstream, which does not exist yet, so it is recorded here as the next
+rung — deliberately not faked with a per-row consult.
+
+### Mask parentage
+
+The mask must belong to **this** store, not merely match its row count — an
+equal-length mask over a different resource is a different population wearing
+the right size. Rejected with `LGJ_ERR_MASK_LENGTH_MISMATCH`, matching the mask
+algebra's own parent check (`lgj_mask_and`) rather than minting a second
+spelling for the same rejection.
+
+### SIMD provenance (§8), stated honestly
+
+**This kernel is scalar, deliberately, and the vector form is a NAMED GAP.**
+`ndarray::simd` has no primitive for "gather a sub-word group out of a
+512-byte-strided register under a runtime grouping and widen-accumulate":
+`masked_sum_i32` is contiguous `i32`, and `eq_u32_strided_to_mask` reads one
+aligned `u32` per row, not six unaligned `u16`s. Writing raw intrinsics here
+would create precisely the second SIMD surface §8 exists to prevent, so the
+scalar form is the in-bounds implementation and the vector form belongs in
+`ndarray::simd` under the W1a consumer contract — added **there** and consumed
+here, never re-implemented at this layer.
+
+Sub-word loads are byte-wise rather than `u16`/`u32` reads because a group's
+offset is `facet*16 + 4 + g*group_bytes`, which is not guaranteed aligned for
+the 3-byte reading, and an unaligned wide read is UB in Rust even where the
+hardware tolerates it.
+
+### Why this shape, measured
+
+`valhalla-lab/reproducers/R8_EntropyBoundary.java` (merged PR #24) measured the
+alternatives on identical bytes with checksum-identical results. Under a
+*random* classid distribution, a generic sweep that re-derives the carving per
+row collapses, while both a materialised index-list partition and a mask-driven
+sweep recover ~4.8×. The mask is the lawful of the two — an index list is a
+materialised population, which the root `CLAUDE.md` forbids as internal
+currency — and it is also the cheaper: building it via
+`eq_u32_strided_to_mask` was an order of magnitude cheaper than a scalar
+partition scan, moving break-even from ~120 passes to ~10. Obeying the law is
+the fast path, not a tax on it.
+
+The control leg is equally load-bearing: under a *predictable* classid pattern
+the same measurement shows specialization buying nothing. This symbol is worth
+calling when there is entropy to remove, and not otherwise.
+
+## 15. The resolved sweep (ABI minor ≥ 6)
+
+§14 shipped `lgj_reduce_facet_sum` with an honest caveat: it applies a grouping
+the caller *asserts*, and cannot check it, because a mask is an opaque
+population and nothing on `ClassView` returned a grouping. **That second half is
+now false**, and this section is the consequence.
+
+```
+i32 lgj_reduce_facet_sum_resolved(u64 res, u32 facet, u64 mask,
+                                  i64* out_sum, u32* out_carving)
+```
+
+For every selected row it resolves `facet classid → ClassId →
+ClassView::cascade_shape` and requires every row to agree, then sweeps
+monomorphically under that answer, reporting the grouping back through
+`out_carving`. The shape the §14 note named as the next rung, built:
+
+```
+classid → ClassView → ResolvedCarving → (population + its grouping) → sum
+```
+
+**The question is asked once at the population's edge and never inside the
+sweep.** Resolution is `O(mask_words + popcount)`; the sweep that follows carries
+no per-row dispatch. Resolving per row would have been the defect this whole
+path exists to avoid — the fix for "unverified" was never "consult more often".
+
+### The resolver was upstream all along
+
+`CascadeShape` (`lance_graph_contract::facet`) has carried the three groupings
+— `G6D2` rails, `G4D3` triplets, `G3D4` quads, each `G·D = 12` — together with
+the full algebra and its own statement that the grouping is *"class-conditioned:
+`classid` selects it from the inherited schema"*. What did not exist was a
+`ClassView` method RETURNING one, which is why §14 minted a local `Carving`
+enum and documented that it claimed no authority.
+
+`ClassView::cascade_shape` (contract, 2026-08-25) is that missing accessor,
+following the exact registry-resolution pattern of its four siblings
+(`edge_codec_flavor` / `rail_carving` / `band_reading` / `value_schema`), with
+`G3D4` — `CascadeShape`'s own "canonical GUID shape" — as the zero-fallback.
+The local enum is now a `pub type Carving = CascadeShape` alias; only the u32
+**wire encoding** stays local, because a `#[repr]` discriminant is not part of
+the contract's promise. That mapping is pinned **by group count**, so a variant
+reorder upstream cannot silently re-map the wire.
+
+This also required widening the G11 contract-import fence by one module —
+`facet`, alongside `class_view`/`canonical_node`/`ontology`. Deliberate and
+recorded, not incidental.
+
+### Failure is the interesting case
+
+`LGJ_ERR_UNRESOLVED_CARVING` (-17) covers three causes and one fact — the
+population spans classes that read the register differently, a row's classid has
+no `ClassView` answer, or the population is **empty**. Zero rows carry zero
+classes, so reporting the zero-fallback there would be inventing an answer.
+Neither output is written.
+
+### Why the fixture provider varies its answer
+
+`FixtureClassView::cascade_shape` returns `class % 3` rather than the trait's
+constant zero-fallback. That is a fixture choice, stated as one: a constant
+answer makes every population trivially homogeneous, so the "does this resolve
+to ONE grouping" guard could never fire and a test for it would pass for an
+implementation that never checked. Varying makes both outcomes reachable on real
+fixture data — a `lgj_op_eq_classid` mask is single-class and resolves; a union
+across classids with different groupings is refused; and a union across classids
+that *share* a grouping still resolves, which is the paired half that stops the
+refusal from being "reject everything".
+
+### Which of the two symbols to call
+
+**`lgj_reduce_facet_sum_resolved` is the one to reach for.** §14's
+`lgj_reduce_facet_sum` remains as the deliberate reinterpretation escape hatch —
+for a caller that means to read the register under a grouping the class does not
+sanction — and its Java name (`facetSumAs`) says so.
+
+### On whether `sum` earns permanent ABI vocabulary
+
+Recorded because §1 makes symbol growth a design smell that needs justification,
+and §14's justification was weak: the operation came from a benchmark's checksum.
+It is retained, with a better reason and a falsifiable condition to revisit.
+
+**The reason:** it is the only mask-CONSUMING operation over the register. Without
+it the mask path has a build half and no execution half, and a consumer wanting
+that shape must leave the membrane — which is the pressure §6's anti-JNI rule and
+the Missing-capability STOP rule both exist to relieve. `sum` is additionally the
+cheapest operation that cannot be faked from the outside: any correct
+implementation must visit exactly the selected rows and decode exactly the
+resolved grouping, which is why it doubles as the parity oracle for both.
+
+**The condition to revisit, stated so it can actually fire:** if a second
+reduction is ever needed (min/max/count-distinct/histogram), do NOT add a second
+symbol. That is the point at which the operation should be generalised — an
+op-code parameter on one reduce symbol, mirroring how `lgj_plan_eval`'s
+`LgjOpDesc` already generalises predicates — and `sum` becomes op-code 0. Two
+reduction symbols would be the smell §1 warns about; one parameterised symbol is
+the shape this ABI already uses elsewhere.
+
+### Two memos, at two lifetimes
+
+Resolution is a per-CLASS fact consulted over a population, so it is cacheable at
+two different lifetimes and both are wired.
+
+**Per dataset — `classid → grouping`.** `RowStore` carries a `OnceLock` table
+built on first resolved sweep: `class_id_for` narrows a `u32` classid to `u16`,
+so the table is 65 536 one-byte entries (`0` = no `ClassView` answer, else the
+wire value plus one). 64 KiB, 65 536 `ClassView` calls once, then never again.
+That trade is the right way round — the table is bounded and one-off, while the
+per-row consult it replaces is unbounded in sweeps. A `OnceLock` rather than a
+`LazyLock` because the resolver is supplied by the caller; the first caller wins
+and every later one reads.
+
+**Per population — the resolved grouping itself.** The memo lives *inside*
+`MaskWords`, so it is read under the same lock that guards the words: a
+resolution can never be observed against a population it was not computed from.
+
+Three properties make it safe rather than merely fast:
+
+- **Keyed by facet, not merely cached.** Different facets of the same rows carry
+  different classids and can resolve differently. A memo holding only "the
+  grouping" would answer a question about facet 3 with facet 7's answer — wrong,
+  not stale.
+- **Invalidation cannot be forgotten.** It happens in `write_mask()` and
+  `lock_masks_ordered()` — the only two ways to obtain the right to mutate a
+  mask. Any writer invalidates whether or not it changes a bit: conservative,
+  and impossible for a new mask-mutating op to skip.
+- **Filled under the READ guard.** The obvious alternative — compute under read,
+  upgrade to write, store — is wrong twice: it would clear the very memo it is
+  storing (that is what a write guard means here), and between dropping the read
+  and taking the write another thread could change the population, so the stored
+  value would describe rows that no longer match. Holding the read guard is
+  exactly the interval in which the population is stable, so the fill belongs
+  there. Hence an atomic field rather than a plain `Option`.
+
+The encoding carries an explicit present bit, so `facet 0, grouping 0` is a real
+answer rather than reading as an empty memo.
+
+A test-only counter (`RESOLUTIONS`) makes the memo's behaviour observable rather
+than asserted: the first sweep resolves, five repeats over the same population do
+not, a different facet does, and a rewritten population does.
+
+## 16. The whole-row layout probe (ABI minor ≥ 7)
+
+```
+i32 lgj_row_layout_probe(u64 res, u64 mask, u8* out, u64 out_len)
+```
+
+For **every** facet, the SET of register groupings its selected rows carry. One
+crossing covers all 32 — asking per facet would be 32 crossings, and is how a
+consumer drifts into the per-element loop §6 forbids.
+
+### Alignment as arithmetic, not a scan
+
+Each output byte is a 3-bit set (bit `w` = some row resolves to grouping `w`)
+plus bit 3 for "some row's classid has no `ClassView` answer". Then:
+
+```
+aligned(facet)  ⟺  popcount(byte) == 1  &&  byte & UNANSWERABLE == 0
+```
+
+One `or` per (row, facet), no comparison and no early exit, so cost does not
+depend on the data. **An OR-accumulated set is exact where cheaper accumulators
+are not:** a sum of wire values cannot tell `{0,2}` from `{1,1}`, and an XOR
+cannot tell `{1,1}` from `{}`. The set forgets multiplicity, which is precisely
+the information the question does not need.
+
+`0` means the EMPTY set — no row selected — and is deliberately distinguishable
+from disagreement. Conflating them would report "misaligned" for a population
+that simply is not there.
+
+### What it measured, immediately
+
+A mask from `lgj_op_eq_classid(facet 3, …)` constrains **facet 3 only**; the
+other 31 facets of those rows carry whatever classids the generator gave them.
+Measured on the fixture: **1 of 32 facets aligned.** A test asserting
+`isFullyAligned()` there failed, and the expectation was wrong rather than the
+code — which is exactly the confusion a whole-row probe exists to remove.
+
+Note what this says about **placement**: the canon makes `classid` the key's
+prefix precisely so key-ordered placement clusters a class into a range. The
+fixture generates classids uniformly at random instead — measured mean run
+length **1.07**, mean gap ~17 rows. Clustering is worth doing, and measured at
+this stride it is worth ~2× (12.6 vs 25.6 ns/row for the same population size,
+contiguous vs every-16th-row) — not from cache-line count, which is one line per
+row either way at a 512-byte stride, but from stride-predictable prefetch and TLB
+locality.
+
+### A classid is a GLOBAL address
+
+The `classid → grouping` table is process-global (`LazyLock`, 64 KiB, built
+once), not per dataset: the same classid means the same class in every SoA, so
+the resolution is dataset-independent. An earlier version put it on `RowStore`,
+which was wrong in shape rather than output — the answers were right, but the
+placement implied two datasets could disagree about what a classid carves into,
+which the address space does not permit.
+
+And the table captures **layout only**. Meaning, RBAC, ontology category and
+render template are separate resolutions off the same address; none belong in it
+and none can be inferred from it.
+
+---
+
+## 17. The register groupings, served as data (ABI minor ≥ 8)
+
+The manifest grew two fields. No symbol, no status, no call:
+
+```
+u32  carving_count      // populated entries in `carvings`
+u16  carvings[8]        // entry w = wire value w, packed (groups << 8) | group_bytes
+```
+
+Entries past `carving_count` are zero, so a reader that trusts the count and one
+that scans for a terminator agree. The struct is 128 bytes (108 + 16 = 124,
+rounded to its 8-byte alignment).
+
+### Why this exists
+
+The wire encoding of §14's `carving` parameter was hand-written in **three**
+places — a Rust `match`, a Java `enum`, and §14's own table — with nothing that
+would fail if they disagreed. Three copies of one fact is not a documentation
+problem; it is a correctness problem with no falsifier, and the specific failure
+it invites is silent: a grouping added or reordered upstream re-maps one copy and
+not the others, and a sweep then reads the same 12 bytes under the wrong reading
+and returns a plausible number.
+
+So the fact now has one source and two derivations:
+
+1. **The contract owns the SET.** `lance_graph_contract::facet::CascadeShape::ROTATIONS`.
+2. **This ABI derives the ENCODING from it** — group count, descending
+   (`kernels::CARVING_ORDER`, a `const`). A variant REORDER upstream cannot
+   re-map the wire, because position is computed from `groups()` rather than
+   from declaration order. A variant ADDED upstream appears automatically, in
+   its group-count place, with no edit.
+3. **The manifest SERVES the result**, and Java reads it rather than restating
+   it.
+
+`CARVING_ORDER` is deliberately a `const` and not a `LazyLock`: the manifest is
+const-initialised, and a runtime-initialised order could not be reached from it.
+
+### Why the manifest rather than a new symbol
+
+The manifest already exists so Java can discover the ABI's SHAPE instead of
+declaring it — sizes, alignments, pointer width, byte order. A wire encoding is
+exactly such a shape. Serving it here costs no symbol, no crossing at call time,
+and no lifetime question (a fixed `u16[8]` rather than a pointer), and it arrives
+on the same read Java already performs at load.
+
+### What is still declared on the Java side, and why that is correct
+
+`Carving`'s ARITY stays declared: `RAILS_6X2` named anything other than `6 × 2`
+would be a lie in its own name. What is no longer declared is its wire value —
+that is looked up in the served table by arity. Meaning is declared; encoding is
+served.
+
+### The falsifiers
+
+- Rust, `the_manifest_serves_exactly_the_derived_carving_order` — the served
+  bytes against the derived order, including that each entry decodes back to its
+  own shape, so a table that is internally consistent but wrongly ORDERED fails.
+- Rust, `the_derived_order_is_strictly_descending_by_group_count` — a future
+  variant that TIED on group count would make the sort order-dependent again,
+  which is the property the derivation exists to remove.
+- Java, `CarvingTableTest` — membership **both** ways. A grouping served that
+  Java cannot name (an addition upstream) and a grouping Java names that is not
+  served (a removal, or a locally invented constant). Neither direction is
+  redundant: without them, either mismatch would surface only when a particular
+  row happened to resolve to it — on someone's data, not in the build.
+
+Verified red-then-green: swapping the packed axes fails the Rust serve test;
+reversing the sort direction fails the order test and two others; changing one
+Java constant's arity fails both membership directions.
+
+A library predating minor 8 serves no table. Java falls back to the encoding
+those artifacts actually used, in one clearly-named compatibility shim
+(`CarvingTable.PRE_MINOR_8`) rather than back in the enum — so exactly one place
+in the build carries a literal encoding, and its name says it is history rather
+than the current answer.
+
+## 18. The facet-major columnar store (ABI minor ≥ 10)
+
+**A layout is a schema over the same content** (R11's finding, executed):
+`lgj_rowstore_open_columnar(n_rows, seed, edge_classid, edge_gate_mask,
+edge_radius, out_resource)` opens a store whose LOGICAL content is
+byte-for-byte the AoS constructors' (same generator, same draws), arranged
+field-major over the `(row × facet)` plane:
+
+```text
+[0    .. 128n)  classid  facet f at        f*4n, stride 4, contiguous
+[128n .. 384n)  lo64     facet f at 128n + f*8n, stride 8, contiguous
+[384n .. 512n)  hi32     facet f at 384n + f*4n, stride 4, contiguous
+```
+
+Still 512 bytes per row; still one buffer; still the same resource kind —
+every mask, hop and count symbol accepts the handle unchanged and must
+answer identically (pinned by the cross-layout equivalence tests, including
+the 10 → 19 → 29 hop regression on BOTH layouts). What changes is only that
+every single-field sweep becomes CONTIGUOUS, which is what the mask
+algebra's cost model wants: measured through this ABI, the hop runs
+**3.3–4.8×** faster than AoS at every frontier arm (65 536 rows, all 32
+facets, equivalence asserted before timing).
+
+**The lane table is how consumers survive the change.** Minor 10 grows it
+from 33 to 97 lanes — `1 + f` classid (as before), `33 + f` payload-lo64
+(`U64`), `65 + f` payload-hi32 (`U32`) — and the descriptors carry the
+layout's own offsets and strides (AoS: stride 512; facet-major: stride 4/8,
+contiguous). A consumer that reads through descriptors is layout-blind by
+construction; the Java facade now holds NO spelling of the row geometry at
+all (disable-verified: hard-coding stride 512 in its accessors fails the
+columnar store at the first row where the layouts' addresses diverge, and
+only there).
+
+**What refuses, and why that is honest.** The register-sweep family —
+`lgj_reduce_facet_sum` (§14), `lgj_reduce_facet_sum_resolved` (§15),
+`lgj_row_layout_probe` (§16) — reads the 12-byte payload as ONE contiguous
+register. A facet-major store deliberately splits that register into
+per-field regions, so these return `UNSUPPORTED_LAYOUT` (`-18`) rather than
+gathering it back together per row (which would be the serialization this
+ABI exists to forbid) or summing scrambled bytes (which would be worse).
+The gate discriminates by layout: the same calls succeed on AoS, pinned
+two-sided.
+
+**Alignment, stated honestly** (matching §11's own statement): the base
+pointer is `u8`-aligned (`Arc<[u8]>`), and every region base and per-facet
+block offset is a multiple of 64 for any `n_rows` (128, 384 and the block
+factors against `n` all carry the factor; pinned by test). The kernels use
+unaligned loads either way. The carvings' own contract is untouched: every
+`CascadeShape` group is ≤ 4 bytes — half the JEP 401 flattening budget —
+and `512 = 8 × 64` keeps the row stride cache-line-quantised (both pinned
+in `rowstore.rs`, the substrate half of what R4/R10 measured from the
+Valhalla side).

@@ -263,6 +263,183 @@ Three findings, in decreasing order of confidence:
    `facetMatchesInto(classId, …)` reuse form is the named follow-up if the small-row gap ever
    matters — filed, not assumed to.
 
+## G — the hop: native `lgj_hop` vs the two preserved scalar oracles
+
+The F-PARITY harness (spec §12) and §3.8's pre-registered promotion trigger, run for the first
+time. Three arms over `RowStore.openWithEdges`, swept on **both** axes §3.8 asks for — two row
+counts × two frontier densities. All three arms are cross-checked to agree on the destination set
+in `@Setup`, with an anti-vacuity guard that refuses a fixture whose hop reaches nothing.
+
+Own CSV: `results/jmh-results-G.csv` (this run did NOT merge into the A–F tables — different
+fixture, different axes).
+
+| arm | 1 % / 4096 | 1 % / 65536 | 25 % / 4096 | 25 % / 65536 |
+|---|---|---|---|---|
+| `java_scalar_classidScan` | **8.5 µs** | **150.6 µs** | **204.0 µs** | **7 173.6 µs** |
+| `java_scalar_facetMatches` | 394.9 µs | 7 142.3 µs | 433.8 µs | 10 071.5 µs |
+| `native_hop` | 479.0 µs | 24 798.3 µs | 521.2 µs | 23 633.9 µs |
+
+### The native arm is the slowest at every configuration — and the shape says why
+
+Not a small margin: **2.6× to 165×** slower than the best scalar arm. But the ratio is the less
+interesting half. Look at how `native_hop` responds to the two axes:
+
+- **Flat in frontier density.** 479 → 521 µs at 4096 rows; 24 798 → 23 634 µs at 65 536 — a 25×
+  bigger frontier costs *nothing*, and at the larger size the denser run is nominally faster.
+- **Linear in population.** 4096 → 65 536 rows (16×) takes 479 → 24 798 µs (~52×).
+
+A hop whose cost tracks the population it *ignores* rather than the frontier it *starts from* is
+doing full-population work per call. The kernel confirms it — `exports.rs:1589-1599`:
+
+```rust
+for facet in 0..ROW_FACETS {                        // 32 facets
+    if (effective >> facet) & 1 == 0 { continue }
+    kernels::simd_rowstore_classid_mask(bytes, …, n, …)   // n = ALL rows
+    for (w, (&sw, &cw)) in src_snapshot.iter().zip(classid_scratch.iter()) { … }
+}
+```
+
+The classid mask is built across the **whole** population, once per participating facet — 32
+full-width sweeps per hop — and only then intersected with `src`. The decode/scatter half is
+correctly frontier-bounded; the sweep that precedes it is not. At 65 536 rows that is ~2.1 M
+strided classid reads per call before a single edge is decoded.
+
+**This is what the falsifier was pre-registered to find.** §3.8's rule — *"Promotion/demotion of
+the placement follows that measurement — never taste"* — now has its measurement, and it points at
+a specific, local property of the kernel rather than at the architecture.
+
+### FIXED — one pass instead of 32, re-measured
+
+The remedy the section above deferred landed immediately after, once the
+measurement justified it. `lgj_hop` no longer loops `for facet in 0..32 {
+sweep(all n rows) }`; it calls `simd_rowstore_facet_match` **once**, which
+answers all 32 facets per row in a single `MultiLaneColumn` pass, and then
+walks **src's set rows** rather than every row × facet.
+
+No new kernel: `simd_rowstore_facet_match` already existed and is the same
+sanctioned `ndarray::simd` surface (abi.md §8) — it was simply being consumed
+the wrong way round.
+
+| arm | 1 % / 4096 | 1 % / 65536 | 25 % / 4096 | 25 % / 65536 |
+|---|---|---|---|---|
+| `native_hop` **before** | 479.0 µs | 24 798.3 µs | 521.2 µs | 23 633.9 µs |
+| `native_hop` **after** | **374.7 µs** | **7 120.3 µs** | **375.8 µs** | **8 076.9 µs** |
+| speed-up | 1.28× | **3.48×** | 1.39× | **2.93×** |
+
+**The two scalar arms are the control, and they matter here.** They are
+untouched code, so if the second run had merely landed on a faster host they
+would have moved too. Measured: `classidScan` 150.6 → 164.2 µs and
+`facetMatches` 7 142.3 → 7 698.8 µs at 1 %/65 536 — within ~9 %, and slightly
+*slower*, so the native gain is real and if anything understated. (The JMH
+banner does report a different CPU string between runs — 2.10 GHz vs 2.80 GHz
+— which is exactly why the control arms are quoted rather than trusted to be
+the same box.)
+
+Behaviour is unchanged, not merely believed to be: lgj-abi 134/134, AllTests
+304, GraphHopTest 66 **including G3 at the identical 384-byte floor**,
+TradesParity 12, TradesAllocation 3, BricksAuth 62.
+
+### FIXED AGAIN — and the crossover I predicted does not exist
+
+The section below was written when the one-pass rewrite still left native 43×
+the best scalar arm, and it named the next rung as a *gather* whose merit
+depended on a **density crossover**: sparse frontiers should favour a gather,
+dense ones the sweep's sequential vectorised access. It said to measure rather
+than assume.
+
+Measured — `native/lgj-abi/examples/hop_gather_vs_sweep.rs`, both shapes over
+**five populations (1 024 … 262 144) × twelve densities**, with byte-identical
+output asserted at every one of the 60 configurations plus an anti-vacuity
+guard against an empty hop:
+
+**There is no crossover. Gather wins all 60.**
+
+| n_rows | 0.01 % | 1 % | 25 % | 100 % |
+|---|---|---|---|---|
+| 1 024 | 361× | 113× | 7.3× | 1.73× |
+| 4 096 | 1 295× | 143× | 5.9× | 1.75× |
+| 65 536 | 2 666× | 117× | 2.5× | **1.78×** |
+| 262 144 | 2 754× | 90× | 2.6× | **1.73×** |
+
+**Why it holds even at 100 % density** — the part I had wrong. A sweep
+MATERIALISES an `n`-element per-row intermediate that each row reads exactly
+once, so its cost is never amortised. At full density the sweep does
+everything the gather does *plus* allocate, zero, write and re-read `n` u32s.
+It is strictly more work at every density, not merely at sparse ones. I
+reasoned about access *pattern* and missed that one shape simply does *more*.
+
+**A scalar gather beats a vectorised `ndarray::simd` sweep.** Same lesson the
+object-model ladder taught in the Component-C/F family: the win is in not
+doing the work, not in the vector width.
+
+### End-to-end through the independent instrument
+
+Re-running Component G with the gather in place, same command:
+
+| `native_hop` | 1 % / 4096 | 1 % / 65536 | 25 % / 4096 | 25 % / 65536 |
+|---|---|---|---|---|
+| original (32 sweeps) | 479.0 µs | 24 798.3 µs | 521.2 µs | 23 633.9 µs |
+| one-pass | 374.7 µs | 7 120.3 µs | 375.8 µs | 8 076.9 µs |
+| **gather** | **1.9 µs** | **34.4 µs** | **61.0 µs** | **3 534.1 µs** |
+| vs original | **246×** | **720×** | 8.5× | 6.7× |
+
+And the ordering the whole component was built to test has inverted — native
+is now **fastest at every configuration**, 2.0×–13× ahead of the best scalar
+arm, where it began this arc slowest at every configuration by 2.6×–165×.
+
+Two honesty notes. The Rust probe and the JMH harness are independent
+instruments and they agree: sweep at 1 %/65 536 measures 6 754–8 118 µs in
+Rust against JMH's 7 120 µs. And this JMH run was noisier than the previous
+one — `classidScan` at 1 %/4096 reports 25.6 ± 61.9 µs, an error bar larger
+than the score — so the *scalar* absolutes here are weak. Native's own errors
+are tight (1.9 ± 0.3, 34.4 ± 8.1), and a 720× change is far outside any noise
+in this container.
+
+Raw probe output: `.claude/board/hop-gather-vs-sweep-crossover.txt`.
+
+### Still slower than the best scalar arm — the honest remaining gap
+
+At 1 % / 65 536, native is 7 120 µs against `classidScan`'s 164 µs: **43×**.
+The catastrophic term is gone; a structural one is not.
+
+`simd_rowstore_facet_match` still sweeps the **whole population**. At a 1 %
+frontier the scalar arm touches 655 rows × 32 facets ≈ 21 k reads, while the
+native arm answers all 65 536 rows before intersecting with `src`. The decode
+half is now frontier-bounded; the compare half is not.
+
+The next rung is a genuinely different shape — gather per src row (read that
+row's 512 bytes, answer its 32 facets, move on) — which is O(frontier) rather
+than O(population). It is NOT obviously better: at a dense frontier the full
+sweep's sequential access should beat a scattered gather, so there is a real
+density crossover and it should be **measured, not assumed**. Component G is
+now the instrument that can find it, which is the point of having built it.
+
+### What this does NOT say
+
+- **It is not a verdict on mask-native execution.** The architectural claims are pinned elsewhere
+  and are unaffected: `GraphHopTest`'s G3 gate pins *allocation* flat against frontier size, and
+  the no-row-id guarantees are structural. What is measured here is throughput placement, which is
+  exactly the axis §3.8 says a measurement decides.
+- **It is not a clean isolation of the sweep.** `native_hop` also pays one `Engine.createMask` +
+  close per call, which the scalar arms have no analogue for. That co-factor was not isolated. It
+  is very unlikely to be the story (a mask allocation cannot plausibly account for 470 µs at 4096
+  rows, and it would not scale with `rows` the way the data does), but it was not ruled out and is
+  named rather than waved away.
+- **The absolute native numbers are noisy.** ±12 844 on 24 798 µs is 52 % relative error on a
+  shared 4-vCPU container. The *ordering* is robust — native is slowest in all four configs, by at
+  least 2.6× — but do not quote the native absolutes to two significant figures.
+- **One machine, one run.** Same environment caveat as the rest of this file.
+
+### The obvious remedy is deliberately NOT in this commit
+
+`src_snapshot` is known before the loop, so the sweep could be bounded to the words where `src`
+actually has bits, or skipped entirely for a facet whose intersection is empty. That is a kernel
+change, and W8's scope for F-PARITY is *"seeds the HARNESS only"* (§12) against a component §3.8
+declares non-gating. Landing a kernel rewrite inside a bench commit would widen the PR past what
+the measurement authorises. Filed as its own item.
+
+---
+
 ## Verdict — where does execution belong?
 
 On the evidence, **not where the architecture currently puts it, for count-only queries.** Stated

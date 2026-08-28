@@ -1,0 +1,109 @@
+measure_wal_curve — five-axis 64k measurement (release-mode; plan: .claude/plans/measure-64k-axes-v1.md)
+FLEET_OWNERS=65536 CANONICAL_ROW_BYTES=512 CANONICAL_FRAME_BYTES=33554432
+measure.csv: writing rows to /tmp/measure_wal_curve.csv
+
+== B0 — DummyOwner cast baseline (owner lookup, write-on-behalf rebind, CastId allocation, staging, collect) ==
+B0 repeat 0: build=2532013ns scan=234930ns cast=17175060ns collect=17866807ns freeze=12147456ns total=49956266ns
+B0 repeat 1: build=1972110ns scan=158831ns cast=9721674ns collect=12088807ns freeze=10378788ns total=34320210ns
+B0 repeat 2: build=1551380ns scan=144869ns cast=8970797ns collect=10181449ns freeze=10208316ns total=31056811ns
+
+== B1a — 65,536 x MailboxSoA<4> (the actual hot runtime owner) ==
+B1a repeat 0: build=2769611970ns scan=991456ns think=8893074ns cast=61410849ns collect=37243161ns freeze=27997868ns apply=45104337ns total=2951252715ns peak_rss=1703395328B
+B1a repeat 1: build=294982556ns scan=749351ns think=7612199ns cast=17293633ns collect=12161386ns freeze=10846729ns apply=14839613ns total=358485467ns peak_rss=1703608320B
+B1a repeat 2: build=289954027ns scan=791278ns think=7604849ns cast=13131324ns collect=9485796ns freeze=10336337ns apply=14084119ns total=345387730ns peak_rss=1703981056B
+
+== B1b — 65,536 x NodeRow512 = 32 MiB canonical storage envelope (memory-only) ==
+B1b repeat 0: build=13910192ns peak_rss=1703981056B
+B1b repeat 1: build=13834997ns peak_rss=1703981056B
+B1b repeat 2: build=13618500ns peak_rss=1703981056B
+
+== L1a — 64 x MailboxSoA<1024> chunks, 65,536 LOGICAL owners (owner = chunk*1024+lane) ==
+L1a repeat 0: build=119493386ns scan=2524ns think=65388ns cast=7236769ns collect=10460086ns freeze=9486638ns total=146744791ns
+L1a repeat 1: build=125003297ns scan=2775ns think=65234ns cast=7091750ns collect=9473531ns freeze=9165400ns total=150801987ns
+L1a repeat 2: build=124457084ns scan=2370ns think=72025ns cast=9214763ns collect=11507104ns freeze=10489058ns total=155742404ns
+
+== L1b — 64 chunks AS owners (mislabelling CONTROL, never the 64k-owner model) ==
+L1b: build=127909536ns cast=7278541ns collect=8277040ns -> 65536 staged, 65472 of 65536 HELD (chunk-as-owner collapse, proves the control)
+
+== WAL curve — W1-contiguous (storage/cache ceiling) vs W0-current (SweepSlot/BTreeMap) ==
+WAL w1_contiguous segment_bytes=1048576 segments/cycle=32: median write=119035402ns p95=131000486ns sync=42980879ns (197.5 MiB/s)
+WAL w0_current segment_bytes=1048576 segments/cycle=32: median write=11403469ns p95=127678714ns sync=44287259ns (574.6 MiB/s)
+WAL w1_contiguous segment_bytes=2097152 segments/cycle=16: median write=8258261ns p95=22816912ns sync=41621083ns (641.5 MiB/s)
+WAL w0_current segment_bytes=2097152 segments/cycle=16: median write=137842004ns p95=193008254ns sync=50270292ns (170.1 MiB/s)
+WAL w1_contiguous segment_bytes=4194304 segments/cycle=8: median write=8749981ns p95=21850140ns sync=48620512ns (557.8 MiB/s)
+WAL w0_current segment_bytes=4194304 segments/cycle=8: median write=144589584ns p95=203694904ns sync=56600040ns (159.1 MiB/s)
+WAL w1_contiguous segment_bytes=8388608 segments/cycle=4: median write=8566550ns p95=29651854ns sync=46816680ns (577.8 MiB/s)
+WAL w0_current segment_bytes=8388608 segments/cycle=4: median write=117406893ns p95=126960430ns sync=51230528ns (189.8 MiB/s)
+WAL w1_contiguous segment_bytes=33554432 segments/cycle=1: median write=8070001ns p95=9303069ns sync=43727144ns (617.8 MiB/s)
+WAL w0_current segment_bytes=33554432 segments/cycle=1: median write=121043589ns p95=164016760ns sync=50722889ns (186.3 MiB/s)
+WAL curve gains (W1-contiguous, by segment_bytes):
+  segment_bytes=  1048576 throughput=197.5 MiB/s gain=n/a
+  segment_bytes=  2097152 throughput=641.5 MiB/s gain=+224.8%
+  segment_bytes=  4194304 throughput=557.8 MiB/s gain=-13.1%
+  segment_bytes=  8388608 throughput=577.8 MiB/s gain=+3.6%
+  segment_bytes= 33554432 throughput=617.8 MiB/s gain=+6.9%
+WAL curve plateau: NOT MEASURABLE ON THIS HOST — 1 of 5 configs exceed the p95/median spread ceiling (3x); worst 3.5x. The write phase is being driven by page-cache / dirty-writeback state rather than by segment size, so NO knee is reported. Re-run on a quiet host with headroom (this one was ~90% full) and O_DIRECT or a drop_caches barrier per config.
+
+== Temporal — T0 scan_sealed / T1 local_trajectories / T2 deinterlace (post-WAL only) ==
+Temporal: T0 scan_sealed=21614316ns (1048576 rows) | T1 local_trajectories=81525493ns (65536 owners) | T2 deinterlace=8285517ns (524288 of 1048576 visible)
+
+== EXP-KIA-A2-64K — exploratory concurrency (non-claiming; D-KIA-A2 untouched) ==
+EXP-KIA: worker counts under test: [1, 2, 4, 8, 16] (available_parallelism=4)
+EXP-KIA workers=1: build=334938430ns think(compute)=21811267ns max_active=1 cast=21518783ns collect=10059046ns wal=14618779ns apply=17727983ns total=420674288ns digest=248c6e7b991d3b25
+EXP-KIA workers=2: build=294678244ns think(compute)=9034649ns max_active=2 cast=20434826ns collect=10175085ns wal=14312366ns apply=17207461ns total=365842631ns digest=248c6e7b991d3b25
+EXP-KIA workers=4: build=289380526ns think(compute)=8656061ns max_active=4 cast=21645750ns collect=11782735ns wal=14877500ns apply=16317295ns total=362659867ns digest=248c6e7b991d3b25
+EXP-KIA workers=8: build=345653168ns think(compute)=6675257ns max_active=4 cast=20827314ns collect=9452535ns wal=15619567ns apply=15865932ns total=414093773ns digest=248c6e7b991d3b25
+EXP-KIA workers=16: build=288735149ns think(compute)=7041295ns max_active=5 cast=19674829ns collect=10330886ns wal=14213679ns apply=14658036ns total=354653874ns digest=248c6e7b991d3b25
+EXP-KIA: sequential-vs-parallel digests MATCH across all worker counts
+
+== M-arm — Morton reorder inserted before the seal (plan v3) ==
+M-arm digest identity: natural=68128e3662df105c morton=68128e3662df105c MATCH
+M-arm natural: cast=27741249ns collect=10995879ns seal=55879501ns write=131989145ns sync=32276255ns T1=77641737ns
+M-arm morton:  cast=27991560ns collect=10912983ns reorder=8008125ns seal=58284224ns write=131767424ns sync=32715922ns T1=92222181ns fastpath=86846372ns (fastpath-vs-generic digest match=true)
+M-arm SUM verdict: reorder_cost=8008125ns, downstream (seal+write+sync+T1) natural=297786638ns morton=314989751ns savings=-17203113ns -> delta_total=+25211238ns (Morton does NOT win under this workload/host (reorder cost exceeds downstream savings))
+M-arm reference: A0 measured T1 at 78-86ms over 1,048,576 rows — the number the fast path must beat; this run's fast path=86846372ns is the direct comparison (implementation-scoped: this implementation, this workload, this host).
+
+== O-arm — ordering source: O-A (cast->seal->WAL->temporal replay) vs O-B (cast->temporal replay->seal->WAL) ==
+O-arm firewall: derive_order_from_temporal_replay (1351 bytes) contains no scan_sealed / sealed-store read; local_trajectories present (scan mechanism proven live)
+O-arm PRIMARY OBSERVABLE (decided before timing): O-A digest=64565f362db2e4a5 O-B digest=3e71c2aa7be8e325 -> DIVERGED
+O-arm VERDICT: DIVERGED — ordering sourced from temporal replay does NOT reproduce the seal's ordering. Under this construction the seal's ordering is LOAD-BEARING and cannot be re-scoped away. Honest scope: this falsifies the hypothesis FOR THIS O-B CONSTRUCTION; it does not prove that no construction could match. The divergence itself is the finding.
+O-arm kill-condition check: CONSTRUCTIBLE. O-B's ordering derivation (`local_trajectories` grouping, ~O(n log n) via BTreeMap insertion) is a DIFFERENT code path from O-A's seal-side sort (`order_cycle_stably`'s Vec sort_by_key, also O(n log n)) — not literally shared code, so this is not a disguised O-A. Under THIS harness's one-row-per-owner-per-cycle shape the two algorithms are doing comparable asymptotic work; the redundancy the plan asks about is SEMANTIC (does temporal's grouping make the seal's own sort unnecessary for correctness), not literal code-sharing — reported honestly, not glossed over.
+O-A (today's pipeline): cast=36869556ns collect=12512526ns seal=60766385ns commit=7365397ns T1=236612430ns
+O-B (ordering sourced first): cast=53955419ns collect=15452292ns order_derive=43480687ns seal=71368994ns commit=4062285ns T1=208751643ns
+
+measure.csv: 183 rows written
+measure.csv: file at /tmp/measure_wal_curve.csv
+hot representation overhead: B1a MEASURED VmRSS delta +54661120B (52.1 MiB) minus canonical envelope 33554432B (32.0 MiB, exact by construction) = +21106688B (+20.1 MiB, +63%)
+  (B1b in-process VmRSS delta +0B — reads ~0 by allocator reuse, which is why the line above uses the exact canonical size)
+
+================ THE FOUR ANSWERS ================
+1. Ownership cost (B1a MailboxSoA<4> minus B0 DummyOwner, median of 3): scan +632447ns, cast/rebind +7571959ns, freeze +467941ns (B1a also pays a real per-owner think phase B0 has none of: 7612199ns, and a real apply phase: 14839613ns — B0 has neither).
+2. Physical layout cost (L1a 64x MailboxSoA<1024> minus B1a 65,536x MailboxSoA<4>, equal 65,536 logical owners, build..freeze phases only — apply is not comparable, see the §12 doc comment): build -170525472ns, cast/rebind -10056864ns, freeze -1360091ns.
+3. WAL amortisation plateau: NOT MEASURABLE ON THIS HOST — 1 of 5 configs exceeded the p95/median spread ceiling (worst 3.5x). The write phase is driven by page-cache / dirty-writeback state, not segment size, so NO knee is claimed. Four runs of this binary disagreed by up to 6x at identical configs. Needs a quiet host with disk headroom plus O_DIRECT or a per-config cache barrier. W0-current numbers are in the CSV, never substituted here.
+4. EXP-KIA-A2-64K (exploratory, NON-CLAIMING — D-KIA-A2's own median-of-5 >=2x gate is untouched by this number): sequential (workers=1) compute-phase median 21811267ns vs best observed parallel compute-phase median 6675257ns at workers=8; sequential-vs-parallel sealed-cycle digests MATCH across every worker count tested.
+====================================================
+
+---
+Banked 2026-08-27, in-tree run (lance-graph@1d7bc1b1, release build, this host,
+available_parallelism=4). Full stderr of
+`cargo run --release -p lance-graph-supervisor --features cycle-driver
+--example measure_wal_curve` (all five axes; EXP-KIA-A2-64K is the section
+this bank exists for). Answers the mask-native-navigation-correction-v1.md
+§8.3 receipt-provenance gap: the 125ms/233ms pair stays operator-measured/
+out-of-tree (still not this workload — a different weather probe); THIS run
+is the in-tree, reproducible number for the EXP-KIA-A2-64K shape itself.
+
+Per-cycle steady-state total (build excluded — build is one-time population,
+not part of the repeating cycle), summing think+cast+collect+wal+apply:
+  workers=1: 21811267+21518783+10059046+14618779+17727983 = 85735858 ns (~85.7 ms)
+  workers=8: 6675257+20827314+9452535+15619567+15865932  = 68440605 ns (~68.4 ms)
+
+Compute (think) alone: 21.8ms seq -> 6.68ms @ workers=8 (3.27x, matches the
+plan's "~3.2-3.5x compute overlap on 4 cores" prior exactly).
+Cast/collect/wal/apply (the convergence/publish tail): ~64-65ms, FLAT across
+every worker count (20.8-21.6ms cast, 9.5-11.8ms collect, 14.2-15.6ms wal,
+14.7-17.7ms apply) -- unparallelised in this harness, and it dominates the
+cycle: at workers=8 the sequential tail is ~90% of the steady-state total
+while compute is ~10%. Digests match sequential-vs-parallel at every worker
+count -- correctness holds; the finding is about WHERE the time goes, not
+about correctness.

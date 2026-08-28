@@ -1,0 +1,88 @@
+type               payload  NR-nonAtomic     NR-atomic        nullable-atomic
+Pair                   2 B  true             true             true
+Triplet                3 B  true             true             true
+Quad                   4 B  true             true             true
+Flat4                  4 B  true             true             true
+Nest4                  4 B  true             true             true
+Flat8                  8 B  true             true             false
+Nest8AsPairs           8 B  false            false            false
+Nest8AsQuads           8 B  false            false            false
+Flat6                  6 B  true             true             true
+Flat7                  7 B  true             true             true
+Nest5                  5 B  true             true             true
+Nest6AsPairs           6 B  false            false            false
+Nest6AsTriplets        6 B  true             true             false
+Nest7                  7 B  false            false            false
+Nest8Single            8 B  true             true             false
+Nest7NR                7 B  true             true             false
+Nest8AsQuadsNR         8 B  true             true             false
+Nest6AsPairsNR         6 B  true             true             true
+Reg12AsRails          12 B  false            false            false
+Reg12AsTriplets       12 B  false            false            false
+Reg12AsQuads          12 B  false            false            false
+Reg12Flat             12 B  false            false            false
+Facet16AsRails        16 B  false            false            false
+Facet16AsQuads        16 B  false            false            false
+Reg12AsQuadsNR        12 B  false            false            false
+Reg12AsRailsNR        12 B  false            false            false
+Facet16AsQuadsNR      16 B  false            false            false
+Lane8                  8 B  true             true             false
+Two8                  16 B  false            false            false
+Two8NR                16 B  false            false            false
+Four8AsTwo8           32 B  true             true             false
+Blk64AsTwo8           64 B  false            false            false
+
+=== VM element sizes (-XX:+PrintFlatArrayLayout), for every case reporting flat ===
+NOTE: 'flat' does NOT imply the payload is inline. A container whose components are
+themselves non-flattenable stores them as REFERENCES, so element size collapses to the
+pointer count -- Four8AsTwo8 is 32 B of record reported flat at element size 8.
+ - element klass: 'R4_CarvingVsCliff$Pair'
+ - element size 4 aligned layout size 4
+ - element klass: 'R4_CarvingVsCliff$Pair'
+ - element size 2 aligned layout size 2
+ - element klass: 'R4_CarvingVsCliff$Triplet'
+ - element size 4 aligned layout size 4
+ - element klass: 'R4_CarvingVsCliff$Triplet'
+ - element size 4 aligned layout size 4
+ - element klass: 'R4_CarvingVsCliff$Quad'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Quad'
+ - element size 4 aligned layout size 4
+ - element klass: 'R4_CarvingVsCliff$Flat4'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Flat4'
+ - element size 4 aligned layout size 4
+ - element klass: 'R4_CarvingVsCliff$Nest4'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest4'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Flat8'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Flat6'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Flat6'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Flat7'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Flat7'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest5'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest5'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest6AsTriplets'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest8Single'
+ - element size 16 aligned layout size 16
+ - element klass: 'R4_CarvingVsCliff$Nest7NR'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest8AsQuadsNR'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest6AsPairsNR'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Nest6AsPairsNR'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Lane8'
+ - element size 8 aligned layout size 8
+ - element klass: 'R4_CarvingVsCliff$Four8AsTwo8'
+ - element size 8 aligned layout size 8

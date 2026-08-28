@@ -56,6 +56,62 @@ use crate::rowstore::{RowStore, ROWSTORE_LANE_COUNT};
 pub struct MaskWords {
     /// The packed row bits. Allocated once; the buffer never moves.
     pub words: Box<[u64]>,
+    /// The population's resolved register grouping, memoised (abi.md §15):
+    /// `Some((facet, wire))` for the facet it was resolved against.
+    ///
+    /// **Keyed by FACET, not just cached.** Resolution reads facet `f`'s classid,
+    /// and different facets of the same rows can carry different classids and so
+    /// resolve differently. A cache holding only "the grouping" would answer a
+    /// question about facet 3 with facet 7's answer.
+    ///
+    /// Invalidation is not a discipline to remember — see
+    /// [`ResourceEntry::write_mask`], which clears this whenever it hands out
+    /// the right to mutate `words`. Any writer invalidates, whether or not it
+    /// ends up changing a bit; conservative, and never wrong.
+    ///
+    /// **An atomic, so it can be FILLED under a read guard.** The alternative —
+    /// compute under a read guard, then upgrade to write to store — is wrong
+    /// twice over: it would clear the very memo it is storing (that is what a
+    /// write guard means here), and between dropping the read and taking the
+    /// write another thread could change the population, so the value stored
+    /// would describe rows that no longer match. Holding the READ guard is
+    /// exactly the interval in which the population is guaranteed stable, so
+    /// that is where the fill belongs.
+    ///
+    /// Encoding: `0` = empty; otherwise `PRESENT | (facet << 8) | wire`.
+    pub resolved_carving: std::sync::atomic::AtomicU64,
+}
+
+impl MaskWords {
+    /// Bit marking the memo as filled, so `facet 0, wire 0` is distinguishable
+    /// from "nothing cached".
+    const CARVING_PRESENT: u64 = 1 << 63;
+
+    /// The memoised grouping for `facet`, or `None` on an empty memo OR one
+    /// resolved against a DIFFERENT facet.
+    pub fn cached_carving(&self, facet: u32) -> Option<u8> {
+        let v = self
+            .resolved_carving
+            .load(std::sync::atomic::Ordering::Acquire);
+        if v & Self::CARVING_PRESENT == 0 {
+            return None;
+        }
+        (((v >> 8) & 0xFFFF_FFFF) as u32 == facet).then_some((v & 0xFF) as u8)
+    }
+
+    /// Fill the memo. Safe under a READ guard: see the field's own doc for why
+    /// that is the only correct place to do it.
+    pub fn set_cached_carving(&self, facet: u32, wire: u8) {
+        let v = Self::CARVING_PRESENT | (u64::from(facet) << 8) | u64::from(wire);
+        self.resolved_carving
+            .store(v, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Drop the memo. Called from every path that hands out mutation rights.
+    pub fn invalidate_carving(&self) {
+        self.resolved_carving
+            .store(0, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// What a handle refers to.
@@ -127,9 +183,19 @@ impl ResourceEntry {
     }
 
     /// Write-lock the mask words, recovering from poisoning (see module header).
+    ///
+    /// **Taking this guard INVALIDATES the memoised carving resolution**, because
+    /// holding it is precisely the right to change which rows the mask selects.
+    /// Putting the invalidation here rather than at each write site means a new
+    /// mask-mutating op cannot forget it: there is no way to mutate `words`
+    /// without coming through this function (or
+    /// [`lock_masks_ordered`], which does the same).
     pub fn write_mask(&self) -> Option<RwLockWriteGuard<'_, MaskWords>> {
-        self.mask()
-            .map(|m| m.write().unwrap_or_else(|e| e.into_inner()))
+        self.mask().map(|m| {
+            let g = m.write().unwrap_or_else(|e| e.into_inner());
+            g.invalidate_carving();
+            g
+        })
     }
 
     /// Fill an [`LgjResourceInfo`]. Takes no handle: the description is about
@@ -317,9 +383,35 @@ pub fn open_rowstore_with_edges(
     edge_gate_mask: u64,
     edge_radius: u32,
 ) -> Result<u64, i32> {
-    let store =
-        RowStore::generate_with_edges(n_rows, seed, edge_classid, edge_gate_mask, edge_radius)
-            .ok_or(LGJ_ERR_LENGTH_OVERFLOW)?;
+    open_rowstore_with_edges_in(
+        n_rows,
+        seed,
+        edge_classid,
+        edge_gate_mask,
+        edge_radius,
+        crate::rowstore::RowLayout::AosRows,
+    )
+}
+
+/// [`open_rowstore_with_edges`] under an explicit layout (minor 10's columnar
+/// constructor routes here with [`crate::rowstore::RowLayout::FacetMajor`]).
+pub fn open_rowstore_with_edges_in(
+    n_rows: u64,
+    seed: u64,
+    edge_classid: u32,
+    edge_gate_mask: u64,
+    edge_radius: u32,
+    layout: crate::rowstore::RowLayout,
+) -> Result<u64, i32> {
+    let store = RowStore::generate_with_edges_in(
+        n_rows,
+        seed,
+        edge_classid,
+        edge_gate_mask,
+        edge_radius,
+        layout,
+    )
+    .ok_or(LGJ_ERR_LENGTH_OVERFLOW)?;
     insert(ResourceEntry {
         kind: LGJ_RESOURCE_ROWSTORE,
         epoch: next_epoch(),
@@ -365,7 +457,10 @@ pub fn create_mask(parent_handle: u64, initial: u32) -> Result<u64, i32> {
         n_rows,
         parent: parent_handle,
         parent_gen: pgen,
-        payload: Payload::Mask(RwLock::new(MaskWords { words })),
+        payload: Payload::Mask(RwLock::new(MaskWords {
+            words,
+            resolved_carving: std::sync::atomic::AtomicU64::new(0),
+        })),
     })
 }
 
@@ -392,7 +487,13 @@ pub fn lock_masks_ordered<'a>(
     let mut guards: [Option<RwLockWriteGuard<'a, MaskWords>>; 3] = [None, None, None];
     for &role in &order {
         let lock = entries[role].mask().ok_or(LGJ_ERR_WRONG_RESOURCE_KIND)?;
-        guards[role] = Some(lock.write().unwrap_or_else(|e| e.into_inner()));
+        let g = lock.write().unwrap_or_else(|e| e.into_inner());
+        // Same invalidation as ResourceEntry::write_mask, and for the same
+        // reason: this guard IS the right to change the population, so the
+        // memoised resolution is stale from the moment it is handed out. The
+        // two are the only ways to obtain one.
+        g.invalidate_carving();
+        guards[role] = Some(g);
     }
     Ok(guards)
 }
@@ -646,5 +747,105 @@ mod tests {
         for h in [c, b, a, p] {
             close(h).unwrap();
         }
+    }
+
+    // ── the carving memo (abi.md §15) ──
+
+    /// The memo answers only for the facet it was resolved against. A cache
+    /// holding just "the grouping" would serve facet 3's answer for facet 7 —
+    /// and since different facets of the same rows carry different classids,
+    /// that is a wrong answer, not a stale one.
+    #[test]
+    fn the_memo_is_keyed_by_facet_not_merely_cached() {
+        let m = MaskWords {
+            words: vec![0u64; 1].into_boxed_slice(),
+            resolved_carving: std::sync::atomic::AtomicU64::new(0),
+        };
+        assert_eq!(m.cached_carving(3), None, "empty memo answers nothing");
+
+        m.set_cached_carving(3, 1);
+        assert_eq!(m.cached_carving(3), Some(1), "the facet it was set for");
+        assert_eq!(m.cached_carving(7), None, "a DIFFERENT facet must miss");
+        assert_eq!(m.cached_carving(0), None);
+    }
+
+    /// `facet 0, wire 0` is a legitimate answer and must not read as "empty" —
+    /// which is the whole reason the encoding carries a present bit rather than
+    /// relying on a non-zero value.
+    #[test]
+    fn facet_zero_wire_zero_is_a_real_answer_not_an_empty_memo() {
+        let m = MaskWords {
+            words: vec![0u64; 1].into_boxed_slice(),
+            resolved_carving: std::sync::atomic::AtomicU64::new(0),
+        };
+        assert_eq!(m.cached_carving(0), None);
+        m.set_cached_carving(0, 0);
+        assert_eq!(m.cached_carving(0), Some(0), "0/0 must be distinguishable");
+    }
+
+    /// Every facet index the ABI accepts round-trips through the encoding, so a
+    /// high facet cannot alias a low one.
+    #[test]
+    fn every_legal_facet_round_trips_through_the_memo_encoding() {
+        let m = MaskWords {
+            words: vec![0u64; 1].into_boxed_slice(),
+            resolved_carving: std::sync::atomic::AtomicU64::new(0),
+        };
+        for facet in 0..crate::rowstore::ROW_FACETS {
+            for wire in 0u8..3 {
+                m.set_cached_carving(facet, wire);
+                assert_eq!(m.cached_carving(facet), Some(wire), "facet {facet}");
+                if facet > 0 {
+                    assert_eq!(m.cached_carving(facet - 1), None, "no aliasing");
+                }
+            }
+        }
+    }
+
+    /// Taking a WRITE guard invalidates, because holding one is the right to
+    /// change which rows the mask selects. This is the property that makes the
+    /// memo safe without any per-write-site discipline.
+    #[test]
+    fn handing_out_mutation_rights_invalidates_the_memo() {
+        let h = open_pattern(64, 1).unwrap();
+        let mh = create_mask(h, 0).unwrap();
+        let e = resolve_kind(mh, crate::abi::LGJ_RESOURCE_MASK).unwrap();
+
+        {
+            let g = e.read_mask().unwrap();
+            g.set_cached_carving(2, 1);
+            assert_eq!(g.cached_carving(2), Some(1));
+        }
+        {
+            // A write guard, taken and dropped without touching a single bit.
+            let _w = e.write_mask().unwrap();
+        }
+        let g = e.read_mask().unwrap();
+        assert_eq!(
+            g.cached_carving(2),
+            None,
+            "a write guard must invalidate even if it changed nothing"
+        );
+    }
+
+    /// The ordered multi-mask lock invalidates too — it is the OTHER way to
+    /// obtain mutation rights, and an implementation that only cleared in
+    /// `write_mask` would leave `mask_and`/`or`/`andnot` serving stale answers.
+    #[test]
+    fn the_ordered_multi_mask_lock_invalidates_too() {
+        let h = open_pattern(64, 1).unwrap();
+        let a = create_mask(h, 0).unwrap();
+        let b = create_mask(h, 0).unwrap();
+        let ea = resolve_kind(a, crate::abi::LGJ_RESOURCE_MASK).unwrap();
+        let eb = resolve_kind(b, crate::abi::LGJ_RESOURCE_MASK).unwrap();
+
+        ea.read_mask().unwrap().set_cached_carving(1, 2);
+        eb.read_mask().unwrap().set_cached_carving(1, 2);
+        assert_eq!(ea.read_mask().unwrap().cached_carving(1), Some(2));
+
+        drop(lock_masks_ordered(&[&ea, &eb]).unwrap());
+
+        assert_eq!(ea.read_mask().unwrap().cached_carving(1), None);
+        assert_eq!(eb.read_mask().unwrap().cached_carving(1), None);
     }
 }

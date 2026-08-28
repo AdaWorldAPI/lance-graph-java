@@ -1,0 +1,12 @@
+== (1) the SCHEMA as one value class: 12 B, never flat ==
+  Rails6     false    Triplets4  false    Quads3  false
+== (2) one GROUP as a value class: <= 4 B, all flat ==
+  Rail 2B    true     Triplet 3B true     Quad 4B true
+
+== (3) storage / Panama / Valhalla must decode the SAME values ==
+  RAILS_6X2      layout=12 B  groups=[5123, 13861, 22599, 31337, 40075, 48813]
+  TRIPLETS_4X3   layout=12 B  groups=[2429955, 5785398, 9140841, 12496284]
+  QUADS_3X4      layout=12 B  groups=[908399619, 2053724231, 3199048843]
+
+  all three descriptions agree, all schemas: true
+  and the schemas genuinely read differently: true

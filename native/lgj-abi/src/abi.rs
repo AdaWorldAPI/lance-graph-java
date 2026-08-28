@@ -50,9 +50,26 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// `lgj_hop` (one-hop graph traversal over a row store — the FIRST symbol
 /// gated by the `lance-graph-contract` `ClassView`/`FieldMask` LAW via the
 /// fixture's `crate::class_view_provider::edge_participation` seam;
+/// Minor 5 adds `lgj_reduce_facet_sum` — the mask-driven, carving-
+/// monomorphic sweep over a facet's 12-byte register (`docs/abi.md` §14),
+/// the execution half of a mask path whose build half
+/// (`lgj_op_eq_classid`) has existed since minor 2. Purely additive: a
+/// minor-4 Java loads fine and never calls it.
+///
 /// `docs/abi.md` §13). Purely additive: a minor-3 Java loads fine and
 /// simply cannot call either new symbol.
-pub const LGJ_ABI_MINOR: u32 = 4;
+///
+/// Minor **8** (2026-08-25): the manifest carries the register groupings as
+/// DATA — [`LgjAbiManifest::carving_count`] and [`LgjAbiManifest::carvings`],
+/// derived from `CascadeShape::ROTATIONS` (see
+/// [`crate::kernels::CARVING_ORDER`]). No new symbol: the manifest already
+/// exists so Java can discover the ABI's shape instead of restating it, and the
+/// wire encoding is exactly such a shape. This is the FIRST growth of the
+/// manifest struct itself, so it is also the change that made Java's load gate
+/// require only the base 104-byte prefix rather than the full layout — without
+/// that, every future manifest field would be a hard incompatibility with every
+/// older artifact.
+pub const LGJ_ABI_MINOR: u32 = 10;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -103,10 +120,54 @@ pub const LGJ_ERR_READ_ONLY: i32 = -13;
 /// rejected call. D-LGJ-W8, ABI minor 4.
 pub const LGJ_ERR_UNSUPPORTED_DECODE_MODE: i32 = -14;
 
+/// `lgj_reduce_facet_sum` was handed a `carving` wire value outside `0..=2`
+/// (`0` rails `6*(u8:u8)`, `1` triplets `4*(u8:u8:u8)`, `2` quads
+/// `3*(u8:u8:u8:u8)` — `le-contract.md` §3's three readings of the same 12
+/// bytes). Checked FIRST, before the store or mask are resolved, so
+/// `out_sum` is provably untouched on a rejected call (§7's
+/// write-only-on-OK rule).
+///
+/// Deliberately NOT a reuse of `LGJ_ERR_UNSUPPORTED_DECODE_MODE`: that code
+/// names the edge-decode axis (`EdgeCodecFlavor`), and a register reading is
+/// a different question. An unknown reading must never alias a known one.
+/// ABI minor 5.
+pub const LGJ_ERR_UNSUPPORTED_CARVING: i32 = -15;
+
+/// `lgj_reduce_facet_sum`'s accumulator exceeded `i64`.
+///
+/// `i64` is not closed under this reduction: a single row contributes up to
+/// `3 * (2^32 - 1)` under the quads reading, so a large enough selection of
+/// large enough registers genuinely does not fit. The kernel accumulates in
+/// `i128` and range-checks once, so the caller gets this status instead of a
+/// wrapped value — `out_sum` is NOT written. ABI minor 5.
+pub const LGJ_ERR_SUM_OVERFLOW: i32 = -16;
+
+/// `lgj_reduce_facet_sum_resolved`'s population does not resolve to a single
+/// register grouping.
+///
+/// Three causes, one fact: the population spans classes whose `ClassView`s carve
+/// the register differently; a row's classid has no `ClassView` answer; or the
+/// population is EMPTY (zero rows carry zero classes, and reporting the
+/// zero-fallback would be inventing an answer). In every case there is no one
+/// reading that is correct for these rows, so neither output is written.
+/// ABI minor 6.
+pub const LGJ_ERR_UNRESOLVED_CARVING: i32 = -17;
+
+/// The operation needs a byte arrangement this store's [`RowLayout`] does not
+/// provide — today: the 12-byte-register sweeps (`lgj_reduce_facet_sum`,
+/// `lgj_reduce_facet_sum_resolved`) and the whole-row `lgj_row_layout_probe`
+/// on a FACET-MAJOR store, whose payload register is deliberately split into
+/// per-field regions. A DEFERRAL stated as a status, never a silent wrong
+/// answer: the caller learns the layout is the reason, and the register-sweep
+/// family stays honest about being row-major operations. ABI minor 10.
+///
+/// [`RowLayout`]: crate::rowstore::RowLayout
+pub const LGJ_ERR_UNSUPPORTED_LAYOUT: i32 = -18;
+
 /// A panic was caught at the membrane and converted to a status (§9).
 ///
 /// Not in `abi.md`'s table, and deliberately *outside* the allocated
-/// `-1..=-14` block so it can never be confused with a specified condition.
+/// `-1..=-18` block so it can never be confused with a specified condition.
 /// A caller seeing this has found a bug in this crate; it is reported rather
 /// than allowed to unwind into JVM frames, which would be UB.
 pub const LGJ_ERR_PANIC: i32 = -99;
@@ -327,6 +388,30 @@ pub struct LgjAbiManifest {
     pub simd_backend_name: [u8; 32],
     /// `"release"` | `"debug"`, NUL-terminated.
     pub build_profile: [u8; 16],
+    /// How many register groupings this build's `ClassView` set defines — the
+    /// number of valid entries in [`carvings`](Self::carvings). ABI minor 8.
+    pub carving_count: u32,
+    /// The register groupings, as DATA: entry `w` is the wire value `w`, packed
+    /// `(groups << 8) | group_bytes`. Entries past `carving_count` are zero.
+    ///
+    /// # Why the manifest and not a symbol
+    ///
+    /// This is the one fact that was hand-written three times — a Rust map, a
+    /// Java enum, and `abi.md`'s table — with nothing to catch drift between
+    /// them. The manifest already exists to let Java discover the ABI's shape
+    /// instead of restating it, so serving the groupings here needs no new
+    /// symbol and no new call: Java reads them at load, alongside the struct
+    /// sizes it already checks.
+    ///
+    /// The Rust side does not hand-write them either — they are derived from
+    /// the contract's own `CascadeShape::ROTATIONS`, ordered by group count
+    /// descending. So the contract owns the set, this serves it, and a
+    /// grouping added upstream propagates to Java with no edit on either side.
+    ///
+    /// Fixed at 8 slots: `G·D = 12` admits at most the divisors of 12 that are
+    /// ≥ 2 on both axes (`6×2`, `4×3`, `3×4`, `2×6`, `12×1`, `1×12`), so 8 is
+    /// headroom, not a guess. A `count` past the array is a build error below.
+    pub carvings: [u16; 8],
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +428,8 @@ const _: () = assert!(align_of::<LgjOpDesc>() == 8);
 // abi.md does not state the manifest's size (it is self-reported, which is the
 // point), but pinning it still catches an accidental field insertion:
 //   8 (magic) + 12*4 (u32 fields) + 32 (name) + 16 (profile) = 104, align 8.
-const _: () = assert!(size_of::<LgjAbiManifest>() == 104);
+// 104 (minor 7) + 4 (carving_count) + 16 (carvings) = 124, padded to 128.
+const _: () = assert!(size_of::<LgjAbiManifest>() == 128);
 const _: () = assert!(align_of::<LgjAbiManifest>() == 8);
 // A MASK_WORD is 64 row bits in one u64. If this ever stops holding, the whole
 // bit-order contract below is void.
@@ -430,6 +516,27 @@ const fn fixed_cstr<const N: usize>(src: &str) -> [u8; N] {
     out
 }
 
+/// The `carvings` table, packed from [`crate::kernels::CARVING_ORDER`].
+///
+/// Const, because [`MANIFEST`] is: the whole value of serving the groupings as
+/// data is lost if the serving side has to restate them.
+const CARVINGS: [u16; 8] = {
+    let order = crate::kernels::CARVING_ORDER;
+    // A count past the array is a build error, not a truncation: the manifest
+    // would otherwise report more entries than it carries.
+    assert!(
+        order.len() <= 8,
+        "carvings table overflow — widen the field"
+    );
+    let mut out = [0u16; 8];
+    let mut i = 0;
+    while i < order.len() {
+        out[i] = ((order[i].groups() as u16) << 8) | order[i].levels() as u16;
+        i += 1;
+    }
+    out
+};
+
 /// The `'static` the manifest getter hands out. Built entirely from
 /// `size_of` / `align_of` on the real types — never a literal.
 pub static MANIFEST: LgjAbiManifest = LgjAbiManifest {
@@ -451,6 +558,8 @@ pub static MANIFEST: LgjAbiManifest = LgjAbiManifest {
     simd_backend: detect_simd_backend().0,
     simd_backend_name: fixed_cstr::<32>(detect_simd_backend().1),
     build_profile: fixed_cstr::<16>(BUILD_PROFILE),
+    carving_count: crate::kernels::carving_count() as u32,
+    carvings: CARVINGS,
 };
 
 #[cfg(test)]
@@ -496,7 +605,10 @@ mod tests {
         assert_eq!(size_of::<LgjLaneDesc>(), 56);
         assert_eq!(size_of::<LgjResourceInfo>(), 32);
         assert_eq!(size_of::<LgjOpDesc>(), 24);
-        assert_eq!(size_of::<LgjAbiManifest>(), 104);
+        // The manifest is the one struct that GROWS with the ABI: minor 8 added
+        // the carving table. Java's load gate requires only the 104-byte base
+        // prefix, so an older artifact still loads (Layouts.MANIFEST_BASE_BYTES).
+        assert_eq!(size_of::<LgjAbiManifest>(), 128);
     }
 
     #[test]

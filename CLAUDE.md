@@ -110,6 +110,185 @@ per-owner `advance(owner)` RPCs are exactly the deleted shape.
 `BatchWriter::cast()` = staging into a batch image, NOT command/ack
 messaging.
 
+## Zero-copy + memory safety — NORMATIVE, MERGE-GATING (operator-ruled, 2026-08-27)
+
+**Zero-copy means the canonical bytes remain owned by `lance-graph`; Java/
+Panama project operations onto those bytes without duplicating canonical
+state.** What crosses the membrane is identity, descriptor, layout
+contract, projection hint, operation, and result identity — never a
+second graph. **One-copy law**: multiple views/lanes/masks over the same
+substrate are fine; multiple *authorities* are not.
+
+**Shape may cross. Meaning may cross. Operations may cross. Ownership
+does not cross.** The 512×32×(4+12) row/facet contract, offsets, stride,
+alignment, endianness are legitimate contract facts Java may know —
+zero-copy is about storage *ownership*, never about layout *opacity*.
+
+Non-negotiables, each with its enforcement site (audited clean
+2026-08-27 — this is confirmation of existing structure, not a new
+build):
+
+- **Pointer value is not provenance, on the handle-mediated path.** Every
+  ABI *handle* (`Mask`/`RowStore`/`NativePattern` opaque `long`s) is bound
+  to owner identity + generation + kind via the generation-checked handle
+  registry (`registry.rs::{encode_handle, resolve, resolve_kind}`); a
+  stale generation fails closed before dereference, on every resolve call.
+  Falsifiers: `fabricated_handles_are_rejected_not_dereferenced`,
+  `a_reused_slot_invalidates_the_old_handle` (the latter is conditionally
+  vacuous under some registry-slot orderings — cite alongside
+  `use_after_close_is_a_status_not_a_crash`, the falsifier that holds
+  unconditionally). Generation is `u32` and wraps after 2³² closes of one
+  slot (documented in-source at the wrap site; not reachable in practice).
+  **Scope note, not covered by the registry check:** `lgj_lane_describe`/
+  `lgj_mask_describe` hand Java a raw `addr` once, which Java then caches
+  (`RowStore.java`'s `lanes[]`, `Mask.java`'s `words`) and reads directly
+  on every subsequent access with NO further registry call — that repeat
+  path is guarded only by a Java-side `closed` boolean, a strictly weaker,
+  non-generation-checked mechanism. `LgjLaneDesc` carries an `epoch` field
+  designed for exactly this re-check and it is currently unconsulted
+  anywhere in `src/main` (tracked: `.claude/board/ISSUES.md`
+  `ISS-LGJ-EPOCH-UNCHECKED`). Do not read "fails closed before dereference"
+  as covering the cached-descriptor path until that epoch check is wired.
+- **Bounds/overflow are checked, never wrapped, at the point n_rows is
+  first derived.** `rowstore.rs` uses `checked_mul` at its two allocation
+  sites (`generate_in`/`generate_with_edges_in`); overflow there fails
+  closed, never truncates. `kernels.rs` does not re-derive `n_rows` — it
+  operates on an already-allocated, already-length-checked slice and
+  bounds itself against that slice's real `.len()` via `assert_eq!`
+  (e.g. `kernels.rs:199`), not a second checked multiplication; that is a
+  sound bound, not an unchecked one, but it is a different mechanism than
+  the allocation-time check and should not be described as the same
+  `checked_mul`/`checked_add` machinery "throughout" both files.
+- **Alignment and endianness are contract fields, never inferred.**
+  `LgjAbiManifest.align_of_*` are filled from `core::mem::align_of` on
+  the real types (never a literal); `endianness` is verified explicit
+  (`Abi.java` rejects non-zero before any projection).
+- **Manifest-first handshake.** `Abi.java` reads magic → abi_major
+  (exact) → minor (>=) → struct sizes/alignment → endianness, in that
+  order, before any dependent layout is resolved — never a speculative
+  read past the guaranteed prefix. `requireMinor(N)` gates every
+  minor-5-or-later operation cleanly (an older library fails at the call,
+  via the lazy nested-holder pattern). **Minors 2-4 (row store, edges,
+  hop) are a tracked exception, not yet covered**: their `Downcalls`
+  holders resolve `MethodHandle`s eagerly at class-init, so an ABI-0.1
+  library fails at `Downcalls.<clinit>` before any `requireMinor` guard
+  can report a clean error (`Downcalls.java`'s own comment documents
+  this). Do not claim "fails cleanly at the call, not at load" as a
+  blanket property until minors 2-4 adopt the same lazy-holder shape.
+- **FFM is quarantined.** `java.lang.foreign.*`/`java.lang.invoke.*`
+  never appear in a public signature (`ApiSurfaceTest`, verified by real
+  reflection over compiled classes — `Class.getMethods/getFields` plus a
+  `com.adaworldapi.lancegraph.internal.` package-prefix check — not a
+  source-text grep); internal use in `RowStore.java`/`FacetMatchView.java`
+  is private-field-only, and no other file in the public package touches
+  an FFM type.
+- **Mutation crosses as verbs, not writable memory — except through the
+  named Import exception.** No public API exposes a writable canonical
+  segment for general use; mutation happens through named ABI operations
+  (`mask_and`/`apply_projection`/etc.), never ad hoc `segment.set(...)`.
+  The one sanctioned exception is the **Import** path already named above
+  (`RowStore.importRows`, `Graph.from(long...)`): it does call
+  `Engine.setU64` → `segment.set(...)` on a mask lane the ABI marks
+  `LGJ_FLAG_WRITABLE` by design, and it does run a per-row Java loop over
+  the imported ids — both are the Import exception's documented cost, not
+  a second, unnamed violation of this bullet.
+- **Materialization is named and bounded.** Production `long[]`/`copyOf`/
+  `toArray` call sites, exhaustively: `Mask.materializeRows()` (the one
+  named terminal, O(n)); the manifest-name read during handshake;
+  `rowLayoutProbe`'s ≤32-byte-per-call diagnostic (bounded by facet count,
+  not row count — verified fixed-size on both the Rust and Java sides);
+  `Abi.java`'s `readCarvings` (bounded by `CARVING_SLOTS`, a manifest
+  constant, not n_rows); `Engine.facetSumResolved`'s fixed `long[2]`
+  result pair. None of the five is a hidden proportional-to-n_rows
+  population copy — keep this list exhaustive when a sixth site is added,
+  rather than letting the enumeration silently go stale again.
+  Temporary kernel scratch (SIMD scratch masks, decode buffers) is
+  allowed and is NOT the same claim as a second canonical copy.
+- **Layout parity is independently derived, not self-compared.**
+  `AbiContractTest`: Java's own layout constants vs. the artifact's
+  runtime self-description, with a deliberately-impossible-expectation
+  arm proving the check can actually fail.
+- **SIMD backend is diagnostic only.** `NativeRuntime.simdBackend()` is
+  a manifest string for logging; no `if` branches on it anywhere in
+  `src/main` — backend parity is `ndarray::simd`'s business (see E1-E6
+  below), never Java's.
+- **Worker topology stays substrate-private** — see §E of the
+  mask-native-navigation-correction-v1.md enforcement pass: no
+  `workers(`/`workerCount`/`parallelism(`/`threads(` in any production
+  Java, ABI struct, or export; `EXP-KIA-A2-64K`'s worker sweep is a
+  native benchmark independent variable, never a consumer-facing API.
+
+Wording discipline (use exactly): *"lance-graph owns the only canonical
+copy. lance-graph-java projects semantic operations across Panama onto
+that state without row/population duplication."* Never *"Java borrows
+the native database memory directly"* — that overclaims the
+abstraction. Never *"FFI is memory-safe end-to-end"* — the defensible
+claim is *"the Java consumer cannot directly express arbitrary native
+memory access; native resources are accessed through generation-checked,
+version-checked, bounds-checked ABI operations whose ownership remains
+in lance-graph."*
+
+## The simd.rs isomorphism — ENFORCEMENT LAYER (operator-ruled, 2026-08-27)
+
+The repo's whole shape is `ndarray`'s own SIMD architecture repeated one
+level up, and every layer rule below is enforced by a named gate, not by
+discipline:
+
+```
+ndarray                          lance-graph-java
+simd.rs      (facade)      ←→    Java (View / Mask / RowStore / consumers)
+cfg dispatch (polyfill)    ←→    Valhalla + Panama (internal/ffm)
+simd_{amx,avx512,avx2,           Rust: lgj-abi kernels → ndarray::simd
+  neon,wasm,scalar}.rs           (the pattern NESTS — lgj's bottom is
+             (backends)           ndarray's top)
+```
+
+Measured grounding (2026-08-27, in-tree): `simd.rs` is 37 functions and
+ZERO shipping instructions — every raw intrinsic in it sits inside
+`#[cfg(test)]` as the wrapper's oracle; `simd_avx512.rs` alone carries 488.
+`simd_scalar.rs` is a BACKEND, below the facade — the fallback is never
+inline in `simd.rs`.
+
+**E1 — Java never grows a compute path.** A Java-side loop over rows,
+facets, or partial results is an inline scalar fallback in the facade —
+the shape ndarray forbids by architecture. Java hands the question through
+Panama and receives the projection; the decomposition of an answer (how
+many parts, in what order, summed how) is itself a moving part and never
+crosses. Enforced by: GraphHopTest's G2 no-per-row-engine check + the
+reflective allowlist; the three-strikes provenance is
+`FacetMatchView.cardinality` (Java popcount loop → 32 composed counts
+summed in Java → the proposed buffer-popcount symbol — each one layer up,
+all three wrong; ABI minor 9 is the correct shape).
+
+**E2 — Java scalar code is licensed in exactly one place: as a TEST
+ORACLE.** Same license `simd.rs` gives raw intrinsics under `#[cfg(test)]`.
+GraphHopTest / parity-suite scalar recomputes stay; any scalar path in
+`src/main` is a violation regardless of how it is doc-commented ("saves a
+crossing" is the recorded tell, not a defence — R8 measured bulk crossings
+as costing nothing).
+
+**E3 — the geometry has ONE spelling, owned by the polyfill.** The facade
+names sizes and offsets from `internal/ffm/Layouts` (`ROW_BYTES`,
+`FACET_BYTES`, `FACET_PAYLOAD_OFFSET`, `FACET_PAYLOAD_HI32_OFFSET` — all
+DERIVED from `ROW_LAYOUT`/`ROW_FACET`, proven by `SELF_CHECK` at
+class-init); it never hand-writes them. Same rule minor 8 established for
+carvings: one source and two derivations, never three spellings. Rust's
+mirror constant is `rowstore::FACET_PAYLOAD_HI32_OFFSET`.
+
+**E4 — Vector API is permanently a lab arm.** It would be a backend INSIDE
+Java, and Java has no backends. `valhalla-lab`/`bench` may measure it; it
+never ships in `src/main`.
+
+**E5 — new capability lands backend-first** (the STOP rule below, restated
+as this frame's corollary): the facade only ever gains a NAME for something
+a backend already does. A facade method that cannot be one delegation is
+the signal the substrate is missing a word.
+
+**E6 — consumers import only the facade.** `ApiSurfaceTest` is this repo's
+`simd-savant`: no `java.lang.foreign.*`, `java.lang.invoke.*`, or
+`internal.*` in any public signature — the exact analog of "all SIMD from
+`ndarray::simd`, never `simd_{arch}`, never raw intrinsics".
+
 ## Missing-capability STOP rule
 
 A consumer or facade that needs a capability the substrate lacks does
@@ -133,7 +312,13 @@ each closed substrate-first before the consumer wave dispatched).
   are red-then-green or they are not evidence.
 - Board discipline: append-only, storno cites what it corrects, board
   artifacts land in the SAME commit as the change, PR-arc sha recorded
-  post-merge only.
+  post-merge only. **`.claude/board/README.md` is the full rule set** —
+  what each board file answers, the one-writer rule and its base case,
+  the non-recursion clause, and what is deliberately absent.
+- A PR stacked on another PR's branch is not finished when it merges:
+  if the base merged FIRST, the child's content never reaches `main`.
+  Verify with `git log origin/main..origin/<base>` — it must be empty.
+  (`ISSUES.md` `ISS-LGJ-STACK-TAIL-STRANDED-MINOR-8`.)
 - **No model identifier in any committed artifact** (chat only). This
   file deliberately carries NO model-policy section; worker-tier
   allocation is stated by role in session briefs.

@@ -57,6 +57,7 @@ version = "0.1.0"
 dependencies = [
  "lance-graph-contract",
  "ndarray",
+ "ogar-class-view",
 ]
 
 [[package]]
@@ -109,6 +110,18 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
 ]
+
+[[package]]
+name = "ogar-class-view"
+version = "0.1.0"
+dependencies = [
+ "lance-graph-contract",
+ "ogar-vocab",
+]
+
+[[package]]
+name = "ogar-vocab"
+version = "0.1.0"
 
 [[package]]
 name = "paste"

@@ -13,10 +13,11 @@ import java.util.concurrent.atomic.LongAdder;
  * Every downcall handle in the project, resolved <strong>once</strong> into static finals.
  *
  * <p>Resolution is not free — {@code Linker.downcallHandle} builds a native stub — so doing it per
- * call would be a per-crossing tax on top of the crossing itself. There are 20 downcall symbols
- * resolved here (docs/abi.md §7 + §11 + §13) and 20 handles; the 21st ABI symbol, {@code
- * lgj_abi_manifest}, resolves separately in {@link Abi} because it returns a pointer rather than a
- * status and has no failure mode.
+ * call would be a per-crossing tax on top of the crossing itself. There are 21 downcall symbols
+ * resolved here (docs/abi.md §7 + §11 + §13 + §14) and 21 handles — 20 eagerly, plus the minor-5
+ * {@code lgj_reduce_facet_sum} in the lazy {@code Minor5} holder below. The 22nd ABI symbol,
+ * {@code lgj_abi_manifest}, resolves separately in {@link Abi} because it returns a pointer rather
+ * than a status and has no failure mode.
  *
  * <p><strong>The anti-JNI rule (docs/abi.md §6) lives here.</strong> Panama makes it easy to write
  * JNI-shaped code: one downcall per element. Every wrapper below either does work proportional to
@@ -95,41 +96,82 @@ public final class Downcalls {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
                     ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
 
-    // Row store (docs/abi.md §11, ABI minor 2). Argument widths follow §11 argument-for-argument,
-    // same u32/i32-are-both-JAVA_INT rule as above.
-    private static final MethodHandle ROWSTORE_OPEN = mh("lgj_rowstore_open",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    // ── Handles for later minors live in LAZY HOLDERS, one per minor ────────────────────────
+    //
+    // Everything above this line is the minor-1 base surface: a library missing any of it is not
+    // an older library, it is a WRONG one, so eager resolution there is correct — that failure
+    // should be immediate and total.
+    //
+    // Below is a different case, and eager resolution there was a real defect. It defeats
+    // {@link Abi#requireMinor(int)}, whose own contract promises to fail "before any downcall for
+    // the feature is attempted": one absent symbol breaks <clinit>, so the guard never runs and an
+    // unrelated, OLDER feature dies with a bare "no such symbol".
+    //
+    // Measured with the CURRENT Java against real libraries built from this repo's own history:
+    //
+    //     minor 1 library -> SmokeTest died on 'lgj_rowstore_open'             (a minor-2 symbol)
+    //     minor 2 library -> SmokeTest died on 'lgj_rowstore_open_with_edges'  (minor 3)
+    //     minor 3 library -> SmokeTest died on 'lgj_mask_andnot'               (minor 4)
+    //
+    // SmokeTest uses nothing newer than minor 1. Against the minor-1 library it could not even run
+    // minor-1 operations. A nested holder initialises on first ACCESS rather than with Downcalls,
+    // so each minor now fails only when a caller actually reaches for it — and every Engine entry
+    // point calls requireMinor(N) first, so what surfaces is AbiMismatchException naming the
+    // minor, which is what the gate was written to deliver.
 
-    private static final MethodHandle OP_EQ_CLASSID = mh("lgj_op_eq_classid",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG));
+    /** Row store (docs/abi.md §11, ABI minor 2). */
+    private static final class Minor2 {
+        // Argument widths follow §11 argument-for-argument, same u32/i32-are-both-JAVA_INT rule as
+        // the base surface above.
+        static final MethodHandle ROWSTORE_OPEN = mh("lgj_rowstore_open",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
 
-    private static final MethodHandle ROW_FACET_MATCH = mh("lgj_row_facet_match",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        static final MethodHandle OP_EQ_CLASSID = mh("lgj_op_eq_classid",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG));
 
-    // Edge-bearing row store (docs/abi.md §12, ABI minor 3). One extra constructor over the
-    // minor-2 shape above — no new lane, no new op.
-    private static final MethodHandle ROWSTORE_OPEN_WITH_EDGES = mh("lgj_rowstore_open_with_edges",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        static final MethodHandle ROW_FACET_MATCH = mh("lgj_row_facet_match",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
 
-    // Mask complement + one-hop graph traversal (docs/abi.md §13, ABI minor 4). Two new symbols,
-    // one status code (Status#UNSUPPORTED_DECODE_MODE); no existing symbol's semantics changed.
-    private static final MethodHandle MASK_ANDNOT = mh("lgj_mask_andnot",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG));
+        private Minor2() {}
+    }
 
-    private static final MethodHandle HOP = mh("lgj_hop",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,   // store
-                    ValueLayout.JAVA_INT,    // edge_classid
-                    ValueLayout.JAVA_LONG,   // facet_mask
-                    ValueLayout.JAVA_INT,    // decode_mode
-                    ValueLayout.JAVA_LONG,   // src_mask
-                    ValueLayout.JAVA_LONG)); // dst_mask
+    /**
+     * Edge-bearing row store (docs/abi.md §12, ABI minor 3) — one extra constructor over the
+     * minor-2 shape; no new lane, no new op.
+     */
+    private static final class Minor3 {
+        static final MethodHandle ROWSTORE_OPEN_WITH_EDGES = mh("lgj_rowstore_open_with_edges",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private Minor3() {}
+    }
+
+    /**
+     * Mask complement + one-hop graph traversal (docs/abi.md §13, ABI minor 4). Two symbols, one
+     * status code (Status#UNSUPPORTED_DECODE_MODE); no existing symbol's semantics changed.
+     */
+    private static final class Minor4 {
+        static final MethodHandle MASK_ANDNOT = mh("lgj_mask_andnot",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG));
+
+        static final MethodHandle HOP = mh("lgj_hop",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_LONG,   // store
+                        ValueLayout.JAVA_INT,    // edge_classid
+                        ValueLayout.JAVA_LONG,   // facet_mask
+                        ValueLayout.JAVA_INT,    // decode_mode
+                        ValueLayout.JAVA_LONG,   // src_mask
+                        ValueLayout.JAVA_LONG)); // dst_mask
+
+        private Minor4() {}
+    }
+
 
     private static MethodHandle mh(String symbol, FunctionDescriptor descriptor) {
         MemorySegment addr = Abi.lookup().find(symbol).orElseThrow(() ->
@@ -355,6 +397,161 @@ public final class Downcalls {
         return outSum.get(ValueLayout.JAVA_LONG, 0);
     }
 
+    /**
+     * The minor-5 handle, resolved LAZILY.
+     *
+     * <p>Every other handle in this class is a static final resolved in {@code <clinit>}, which
+     * means a single absent symbol makes the whole class unusable. That is not a style
+     * preference — it actively DEFEATS {@link Abi#requireMinor(int)}, whose own contract promises
+     * to fail "before any downcall for the feature is attempted". Measured against a real
+     * ABI 0.4 library: {@code SmokeTest}, which touches nothing newer than minor 1, died in
+     * {@code Downcalls.<clinit>} because {@code lgj_reduce_facet_sum} was missing. The guard
+     * never got to run.
+     *
+     * <p>A nested holder class is initialised on first ACCESS, not when {@code Downcalls} is,
+     * so an old library now fails only when the minor-5 feature is actually called — and
+     * {@link Engine#facetSum} calls {@code requireMinor(5)} first, so what a caller sees is the
+     * intended {@link com.adaworldapi.lancegraph.AbiMismatchException}, not a bare "no such
+     * symbol".
+     *
+     * <p><strong>The same latent defect applies to minors 2-4</strong> (row store, edges, hop):
+     * their handles are still eager, so an ABI 0.1 library would break this class before
+     * {@code requireMinor(2)} could report anything useful. Not changed here — that is a
+     * pre-existing gap this PR did not introduce, and converting every handle is its own
+     * change with its own falsifier. Recorded so it is tracked rather than noticed twice.
+     */
+    private static final class Minor5 {
+        static final MethodHandle REDUCE_FACET_SUM = mh("lgj_reduce_facet_sum",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.ADDRESS));
+
+        private Minor5() {}
+    }
+
+    /** The mask-native sweep under a RESOLVED grouping (docs/abi.md §15, ABI minor 6). */
+    private static final class Minor6 {
+        static final MethodHandle REDUCE_FACET_SUM_RESOLVED = mh("lgj_reduce_facet_sum_resolved",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS));
+
+        private Minor6() {}
+    }
+
+    /** The whole-row layout probe (docs/abi.md §16, ABI minor 7). */
+    private static final class Minor7 {
+        static final MethodHandle ROW_LAYOUT_PROBE = mh("lgj_row_layout_probe",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+
+        private Minor7() {}
+    }
+
+    /** ABI minor 9 symbols (minor 8 added manifest data, no symbol). Lazy per the minor-2..7 rule. */
+    private static final class Minor9 {
+        static final MethodHandle ROWSTORE_FACET_MATCH_COUNT = mh("lgj_rowstore_facet_match_count",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private Minor9() {}
+    }
+
+    /** ABI minor 10 symbols. Lazy per the minor-2..9 rule. */
+    private static final class Minor10 {
+        static final MethodHandle ROWSTORE_OPEN_COLUMNAR = mh("lgj_rowstore_open_columnar",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private Minor10() {}
+    }
+
+    /**
+     * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
+     *
+     * <p>Work is proportional to the mask's popcount, not the row count — this is a bulk op in
+     * the §6 sense, and an empty mask costs O(mask words).
+     */
+    public static long reduceFacetSum(long res, int facet, int carving, long mask,
+            MemorySegment outSum) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor5.REDUCE_FACET_SUM.invokeExact(res, facet, carving, mask, outSum);
+        } catch (Throwable t) {
+            throw wrap("lgj_reduce_facet_sum", t);
+        }
+        Status.check("lgj_reduce_facet_sum", st);
+        return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * Sum one facet's register under the grouping the population itself resolves to, writing the
+     * sum to {@code outSum} and the resolved grouping's wire value to {@code outCarving}.
+     */
+    public static long reduceFacetSumResolved(long res, int facet, long mask, MemorySegment outSum,
+            MemorySegment outCarving) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor6.REDUCE_FACET_SUM_RESOLVED.invokeExact(res, facet, mask, outSum,
+                    outCarving);
+        } catch (Throwable t) {
+            throw wrap("lgj_reduce_facet_sum_resolved", t);
+        }
+        Status.check("lgj_reduce_facet_sum_resolved", st);
+        return outSum.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * For every facet, the SET of register groupings the selected rows carry — one crossing for
+     * all 32 facets.
+     */
+    public static void rowLayoutProbe(long res, long mask, MemorySegment out, long outLen) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor7.ROW_LAYOUT_PROBE.invokeExact(res, mask, out, outLen);
+        } catch (Throwable t) {
+            throw wrap("lgj_row_layout_probe", t);
+        }
+        Status.check("lgj_row_layout_probe", st);
+    }
+
+    /**
+     * Open a facet-major COLUMNAR row store (abi.md §18, minor 10) — same logical content as the
+     * AoS constructors, every single-field sweep contiguous. One crossing.
+     */
+    public static void rowstoreOpenColumnar(long nRows, long seed, int edgeClassid,
+            long edgeGateMask, int edgeRadius, MemorySegment outResource) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor10.ROWSTORE_OPEN_COLUMNAR.invokeExact(
+                    nRows, seed, edgeClassid, edgeGateMask, edgeRadius, outResource);
+        } catch (Throwable t) {
+            throw wrap("lgj_rowstore_open_columnar", t);
+        }
+        Status.check("lgj_rowstore_open_columnar", st);
+    }
+
+    /**
+     * Total {@code (row, facet)} slots carrying {@code classId} — the reduction over
+     * {@code lgj_row_facet_match}'s answer, computed natively (abi.md §11, minor 9). One
+     * crossing, one {@code u64} out-param.
+     */
+    public static void rowstoreFacetMatchCount(long res, int classId, MemorySegment outCount) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor9.ROWSTORE_FACET_MATCH_COUNT.invokeExact(res, classId, outCount);
+        } catch (Throwable t) {
+            throw wrap("lgj_rowstore_facet_match_count", t);
+        }
+        Status.check("lgj_rowstore_facet_match_count", st);
+    }
+
     // ── row store (docs/abi.md §11, ABI minor 2) ─────────────────────────────────────────────
     //
     // Callers above this class are expected to have already checked Abi.requireMinor(2) — these
@@ -369,7 +566,7 @@ public final class Downcalls {
         crossed();
         int st;
         try {
-            st = (int) ROWSTORE_OPEN.invokeExact(nRows, seed, outHandle);
+            st = (int) Minor2.ROWSTORE_OPEN.invokeExact(nRows, seed, outHandle);
         } catch (Throwable t) {
             throw wrap("lgj_rowstore_open", t);
         }
@@ -388,7 +585,7 @@ public final class Downcalls {
         crossed();
         int st;
         try {
-            st = (int) ROWSTORE_OPEN_WITH_EDGES.invokeExact(
+            st = (int) Minor3.ROWSTORE_OPEN_WITH_EDGES.invokeExact(
                     nRows, seed, edgeClassid, edgeGateMask, edgeRadius, outHandle);
         } catch (Throwable t) {
             throw wrap("lgj_rowstore_open_with_edges", t);
@@ -406,7 +603,7 @@ public final class Downcalls {
         crossed();
         int st;
         try {
-            st = (int) OP_EQ_CLASSID.invokeExact(res, facet, needle, dstMask);
+            st = (int) Minor2.OP_EQ_CLASSID.invokeExact(res, facet, needle, dstMask);
         } catch (Throwable t) {
             throw wrap("lgj_op_eq_classid", t);
         }
@@ -423,7 +620,7 @@ public final class Downcalls {
         crossed();
         int st;
         try {
-            st = (int) ROW_FACET_MATCH.invokeExact(res, needle, out, outLenElems);
+            st = (int) Minor2.ROW_FACET_MATCH.invokeExact(res, needle, out, outLenElems);
         } catch (Throwable t) {
             throw wrap("lgj_row_facet_match", t);
         }
@@ -444,7 +641,7 @@ public final class Downcalls {
         crossed();
         int st;
         try {
-            st = (int) MASK_ANDNOT.invokeExact(a, b, dst);
+            st = (int) Minor4.MASK_ANDNOT.invokeExact(a, b, dst);
         } catch (Throwable t) {
             throw wrap("lgj_mask_andnot", t);
         }
@@ -461,7 +658,7 @@ public final class Downcalls {
         crossed();
         int st;
         try {
-            st = (int) HOP.invokeExact(store, edgeClassid, facetMask, decodeMode, srcMask, dstMask);
+            st = (int) Minor4.HOP.invokeExact(store, edgeClassid, facetMask, decodeMode, srcMask, dstMask);
         } catch (Throwable t) {
             throw wrap("lgj_hop", t);
         }
