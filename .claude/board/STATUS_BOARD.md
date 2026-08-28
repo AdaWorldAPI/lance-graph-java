@@ -1,3 +1,23 @@
+## mask-membrane-valhalla-integration-v1 (2026-08-28)
+
+Plan: `.claude/plans/mask-membrane-valhalla-integration-v1.md` — the
+layered consolidation of the PR #44→#46 arc (masking underneath / Panama
+the membrane / Valhalla cheap addresses / everything else underneath).
+
+| D-id | Deliverable | Status |
+|---|---|---|
+| D-LGJ-MMV-0 | Mechanical fences: materialization-list gate, §E worker-topology fence, SIMD-branch fence — each proven able to fire | Queued |
+| D-LGJ-MMV-1a | Resolve `ISS-LGJ-EPOCH-UNCHECKED` by EITHER accepted outcome: (a) epoch re-check wired on the cached-descriptor path, disable-run red-then-green, per-accessor overhead measured on the accessors themselves (not the native benches — they never touch this path); or (b) a falsifier-backed unreachability proof + doctrine downgrade, chosen only on measured cost | Queued |
+| D-LGJ-MMV-1b | Minors 2-4 lazy `Downcalls` holders; `OldAbiCompatTest` minor-1 leg; doctrine "fails cleanly at the call" wording restored by storno | Queued |
+| D-LGJ-MMV-2a | Fused single-plane columnar pass — the lab arm's ~10× claim verified through the real ABI, equivalence before timing | Queued |
+| D-LGJ-MMV-2b | Register-sweep family (§14-16) answers facet-major; −18 refusal re-pinned two-sided, kept reachable | Queued |
+| D-LGJ-MMV-3 | Valhalla value-class promotions where the three-truths lab shows a measured facade-path win; each reversible | Queued (evidence-gated) |
+| D-LGJ-MMV-4 | Temporal read binding via `LanceVersion`/`VersionRange`/`TemporalPov` (contract vocabulary, never the Kanban-entangled types) | Queued (substrate-first per F6) |
+
+W4.2 (the write seam) deliberately has NO row — blocked with GridLake
+(plan F5) and substrate-side by the F7 measurement; a row here would be
+the consumer-side scheduling creep §E forbids.
+
 ## the mask-native SWEEP arc — ABI minors 5-8 (2026-08-25)
 
 The execution half of the mask path. The BUILD half (`lgj_op_eq_classid`)
