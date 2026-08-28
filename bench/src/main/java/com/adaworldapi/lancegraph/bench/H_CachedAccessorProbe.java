@@ -31,23 +31,25 @@ import java.util.concurrent.TimeUnit;
  * reads exactly one row. A probe there is one downcall <em>per row read</em>. That is what §5's
  * "per-access or not at all" means, and why its cost is worth a number rather than a shrug.
  *
- * <h2>Both arms live here, and that is a correction to this plan's own board entry</h2>
+ * <h2>This is NOT the gate, and the two-build requirement still stands</h2>
  *
- * <p>{@code ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT} recorded that §5.5's build-time variant swap
- * "forces TWO BUILDS" — separate builds of {@code java/} compared across separate JMH runs, since
- * one source tree cannot put both arms on one classpath. <strong>That is true for swapping the
- * shipped class, and it is not what this measurement needs.</strong> §5.5's actual prohibition is
- * an {@code if (guardEnabled)} branch <em>inside</em> the accessor — correctly, because such a
- * branch is hoistable and is not the shape either arm ships. Two distinct methods, each with a
- * straight-line body and no branch on a mode flag, honour that prohibition exactly. So both arms
- * are built here, in one run, and the two-build requirement dissolves.
+ * <p>An earlier version of this header claimed both arms living in one run "corrects"
+ * {@code ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT}'s finding that §5.5's variant swap "forces TWO
+ * BUILDS", and that the requirement therefore "dissolves". <strong>That claim was wrong and has
+ * been withdrawn</strong> (Codex P1 on #55; the board entry is struck to match).
  *
- * <p>What that costs, stated rather than buried: these arms reconstruct {@code classidAt}'s body
- * rather than calling it, so this measures <em>the probe's cost on that shape of accessor</em>,
- * not {@code RowStore.classidAt} itself. The bounds check and the {@code FacetId} null-check are
- * deliberately excluded — they are identical in both arms and would only add a constant to both
- * sides of a subtraction. A reader wanting the absolute cost of the public method should not read
- * these numbers as that; a reader wanting the delta the gate is about should.
+ * <p>The reason is what these arms actually call. Both reach {@link Engine#describeLane} directly,
+ * so neither one is {@code RowStore.classidAt}: they bypass the cached {@code lanes[]} lookup, the
+ * {@code requireOpen} check, the {@code FacetId} null-check and the bounds check. §5.4 is explicit
+ * that the accessor "is an inlining/compile barrier that changes the surrounding loop's
+ * optimization… That total is the right thing to gate on" — the whole method as the JIT sees it,
+ * not a bench-local reconstruction of its body. Two <em>production</em> variants genuinely cannot
+ * share one classpath without the hoistable branch §5.5 forbids, so two builds it is.
+ *
+ * <p>What this class measures, stated plainly: <strong>the cost of one bare
+ * {@code lgj_lane_describe} crossing on a hot read loop.</strong> That is a real and useful
+ * number — an order-of-magnitude input to whatever {@code N} an amendment eventually names — and
+ * it is not the cost of the code shape that would ship.
  *
  * <h2>The arms</h2>
  *
@@ -65,12 +67,14 @@ import java.util.concurrent.TimeUnit;
  *
  * <h2>What this class does NOT do</h2>
  *
- * <p>It does not decide anything. §5's verdict function takes {@code delta_ns} and an amendment's
- * {@code N}; <strong>no {@code N} has been recorded yet</strong>, and §5.2 requires that amendment
- * to be committed <em>before</em> the first run for the result to count as pre-registered. So the
- * numbers this produces are a measurement of the delta and nothing more — running it does not
- * ship the {@code RowStore} probe, and cannot, until an amendment names {@code N > 0} and a
- * results commit cites that amendment's sha.
+ * <p>It does not decide anything, on two independent grounds. §5's verdict function takes
+ * {@code delta_ns} and an amendment's {@code N}; <strong>no {@code N} has been recorded</strong>,
+ * and §5.2 requires that amendment to be committed <em>before</em> the run for the result to count
+ * as pre-registered. And even with one, the arms above are not the production accessor. A valid
+ * {@code RowStore} gate needs all three: an amendment naming {@code N > 0} committed first, then
+ * before/after variants of the real accessor in two builds of {@code java/}, then a results commit
+ * citing that amendment's sha. {@code ISS-LGJ-EPOCH-UNCHECKED} stays OPEN for {@code RowStore}
+ * until that runs.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)

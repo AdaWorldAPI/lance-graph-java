@@ -1,6 +1,10 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
-## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — the answer is "not at all"
+## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — EXPLORATORY, decides nothing
+
+> ⊘ Retitled (Codex P1a on #55). The header read *"the answer is 'not at
+> all'"*. It is not an answer: the run below is void by §5.2 and its arms are
+> not the production accessor (§5.4). See the struck Consequences.
 
 The gate §5 named and never had. `bench/.../H_CachedAccessorProbe.java`,
 5 forks x 8 iterations, `rows=65536`, release `.so`:
@@ -15,11 +19,11 @@ The gate §5 named and never had. `bench/.../H_CachedAccessorProbe.java`,
 clear the per-arm acceptance rule. The power precondition `hw_delta < N/2`
 is met for any `N > 2.00 ns`.
 
-**Verdict, for every plausible `N`:** FAIL at any `N ≤ 34.54`; PASS only at
-`N ≥ 36.53`. §5's own framing is "per-access or not at all" — and no
-principled budget for a *safety probe on a documented diagnostic accessor*
-is 35 ns on a 9.4 ns baseline. **So: not at all. The `RowStore` half does
-not ship.**
+⊘ **STRUCK (Codex P1a on #55).** This paragraph read a verdict off the table
+— *"FAIL at any `N ≤ 34.54`… So: not at all. The `RowStore` half does not
+ship."* No verdict is available here: §5's verdict function takes an `N` from
+an amendment that precedes the run, and none does. The numbers stay; the
+conclusion does not.
 
 **⚠ This run is NOT the pre-registered gate, and the reason is my error.**
 §5.2 requires the amendment naming `N` to be committed *before* the first
@@ -29,24 +33,51 @@ post-hoc threshold, and the run is void." So this is recorded as an
 **EXPLORATORY** measurement, and any `N` written now is contaminated by
 having seen it.
 
-What saves the conclusion is that it does not depend on `N`: the delta is
-**3.8× the entire un-probed cost of the accessor**, and the interval is
-nowhere near any budget a reviewer would set for this. A pre-registered
-re-run would change the paperwork, not the answer. Recorded this way
-rather than quietly presented as the gate.
+⊘ **STRUCK (Codex P1a on #55).** This paragraph argued *"what saves the
+conclusion is that it does not depend on `N`"* — the exact move §5.2 exists to
+forbid, dressed as an exemption from it. A conclusion that "does not depend on
+`N`" is a conclusion reached without the gate, and it is doubly unavailable
+here because the arms are not the production accessor (P1b): the ratio is
+against a *reconstructed* 9.4 ns body, not `classidAt`'s.
 
 **Consequences:**
-- `ISS-LGJ-EPOCH-UNCHECKED` closes for `Mask` (shipped, #53) and is
-  **CLOSED AS WON'T-FIX for `RowStore` per-access** on this measurement.
-  The cached-descriptor path in `RowStore.lanes[]` therefore stays guarded
-  only by the Java `closed` boolean — a **documented, measured, accepted**
-  gap, no longer an unexamined one. Root `CLAUDE.md`'s scope note stands
-  and should now cite this number.
-- ⊘ **Corrects `ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT`'s "forces TWO
-  BUILDS".** True for swapping the shipped class; not what the measurement
-  needs. §5.5 forbids an `if (guardEnabled)` branch *inside* the accessor
-  because it is hoistable — two distinct straight-line methods honour that
-  exactly, so both arms live in one bench class and one run.
+- ⊘ **STRUCK (Codex P1a on #55).** This bullet read: *"`ISS-LGJ-EPOCH-UNCHECKED`
+  closes for `Mask` (shipped, #53) and is **CLOSED AS WON'T-FIX for `RowStore`
+  per-access** on this measurement."* **It closed a safety gap as won't-fix using
+  a run this same entry declares void.** Replacing the required ex-ante cutoff
+  with the post-hoc judgment that "no principled budget … is 35 ns" is exactly
+  the substitution pre-registration exists to prevent — and it contradicts v3 W4,
+  which requires this issue to stay OPEN and scoped to `RowStore` until the half
+  has validly shipped or been validly rejected. **`ISS-LGJ-EPOCH-UNCHECKED`
+  remains OPEN for `RowStore`.** The `Mask` half's closure (#53) is unaffected:
+  it shipped on a falsifier, not on a budget.
+- ⊘ **STRUCK (Codex P1b on #55).** This bullet claimed to correct
+  `ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT`'s "forces TWO BUILDS". **The
+  original finding was right and this "correction" was wrong.** `H_CachedAccessorProbe`
+  calls `Engine.describeLane` directly, so both arms *reconstruct* an accessor
+  body and neither is `RowStore.classidAt` — they bypass the cached `lanes[]`
+  lookup, `requireOpen`, the `FacetId` null-check and the bounds check. §5.4's
+  own words are that the accessor "is an inlining/compile barrier that changes
+  the surrounding loop's optimization… That total is the right thing to gate on."
+  Two **production** variants genuinely cannot share one classpath without the
+  hoistable branch §5.5 forbids, so the two-build requirement stands, unamended.
+
+**What this run still is.** An indicative measurement of a bare
+`lgj_lane_describe` crossing on a hot read loop (35.5 ns delta, CI
+[34.54, 36.53]) — real, reproducible, and useful as an order-of-magnitude
+input to whatever `N` an amendment eventually names. It is **not** the cost of
+the shape that would ship, and it decides nothing.
+
+**A valid `RowStore` gate still needs all three, in this order:** (1) an
+amendment naming `N > 0`, committed *before* the run; (2) before/after variants
+of the **production** accessor — two builds of `java/`, per the unamended
+finding above; (3) a results commit citing that amendment's sha.
+
+**The pattern, for the ledger — eighth instance.** `ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST`
+records seven cases of a repair fixing one verdict path and leaving a second
+standing beside it. This is the eighth and the worst shape of it: the entry
+*correctly* declared its own run void in one paragraph and then *acted on that
+run anyway* in the next. Naming a failure mode does not confer immunity to it.
 
 ## ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT — the RowStore gate cannot be run as specified
 

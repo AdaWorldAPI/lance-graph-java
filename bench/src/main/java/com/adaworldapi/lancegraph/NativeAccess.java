@@ -66,9 +66,10 @@ public final class NativeAccess {
      * its cache is cold, and the one a per-access liveness probe would make on <em>every</em>
      * accessor call.
      *
-     * <p>Exists so {@code H_CachedAccessorProbe} can build both arms of the W1.1 {@code RowStore}
-     * measurement here rather than in two separate builds of {@code java/} — see that class's
-     * header for why that is sound and what it costs.
+     * <p>Exists so {@code H_CachedAccessorProbe} can measure that crossing in isolation.
+     * <strong>Not</strong> a substitute for the two-build variant swap the W1.1 {@code RowStore}
+     * gate requires: a call through here is not {@code RowStore.classidAt}, so it cannot stand in
+     * for the production accessor — see that class's header.
      */
     public static Engine.LaneWindow rowStoreLane(RowStore store, int laneId) {
         return Engine.describeLane(store.handle(), laneId);
