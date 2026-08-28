@@ -28,6 +28,11 @@ public final class MaskNativeOpsTest {
     private static final int FACETS_PER_ROW = 32;
     private static final long SEED = 0xABCDL;
 
+    /**
+     * Exercise the native mask operations reachable from the public facade — {@code minus},
+     * {@code hop}, {@code importRows}, {@code materializeRows}, the {@link WideFieldMask}
+     * factories, and the W1.1 cached-lane liveness probe.
+     */
     public static void run(Checks c) {
         c.section("Mask.minus(): parity vs a hand-computed scalar expected set, at a"
                 + " non-multiple-of-64 row count (the tail rule, docs/abi.md §13)");
@@ -182,23 +187,42 @@ public final class MaskNativeOpsTest {
             // thing left that can notice.
             com.adaworldapi.lancegraph.internal.ffm.Engine.close(rs.handle());
 
-            c.throwsUp("a warm cached word lane is refused once the substrate no longer resolves"
-                            + " the handle",
-                    ClosedResourceException.class,
-                    m::materializeRows);
+            // The FIRST post-close call is the only one that goes through the cache path, and
+            // the message is asserted here for that reason: the probe CLEARS the stale window on
+            // refusal, so every later call finds words == null and takes the fresh-describe path
+            // instead, where the ABI's own status message is the correct one to see. Asserting
+            // the probe's marker on a later call fails -- observed, not reasoned about.
+            String probeMarker = "the packed bits of";
+            String viaCache = null;
+            try {
+                m.materializeRows();
+            } catch (ClosedResourceException e) {
+                viaCache = e.getMessage();
+            }
+            c.that("a warm cached word lane is refused once the substrate no longer resolves"
+                            + " the handle", viaCache != null);
+            c.that("the refusal names what it refused -- it came through the cache probe, which"
+                            + " is what a bare exception-type check could not have shown",
+                    viaCache != null && viaCache.contains(probeMarker));
 
-            // ... and it stays refused: the probe cleared the stale window rather than leaving it
-            // for a second caller to trip over.
+            // ... and it stays refused. This one goes through the fresh-describe path, because
+            // the probe dropped the window rather than leaving it for a second caller.
             c.throwsUp("the refusal is not a one-shot -- the stale window was dropped",
                     ClosedResourceException.class,
                     m::materializeRows);
 
-            // count() asks the substrate every time and never touches the cached address, so it
-            // fails through the ABI's own status rather than through this probe. Asserted so the
-            // two paths are not confused with one another.
-            c.throwsUp("count() fails through the ABI status, not through the cache probe",
-                    LanceGraphException.class,
-                    m::count);
+            // count() asks the substrate every time and never touches a cached address, so it
+            // fails through the ABI's own status. Both paths raise ClosedResourceException, so a
+            // type check cannot tell them apart; the message is what discriminates.
+            String viaAbi = null;
+            try {
+                m.count();
+            } catch (ClosedResourceException e) {
+                viaAbi = e.getMessage();
+            }
+            c.that("count() also refuses once the parent is gone", viaAbi != null);
+            c.that("count() refuses through the ABI's own status, NOT through the cache probe",
+                    viaAbi != null && !viaAbi.contains(probeMarker));
         }
 
         c.section("WideFieldMask factories and accessors");
