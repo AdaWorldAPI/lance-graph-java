@@ -1,6 +1,28 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
-## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — OPEN
+## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — OPEN (council ruled; implementation queued)
+
+> **⊕ COUNCIL RULING (2026-08-28, `epoch-recheck-v3.md`).** The 5+3 council
+> found this issue's own framing narrower than the truth: an epoch
+> **mismatch is unreachable** through `lgj_resource_info` — `close` bumps
+> the slot generation (`registry.rs:331-338`), `insert` hands the advanced
+> generation out (`:253-257`), and the export opens with `resolve`
+> (`exports.rs:214-222`), so a stale handle **throws** rather than
+> returning a mismatched epoch (only a `u32` wrap could make the compare
+> fire). The fix is therefore a **native generation-checked liveness probe
+> replacing the Java `closed` boolean** at the cached-descriptor seam — not
+> "wiring epoch checking". The hazard the probe defends is real and
+> reachable (close the native handle out from under a live wrapper; the
+> cached segment then reads freed storage), which is why resolution (b)
+> was NOT selected despite the unreachability finding: (b) requires the
+> HAZARD unreachable, and it is not.
+>
+> **Closure terms, pre-registered:** this issue closes as **RESOLVED**
+> (the spec's status for outcome (a)) when the probe ships, and a **NEW**
+> issue is opened in the same commit for the cross-thread
+> lifecycle-vs-access window that arm (ii) documents rather than fixes.
+> Two entries, never one — a scoped resolution must not absorb an
+> unfixed window.
 
 **Found.** By the 5+3 council's `handle-lifecycle-auditor` pass on PR #45
 (the zero-copy/memory-safety doctrine review). `LgjLaneDesc`/`LgjMaskDesc`

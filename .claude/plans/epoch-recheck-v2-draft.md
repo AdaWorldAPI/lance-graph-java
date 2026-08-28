@@ -1,6 +1,13 @@
 # epoch-recheck-v2 — DRAFT (Phase 2 consolidation of the W1.1 council)
 
-**Status: DRAFT v2 (2026-08-28) — Phase 1 complete (5 savants cast and
+**Status: SUPERSEDED by `.claude/plans/epoch-recheck-v3.md` (2026-08-28).**
+Retained as the council's Phase-2 artifact — the reviewers' findings are
+only auditable against the draft they attacked. Phase 3 found one BLOCKING
+defect here (W5's disable arm is a use-after-free, so "deterministic" was
+false), closed Q1 outright, and corrected five factual errors; v3 §8 is the
+ledger. Read v3, not this, for what to implement.
+
+**Original status line: DRAFT v2 — Phase 1 complete (5 savants cast and
 returned), Phase 2 consolidation done, Phase 3 reviewers NOT yet cast.**
 Predecessor: `.claude/plans/epoch-recheck-phase0-v1.md` (the Phase-0 spec,
 whose §1 frozen decisions and §4 non-goals still bind). Reviewers see THIS
