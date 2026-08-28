@@ -245,6 +245,18 @@ raw-segment read.
 
 ### What arm (ii) obliges — six, and W1/W2 are mechanically checkable
 
+> **STATUS 2026-08-28 (#60): W1 and W2 are BUILT.** Both were recorded as
+> discharged on #57's arc entry — by the two words *"finally landed"* — while
+> neither existed; Codex caught it on #59, after that PR had merged. What now
+> exists: the thread-safety block on `RowStore` and `Mask` (the literal
+> `happens-before`, absent from `java/src` entirely until then) plus the
+> once-per-scan note on `materializeRows()`; the corrected `CLAUDE.md` wording;
+> and **two new `DoctrineFenceTest` legs** — 1b (W1) and 1c (W2). **W2's
+> "this precedent must be built, not merely cited" is discharged by 1c**, the
+> first leg in that class to open the doctrine file rather than cite it.
+> Both legs are disable-verified red-then-green. **W3-W6 are unaffected by this
+> note** and are not claimed here.
+
 - **W1 — Javadoc scope, on both classes.** A thread-safety block on
   `RowStore` and `Mask`: the facade is not thread-safe; the caller must
   establish happens-before between `close()` and every access; a concurrent
