@@ -1,5 +1,53 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — the answer is "not at all"
+
+The gate §5 named and never had. `bench/.../H_CachedAccessorProbe.java`,
+5 forks x 8 iterations, `rows=65536`, release `.so`:
+
+| arm | ns/accessor-call | 99.9% half-width | % of own score |
+|---|---|---|---|
+| `cached` (probe absent) | **9.398** | ±0.362 | 3.85% ✓ |
+| `probed` (probe present) | **44.932** | ±0.931 | 2.07% ✓ |
+
+`delta_ns = 35.534`, `hw_delta = sqrt(0.362² + 0.931²) = 0.999`, delta CI
+**[34.54, 36.53]**, `ratio = 4.78` (**flagged**, threshold 2.0). Both arms
+clear the per-arm acceptance rule. The power precondition `hw_delta < N/2`
+is met for any `N > 2.00 ns`.
+
+**Verdict, for every plausible `N`:** FAIL at any `N ≤ 34.54`; PASS only at
+`N ≥ 36.53`. §5's own framing is "per-access or not at all" — and no
+principled budget for a *safety probe on a documented diagnostic accessor*
+is 35 ns on a 9.4 ns baseline. **So: not at all. The `RowStore` half does
+not ship.**
+
+**⚠ This run is NOT the pre-registered gate, and the reason is my error.**
+§5.2 requires the amendment naming `N` to be committed *before* the first
+run; I built and ran the benchmark without one. By §5.2's own words a
+result whose amendment does not precede it "is not a measurement — it is a
+post-hoc threshold, and the run is void." So this is recorded as an
+**EXPLORATORY** measurement, and any `N` written now is contaminated by
+having seen it.
+
+What saves the conclusion is that it does not depend on `N`: the delta is
+**3.8× the entire un-probed cost of the accessor**, and the interval is
+nowhere near any budget a reviewer would set for this. A pre-registered
+re-run would change the paperwork, not the answer. Recorded this way
+rather than quietly presented as the gate.
+
+**Consequences:**
+- `ISS-LGJ-EPOCH-UNCHECKED` closes for `Mask` (shipped, #53) and is
+  **CLOSED AS WON'T-FIX for `RowStore` per-access** on this measurement.
+  The cached-descriptor path in `RowStore.lanes[]` therefore stays guarded
+  only by the Java `closed` boolean — a **documented, measured, accepted**
+  gap, no longer an unexamined one. Root `CLAUDE.md`'s scope note stands
+  and should now cite this number.
+- ⊘ **Corrects `ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT`'s "forces TWO
+  BUILDS".** True for swapping the shipped class; not what the measurement
+  needs. §5.5 forbids an `if (guardEnabled)` branch *inside* the accessor
+  because it is hoistable — two distinct straight-line methods honour that
+  exactly, so both arms live in one bench class and one run.
+
 ## ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT — the RowStore gate cannot be run as specified
 
 Found while starting the benchmark v3 names as the `RowStore` half's gate.

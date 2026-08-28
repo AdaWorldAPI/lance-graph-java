@@ -60,4 +60,17 @@ public final class NativeAccess {
     public static Engine.LaneWindow maskWords(Mask mask) {
         return Engine.describeMask(mask.id().token());
     }
+
+    /**
+     * Describe one lane of a {@link RowStore} — the crossing {@code RowStore.lane()} makes when
+     * its cache is cold, and the one a per-access liveness probe would make on <em>every</em>
+     * accessor call.
+     *
+     * <p>Exists so {@code H_CachedAccessorProbe} can build both arms of the W1.1 {@code RowStore}
+     * measurement here rather than in two separate builds of {@code java/} — see that class's
+     * header for why that is sound and what it costs.
+     */
+    public static Engine.LaneWindow rowStoreLane(RowStore store, int laneId) {
+        return Engine.describeLane(store.handle(), laneId);
+    }
 }
