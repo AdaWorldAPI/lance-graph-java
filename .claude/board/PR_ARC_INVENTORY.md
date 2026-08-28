@@ -8,6 +8,49 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #51 — plan: CI overlap labels a verdict, it never produces one (merged 2026-08-28, `6530e2f` — 3 commits, head `7acb7fd`)
+
+- **Why it exists:** two findings landed on #49 **~2 minutes AFTER it
+  merged**, so no gate on that PR could have caught them and the merge
+  could not have waited. One was a real defect in the ratified plan's own
+  decision rule. The generalizable lesson, recorded in `ISSUES.md`: **a
+  subscription is not finished at merge — the last review can land after
+  it.** Both #49 and #50 merged with a review still in flight.
+- **The defect chain (three rounds on ONE rule, each subsuming the last):**
+  §5 first auto-passed **any** CI-overlapping run, reasoning an
+  unresolvable cost cannot exceed a positive budget — false, and the
+  counterexample is ordinary: 100 ns vs 118 ns at 9% half-widths overlap
+  while `delta_ns = 18`, so an `N = 10 ns` budget ships a probe at ~2×.
+  The repair demoted overlap to a *label*; **that was still unsound**
+  (Codex P2) — overlapping CIs for two means are not a CI for their
+  difference, so the label asserted unsupported noise AND let a
+  point-estimate failure read as definitively "too costly" on a run that
+  could not tell. Final shape: uncertainty is computed on `delta_ns`
+  itself and its interval compared to `0` and `N`, with a straddling
+  interval classified **UNDERPOWERED** — neither pass nor fail, remedy a
+  better-powered run. Arm-vs-arm comparison no longer appears in the rule.
+- **Also locked:** `N > 0` required at both the non-positive clause and
+  the amendment procedure (an `N ≤ 0` amendment voids the run) — the
+  premise the `delta_ns ≤ 0` auto-pass silently rested on; and the
+  two-delivery-paths correction to #49's headline (`Mask` unconditional,
+  `RowStore` benchmark-gated), recorded as a **dated append-only
+  correction line** after Codex caught that editing it into the Headline
+  broke this file's own lines 2-4 rule. `ISSUES.md` got a storno, not an
+  edit, for the same reason.
+- **Gates:** doc-only. CodeRabbit clean on `f9e6938` and on `7acb7fd`
+  (⚪ Minimal); Codex 2×P2, both fixed; all three threads answered then
+  resolved. Cursor Bugbot did not run — usage limit, third consecutive PR.
+- **Confidence:** high on the final rule's *form* (it now compares the
+  right interval against the right quantities); the numeric `N` is still
+  UNMEASURED and pre-registration-gated, unchanged.
+- **Standing recommendation, NOT yet done:** four consecutive findings in
+  §5, each a rule resting on an unstated premise, and the third subsumed
+  the second's fix. The cheap move before the benchmark amendment is
+  written is ONE adversarial read of §5 against its own premises rather
+  than another round-trip — each of which now also costs money
+  (CodeRabbit is on usage-based billing at $0.25/file; this PR drew $1.00
+  across its runs).
+
 ## PR #47 — plan: mask-membrane-valhalla-integration-v1, the layered consolidation (merged 2026-08-28, `9f6e9a2` — 6 commits, head `586d081`)
 
 - **Added:** `.claude/plans/mask-membrane-valhalla-integration-v1.md` —
