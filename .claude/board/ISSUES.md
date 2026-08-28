@@ -1,5 +1,38 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-EPOCH-UNCHECKED — RESOLVED for the `Mask` half (W1.1)
+
+`Mask.words()` now re-authorises its cached word lane with the substrate
+on every use of that cache: one O(1) downcall per whole scan, never per
+word. `Engine.epoch`'s javadoc claim ("Java re-checks this before
+trusting a cached lane segment") is no longer false for masks.
+
+**A measured correction to the v3 plan, found by building it.** v3 §6 said
+the probe would be `lgj_resource_info`, which "already reads live". It does
+— but it resolves the mask's **own** registry slot, and **that slot
+outlives its parent**. The first implementation probed it and the falsifier
+went red the right way: closing the parent store natively left the probe
+silent, `count()` correctly reported `PARENT_CLOSED`, and
+`materializeRows()` went on to **read freed bytes without crashing**.
+
+Two things worth keeping from that:
+
+1. **An absent segfault is not evidence of safety.** The exact hazard
+   Codex's P1 on #49 described, reproduced here on purpose and observed
+   doing nothing visible.
+2. **Handle liveness is not lane liveness.** A child handle resolving says
+   nothing about whether the bytes it points at are still owned. The
+   authorising question is the one that resolves the parent chain.
+
+`lgj_mask_describe` is that question — `registry::resolve_mask_with_parent`,
+O(1), fills a descriptor and does no work over the population — so the fix
+needs **no new ABI symbol** and v3's "no new production symbol" ruling
+survives, with its *reason* corrected.
+
+**Still open:** the `RowStore` half (per-access or not at all, gated on the
+benchmark) and the identical cached-descriptor path in `RowStore.lanes[]`.
+This entry closes the `Mask` half only.
+
 ## ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST — §5 adversarial read, FIXED
 
 **The pattern, which is the point of this entry.** Three successive

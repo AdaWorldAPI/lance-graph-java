@@ -139,10 +139,72 @@ public final class Mask implements AutoCloseable {
         return handle;
     }
 
+    /**
+     * The mask's packed-bit word lane, resolved once and cached — and, on every use of that
+     * cache, <strong>re-authorised by the substrate</strong>.
+     *
+     * <p>Java holds no liveness authority here. The {@code closed} boolean and
+     * {@link #requireUsable} are this facade's own bookkeeping; they cannot know that the native
+     * resource behind the cached address is gone, because nothing in Java observes that. So
+     * before any use of a cached window this asks the substrate to describe the mask again and
+     * compares the answer with the stamp the cached window carries.
+     *
+     * <p><strong>Why re-describe rather than {@link Engine#epoch}.</strong> Measured, not
+     * assumed: {@code lgj_resource_info} resolves the mask's OWN registry slot, and that slot
+     * outlives its parent — closing the parent store natively left the probe silent while
+     * {@code count()} correctly reported {@code PARENT_CLOSED}, and {@code materializeRows()}
+     * went on to read freed bytes without crashing. (That it did not crash is worth stating: an
+     * absent segfault is not evidence of safety.) {@code lgj_mask_describe} resolves the mask
+     * WITH its parent, so it is the answer that actually covers these bytes.
+     *
+     * <p><strong>One downcall per whole scan, never per word.</strong> Callers resolve the window
+     * once and then read every element in-process from the returned segment; the crossing is a
+     * lifecycle question asked at the boundary, not work proportional to the population. This is
+     * the {@code Mask} half of W1.1 (`.claude/plans/epoch-recheck-v3.md` §6): a native
+     * generation-checked liveness probe replacing a Java boolean's sole authority.
+     *
+     * <p>Two conditions are distinguished on purpose, because "stop" is a weaker signal than
+     * "stop, and here is what moved":
+     *
+     * <ul>
+     *   <li>the handle no longer resolves — the resource was closed and its slot's generation has
+     *       advanced past this handle, so the registry refuses it before any dereference;
+     *   <li>the handle resolves but the epoch has moved — the cached address describes an earlier
+     *       state of a resource that still exists. Unreachable today short of a {@code u32}
+     *       generation wrap (§0), and checked anyway: the cost is one comparison, and a rule that
+     *       is only sound because of an argument made elsewhere is exactly what this plan spent
+     *       three rounds learning not to rely on.
+     * </ul>
+     */
     private Engine.LaneWindow words() {
         if (words == null) {
             words = Engine.describeMask(handle);
+            return words;
         }
+        // Re-describe, once. `lgj_mask_describe` resolves the mask WITH ITS PARENT
+        // (`registry::resolve_mask_with_parent`) and is O(1) — it fills a descriptor, it does no
+        // work over the population — so it is the parent-aware lifecycle answer this needs, with
+        // no new ABI symbol.
+        Engine.LaneWindow fresh;
+        try {
+            fresh = Engine.describeMask(handle);
+        } catch (LanceGraphException e) {
+            words = null;
+            throw new ClosedResourceException(
+                    "the packed bits of " + id() + " were resolved earlier, but the substrate no"
+                            + " longer describes this selection (" + e.getMessage() + "). The"
+                            + " cached address must not be read.");
+        }
+        if (fresh.epoch() != words.epoch() || fresh.byteLength() != words.byteLength()) {
+            long stamped = words.epoch();
+            words = null;
+            throw new ClosedResourceException(
+                    "the packed bits of " + id() + " were described at epoch " + stamped
+                            + " but the substrate now reports epoch " + fresh.epoch()
+                            + ". The cached address describes an earlier state and must not be"
+                            + " read.");
+        }
+        words = fresh;
         return words;
     }
 

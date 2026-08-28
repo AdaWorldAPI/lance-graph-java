@@ -156,6 +156,51 @@ public final class MaskNativeOpsTest {
             }
         }
 
+        c.section("W1.1 Mask half: the cached word lane is re-authorised by the substrate,"
+                + " not by a Java boolean");
+        {
+            // The construction the plan mandates (epoch-recheck-v3 §6, W5's shape applied to the
+            // Mask half): POPULATE THE CACHE FIRST, then invalidate the native resource behind
+            // Java's back, then use the cache again.
+            //
+            // Populate-first is load-bearing. If the window were still unresolved, words() would
+            // call describeMask() fresh and throw on its own, and this test would pass with the
+            // probe deleted -- measuring the wrong mechanism entirely. Getting a real count out
+            // of materializeRows() first is what proves the cache is warm.
+            //
+            // Note what is NOT done here: nothing reads the cached address after the free. The
+            // probe refuses BEFORE returning the window, so no freed byte is ever dereferenced --
+            // which is the whole reason the guard is a substrate question rather than a Java one.
+            RowStore rs = RowStore.open(256, SEED);
+            Mask m = rs.importRows(0L, 1L, 2L, 63L, 64L, 200L);
+            long[] warm = m.materializeRows();
+            c.eq("the cache is warm: materializeRows() returned every row before invalidation",
+                    6, warm.length);
+
+            // Close the NATIVE resource directly. Java's own bookkeeping is untouched, so
+            // requireUsable() still passes and execution reaches the probe -- which is the only
+            // thing left that can notice.
+            com.adaworldapi.lancegraph.internal.ffm.Engine.close(rs.handle());
+
+            c.throwsUp("a warm cached word lane is refused once the substrate no longer resolves"
+                            + " the handle",
+                    ClosedResourceException.class,
+                    m::materializeRows);
+
+            // ... and it stays refused: the probe cleared the stale window rather than leaving it
+            // for a second caller to trip over.
+            c.throwsUp("the refusal is not a one-shot -- the stale window was dropped",
+                    ClosedResourceException.class,
+                    m::materializeRows);
+
+            // count() asks the substrate every time and never touches the cached address, so it
+            // fails through the ABI's own status rather than through this probe. Asserted so the
+            // two paths are not confused with one another.
+            c.throwsUp("count() fails through the ABI status, not through the cache probe",
+                    LanceGraphException.class,
+                    m::count);
+        }
+
         c.section("WideFieldMask factories and accessors");
         c.eq("allFacets() carries exactly 32 facets", 32, WideFieldMask.allFacets().count());
         c.that("allFacets() has every facet 0..31",
