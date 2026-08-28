@@ -70,6 +70,24 @@ public final class Engine {
                 allSet ? Layouts.MASK_INIT_ALL : Layouts.MASK_INIT_EMPTY, s.out);
     }
 
+    /**
+     * Close a resource by handle.
+     *
+     * <p><strong>The sole-closer contract (abi.md, "Concurrency").</strong> A handle has exactly
+     * one closer: the facade object that owns it. This method is the route by which that contract
+     * can be broken, and it cannot defend itself — it is reachable from outside the owning object,
+     * and closing a handle a live facade still believes it owns leaves that facade's cached lane
+     * descriptors pointing at freed memory.
+     *
+     * <p>The registry's generation check does <em>not</em> catch this. It fails closed on every
+     * handle <em>resolve</em>, but a cached descriptor read resolves no handle: Java holds the
+     * address and reads through it, so nothing is consulted and no status is returned. Measured
+     * on W1.1: closing a parent natively left the child's probe silent and a subsequent read went
+     * on to read freed bytes without crashing. <strong>An absent segfault is not evidence of
+     * safety.</strong>
+     *
+     * <p>Callers outside the owning facade: close the facade object, not the handle.
+     */
     public static void close(long handle) {
         Downcalls.close(handle);
     }

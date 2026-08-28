@@ -448,6 +448,13 @@ public final class RowStore implements NativeResource, AutoCloseable {
     /**
      * Release the native storage and this store's own arena.
      *
+     * <p><strong>This object is the sole closer of its handle</strong> (abi.md, "Concurrency").
+     * It caches lane descriptors in {@code lanes[]} and reads them directly on every accessor
+     * call, so a close by any other route — or from any other thread — leaves those cached
+     * addresses pointing at freed memory with nothing to report it: {@code requireOpen} consults
+     * this object's own non-volatile {@code closed} flag, never the registry. The contract is
+     * documented, not enforced; see {@code ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW}.
+     *
      * @throws ClosedResourceException if already closed
      */
     @Override

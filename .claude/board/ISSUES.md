@@ -1,5 +1,38 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-ORPHAN-MASK-CLOSE-LEAKED (2026-08-28) — RESOLVED same day (#57)
+
+**A real leak, found behind a disagreement between two reviewers about a doc
+line.** `Mask.close()` guarded its native close with `if (parent.isOpen())`,
+commented *"the selection was freed with it; calling close again would only earn
+an INVALID_HANDLE. Nothing leaks either way."* **Both halves were false**, and
+the registry says so plainly: `registry::close` takes only the handle's **own**
+slot and never cascades to children, and `create_mask` gives a mask its own
+`Box<[u64]>`. So an orphaned selection is still a live resource holding a live
+allocation, and skipping the call leaked **both the words and the registry
+slot** for the life of the process.
+
+**How it surfaced, which is the part worth keeping.** Codex (P2) said an
+orphan's `lgj_close` returns `OK`; CodeRabbit said `INVALID_HANDLE` and asked
+for the latter to be documented. They cannot both be right, so it went to
+source: `exports.rs`'s `a_mask_whose_parent_closed_reports_parent_closed` ends
+`assert_eq!(lgj_close(m), LGJ_OK)`. Codex had the fact; CodeRabbit had the
+inconsistency; **neither was arguing about a leak, and the leak was what the
+disagreement was standing on.** Following the more confident reviewer, or
+splitting the difference, would have documented the bug as correct behaviour.
+
+**Falsified via the complement, because the leak itself is invisible.** Nothing
+observable distinguishes a leaked slot from a live one — so
+`MaskNativeOpsTest.orphanCloseActuallyReleases` asserts that a **second** close
+on the same handle is REJECTED, which can only happen if the first one really
+ran. Red-then-green confirmed: red under the old skip (`condition was false`),
+green after. Suite 337 → **338**.
+
+**Fixed** by closing unconditionally, with the registry facts in the comment
+rather than a bare "always close" instruction — the old comment was wrong
+because it reasoned from a plausible assumption about cascade, so the
+replacement records what the registry actually does.
+
 ## ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW (2026-08-28) — OPEN
 
 **Opened late, and the lateness is the first thing worth recording.** v3 W4
@@ -41,10 +74,25 @@ need a documented protocol, which this ABI version does not define"*
 window is **tracked** rather than absorbed into a scoped resolution that does
 not cover it.
 
-**Closure terms.** Closes when the sole-closer contract is written into
-`docs/abi.md` and the facade javadoc, *or* when the ABI defines a concurrent
-access protocol that makes the contract enforceable. Not gated on any
-measurement — nothing here is a cost question.
+**Closure terms — HALF DISCHARGED 2026-08-28, and the half matters.** The
+written-contract half is done: `docs/abi.md` "Concurrency" carries *The
+sole-closer contract (normative for callers; NOT enforced)* with all three
+unenforceability facts, and `Engine.close` / `RowStore.close` / `Mask.close`
+each state it where a caller actually reads. Arm (ii)'s deliverable is
+discharged.
+
+**The issue stays OPEN**, because writing a contract down is not enforcing it —
+which is precisely what arm (ii) was scoped to deliver and what W4 declined to
+call a fix. It closes only when the ABI defines a concurrent access protocol
+that makes the contract enforceable. Not gated on any measurement; nothing here
+is a cost question.
+
+**Corrected while writing it:** `abi.md`'s own resource table claimed *"every
+operation on [a child of a closed parent] returns `PARENT_CLOSED`"* — false for
+the cached-descriptor path, which resolves no handle and therefore returns no
+status at all. The row now says **handle-mediated** operation and points at the
+contract. The doc had been overclaiming exactly the guarantee this issue exists
+to deny.
 
 ## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — EXPLORATORY, decides nothing
 
@@ -205,6 +253,30 @@ path while **leaving a second, independent verdict standing beside it**:
 | row 20 | overlap as a verdict | overlap as a *label* |
 | row 22 | the label | the standalone `delta_ns ≤ 0` auto-pass |
 | row 23 | the auto-pass | — (one verdict function now) |
+| #55 (8th) | — | the entry declared its own run void, then acted on it one paragraph later |
+| #57 (9th) | `abi.md`'s "**every** operation returns `PARENT_CLOSED`" | "every **handle-mediated** operation returns `PARENT_CLOSED`" — still false |
+
+**The ninth is the purest instance the ledger has, and it is mine from one PR
+later.** Fixing the eighth taught nothing about the ninth, because they are not
+the same claim — they are the same *sentence*, narrowed once and still wrong.
+`abi.md` promised `PARENT_CLOSED` from *every* operation on an orphaned child;
+#57 narrowed that to every **handle-mediated** operation and shipped it as the
+correction. Codex (P2, #57) showed the narrowed version false in two ways the
+repo's own tests already assert: `lgj_resource_info` resolves the child's own
+still-live slot and returns `OK`, and `lgj_close(orphan)` returns `OK` —
+pinned at `exports.rs`'s `a_mask_whose_parent_closed_reports_parent_closed`,
+whose last line is `assert_eq!(lgj_close(m), LGJ_OK)`.
+
+The true predicate is narrower than either: only operations that resolve the
+child **with its parent** (`resolve_mask_with_parent`). Both sites now say that
+and name the two exclusions.
+
+**What generalizes:** rows 5-7 recorded fixes that *introduced* the next defect.
+This is that shape at its tightest — the repair and the residue in one sentence,
+so no diff could show them apart. A quantifier narrowed once ("every" → "every
+handle-mediated") reads like diligence and is only a *smaller* overclaim; the
+check that catches it is enumerating the actual call sites, not re-reading the
+sentence.
 
 Each version read correctly *in isolation*, which is why three review
 rounds did not catch it: a diff review sees the rule that changed, not
