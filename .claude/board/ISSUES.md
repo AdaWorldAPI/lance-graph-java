@@ -1,5 +1,28 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-CI-OVERLAP-AUTOPASS — post-merge finding on #49, FIXED in the follow-up
+
+**What:** `epoch-recheck-v3.md` §5's first statement of the measurement
+rule auto-passed **any** run whose two arms' 99.9% CIs overlap, on the
+reasoning that an unresolvable cost cannot exceed a positive budget.
+
+**Why it is wrong:** arm-CI overlap and "the delta is under N" are
+different propositions. Scores 100 ns and 118 ns with 9% half-widths give
+`[91, 109]` and `[107.4, 128.6]` — overlapping — while `delta_ns = 18`.
+Under an `N = 10 ns` amendment the rule ships a probe costing ~2× budget.
+
+**Fix:** both gates are evaluated independently of overlap; overlap is a
+LABEL on the verdict, never a verdict. A failure so labelled stays a
+failure — the remedy is a better-powered run, never a re-interpretation.
+
+**Provenance worth keeping:** CodeRabbit posted this ~2 minutes AFTER #49
+merged, so no gate on #49 could have caught it and the merge itself could
+not have waited for it. A subscription is not finished at merge — the
+last review can land after. Companion finding in the same batch: the arc
+headline stated one delivery path where the plan has two (Mask
+unconditional, RowStore benchmark-gated).
+
+
 ## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — OPEN (council ruled; implementation queued)
 
 > **⊕ COUNCIL RULING (2026-08-28, `epoch-recheck-v3.md`).** The 5+3 council

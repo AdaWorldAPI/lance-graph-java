@@ -79,6 +79,12 @@
   "epoch checking". Derived independently three times from source, and
   pinned by a committed test as a W1.1 deliverable (source reading
   establishes today's path; only a test keeps a refactor honest).
+  **Two delivery paths, never one:** the `Mask` half ships
+  UNCONDITIONALLY (one downcall per whole scan); the `RowStore` half
+  ships ONLY if the per-access benchmark passes §5's gate, and otherwise
+  does not ship at all. Reading this headline as "W1.1 ships the probe"
+  full stop would mark the `RowStore` half delivered before its gate
+  closes.
 - **Locked:** atomicity arm (ii) scoped contract on three verified
   reasons (arm (i)'s mandatory falsifier cannot report red — no threads
   in the test tree); six obligations W1-W6 with W1/W2 given mechanical
