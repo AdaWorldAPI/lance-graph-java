@@ -459,8 +459,16 @@ could then yield opposite RowStore ship decisions. Ruled:
 
      The straddle row is what the first rule got wrong in both directions
      at once; the `0` row is a label and **never** a pass, which is what
-     the second repair got wrong. `delta_ns ≤ 0` is not a verdict at all
-     — it is the ordinary case that also earns the label.
+     the second repair got wrong. `delta_ns ≤ 0` is not a verdict at all,
+     and — ⊘ correcting this sentence's own first version, which said it
+     "is the ordinary case that also earns the label" — **it does not
+     automatically earn the label either.** The label is about
+     RESOLVABILITY, not about sign: it attaches when the INTERVAL contains
+     `0`, per the table's own row. At `delta_ns = −20, hw_delta = 5` the
+     interval is `[−25, −15]`, which passes and contains no `0` — a real,
+     resolvable speedup, and calling that "below the harness's resolution"
+     would be exactly backwards. Sign decides nothing here; the interval
+     decides everything.
 
      **`N > 0` is still required, for a different reason than before.**
      Its old justification (making the non-positive auto-pass consistent)
@@ -595,7 +603,8 @@ unverified*. No third option.
   harness's resolution* rather than as free" — **struck**, the fifth
   instance: it sat one clause before "the WHOLE verdict function" and
   contradicted it in the same sentence; a non-positive delta is not a
-  verdict, it is the ordinary case that also earns the label),
+  verdict — and does not automatically earn the label either, which
+  attaches on the INTERVAL containing `0`, never on the sign),
   **the delta interval is the WHOLE verdict
   function** — PASS / FAIL / UNDERPOWERED, with "contains 0" a label and
   never a pass, the ratio a non-blocking flag, and run acceptance an
@@ -637,6 +646,7 @@ unverified*. No third option.
 | 17 | Major, closure-term hole | `ISS-LGJ-EPOCH-UNCHECKED` could have closed RESOLVED on the Mask half alone while `RowStore`'s cached path stayed boolean-guarded. Closure is now per-half and conditional. |
 | 18 | Minor ×2 | The `u32` generation-wrap qualification restored to both board summaries; the Mask "ships regardless" statement reconciled with Q2. |
 | 19 | Major, form without arithmetic | §5 pre-registered the acceptance *form* but not the statistics, so identical data could still yield opposite decisions. Now defined: arms, score-to-ns/call conversion, signed delta and ratio directions, per-arm CI acceptance, and the non-positive case (passes, recorded as *below the harness's resolution*, never as "free"). |
+| 26 | Low, on #54 — CodeRabbit | **Seventh instance, written while fixing the sixth.** Row 25's own prose said `delta_ns ≤ 0` "is the ordinary case that ALSO EARNS THE LABEL" — false for a delta whose interval lies entirely below zero. At `delta_ns = −20, hw_delta = 5` the interval `[−25, −15]` passes and contains no `0`, so the table attaches no label; the prose attached one anyway. The label is about **resolvability, not sign**, and calling a measurably-faster probe "below the harness's resolution" inverts its meaning. Corrected at both sites. |
 | 25 | P1, on #54 — Codex | **Fifth instance, and the first inside a single sentence.** Row 24 struck the three §5 statements but left the Q3 SUMMARY's "a non-positive delta passes" standing — one clause before "the delta interval is the WHOLE verdict function", contradicting it in the same breath (`delta_ns = −1, hw_delta = 50, N = 10`: PASS from the clause, UNDERPOWERED from the table). Struck. Also on #54: the `ISS-LGJ-EPOCH-UNCHECKED` entry claimed `Engine.epoch`'s javadoc "is no longer false for masks" — **false**, since the fix routes through `Engine.describeMask` and leaves `Engine.epoch` with zero callers. Both corrected; the javadoc itself is now true rather than merely re-described. |
 | 24 | Major/P1, on #53 — CodeRabbit and Codex, independently | **Row 23's own fix committed row 23's own defect.** It declared the delta table "the whole verdict function" while leaving three earlier verdict statements standing — "Ship if `delta_ns < N`", "Ship if `ratio < 2.0`", and Q3's "both must pass" — none marked struck. Codex's counterexample: at `delta_ns = 9, hw_delta = 2, N = 10` the earlier rule ships while the table returns UNDERPOWERED. So the fourth instance of the pattern row 23 *named*, produced by the commit that named it. All three are now struck in place (⊘, not deleted): the delta and ratio bullets define QUANTITIES, the table alone returns a verdict. |
 | 23 | Adversarial read of §5 against its own premises (this pass, no reviewer) | Six defects, all internal-consistency, none of which a diff review would surface because each rule reads correctly *alone*: (1) the standalone `delta_ns ≤ 0` auto-pass **contradicted** the delta table it was shipped beside — at `delta=−1, hw=50, N=10` one says PASS, the other UNDERPOWERED; (2) per-arm-only run acceptance makes PASS **unreachable for any `N ≤ 14 ns`** at the ceiling it permits, even for a free probe — a gate that cannot return its own PASS; (3) the ratio was still compared on bare point estimates, the very error just fixed for the delta, and could veto a passing delta under "both must pass"; (4) "paired per-iteration samples" is **incoherent with §5.5's build-time variant swap** — separate builds have no pairing; (5) offering two estimators to be chosen at analysis time reopened exactly the freedom Q3 closed; (6) the retained "median of 5" contradicts the defined `avgt`-with-CI score every rule depends on. Fixed: one verdict function, ex-ante power precondition, ratio demoted to a flag, estimator fixed in the amendment, median clause regraded. **The pattern across rows 20/22/23: each repair fixed one verdict path and left a second standing beside it.** |
