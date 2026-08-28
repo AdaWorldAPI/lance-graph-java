@@ -327,9 +327,11 @@ public final class DoctrineFenceTest {
         c.section("fence 2b: no public facade method is topology-named (reflective, §E)");
 
         List<Class<?>> types = publicFacadeTypes(c);
-        // Anti-vacuity: the compiled facade must actually be on the classpath.
+        // Anti-vacuity: the compiled facade must actually be on the classpath, at its real
+        // size — 29 public types measured 2026-08-28; the bound leaves headroom for pruning
+        // but a near-empty scan (a broken classpath) must fail, not pass vacuously.
         c.that("the reflective arm sees the compiled facade (" + types.size()
-                + " public types >= 5)", types.size() >= 5);
+                + " public types >= 20)", types.size() >= 20);
 
         List<String> leaks = new ArrayList<>();
         for (Class<?> t : types) {
@@ -538,33 +540,70 @@ public final class DoctrineFenceTest {
     /**
      * The ONE comment filter every fence reads through (CodeRabbit, PR #48: three fences with
      * three notions of "code" means prose can fail the build under one fence and pass under
-     * another). Returns lines index-aligned with the file — a comment line becomes {@code ""} so
-     * reported line numbers stay real. Line comments ({@code //}), javadoc continuation
-     * ({@code *}), block openers ({@code /*}), and the interior of a multi-line block comment
-     * are all skipped; the same prefixes cover the Rust files fence 2 scans ({@code //},
-     * {@code ///}, {@code /* ... *}{@code /}).
+     * another). Returns lines index-aligned with the file — a fully-commented line becomes
+     * {@code ""} so reported line numbers stay real.
+     *
+     * <p>Comment SPANS are removed rather than lines skipped (the second CodeRabbit round: a
+     * prefix-only skip blanked the whole of {@code /* c *}{@code /} {@code new long[4];}, so
+     * code sharing a line with a block comment escaped every fence). String and char literals
+     * are honored while scanning, so a {@code "//"} or {@code "/*"} INSIDE a literal (a URL, a
+     * glob) neither starts a comment nor truncates the code after it. The same lexing covers
+     * the Rust files fence 2 scans ({@code //}, {@code ///}, block comments); Rust's nested
+     * block comments and raw strings are not modeled — neither occurs in the two scanned files,
+     * and a false positive from either fails LOUD, never silent.
      */
     private static List<String> codeLines(Path f) {
         List<String> raw = readLines(f);
         List<String> out = new ArrayList<>(raw.size());
         boolean inBlock = false;
         for (String line : raw) {
-            String code = line.strip();
-            if (inBlock) {
-                inBlock = !code.contains("*/");
-                out.add("");
-                continue;
+            StringBuilder kept = new StringBuilder(line.length());
+            int i = 0;
+            while (i < line.length()) {
+                if (inBlock) {
+                    int end = line.indexOf("*/", i);
+                    if (end < 0) {
+                        i = line.length();
+                    } else {
+                        inBlock = false;
+                        i = end + 2;
+                    }
+                    continue;
+                }
+                char ch = line.charAt(i);
+                if (ch == '"' || ch == '\'') {
+                    int j = i + 1;
+                    while (j < line.length()) {
+                        char cj = line.charAt(j);
+                        if (cj == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (cj == ch) {
+                            break;
+                        }
+                        j++;
+                    }
+                    int stop = Math.min(j + 1, line.length());
+                    kept.append(line, i, stop);
+                    i = stop;
+                    continue;
+                }
+                if (ch == '/' && i + 1 < line.length()) {
+                    char next = line.charAt(i + 1);
+                    if (next == '/') {
+                        break; // line comment: drop the rest of the line
+                    }
+                    if (next == '*') {
+                        inBlock = true;
+                        i += 2;
+                        continue;
+                    }
+                }
+                kept.append(ch);
+                i++;
             }
-            if (code.startsWith("//") || code.startsWith("*")) {
-                out.add("");
-                continue;
-            }
-            if (code.startsWith("/*")) {
-                inBlock = !code.contains("*/");
-                out.add("");
-                continue;
-            }
-            out.add(code);
+            out.add(kept.toString().strip());
         }
         return out;
     }

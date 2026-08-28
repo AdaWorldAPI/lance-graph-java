@@ -44,8 +44,12 @@
   census count unchanged, caught by the widened marker half alone.
   Stay-silent twin: a planted comment line carrying `Arrays.copyOf` +
   `new long[64]` + `workers(8)` moves nothing (prose is filtered by the
-  shared `codeLines`). Anti-vacuity guards pin the corpus as real
-  (≥20 files scanned, ≥29 compiled public types, ≥5 backend-token code
+  shared `codeLines`). A second round closed the shared-line hole
+  (`/* c */ new long[4];` was blanked whole-line by the prefix skip —
+  the filter now removes comment SPANS, honoring string/char literals
+  so a `//` inside a URL neither starts a comment nor truncates code).
+  Anti-vacuity guards pin the corpus as real (≥20 files scanned, ≥20
+  compiled public types against the measured 29, ≥5 backend-token code
   lines) so an empty-scan pass cannot masquerade as clean.
 - **Deliberately source-text where the property lives only in source**
   (call sites, branches), reflective where it lives in the compiled
