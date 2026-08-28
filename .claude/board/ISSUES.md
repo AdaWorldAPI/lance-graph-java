@@ -1,5 +1,35 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT — the RowStore gate cannot be run as specified
+
+Found while starting the benchmark v3 names as the `RowStore` half's gate.
+Two ordering problems, both in the plan rather than in the code:
+
+**1. The gate requires the thing it gates to exist.** v3 says the
+`RowStore` half is *"per-access or not at all, gated on a benchmark that
+does not yet exist"*. But the benchmark's `after` arm **is** the per-access
+probe — there is nothing to measure until it is written. So the honest
+sequence is *implement, measure, then keep or discard*, and the plan reads
+as though the measurement precedes the implementation. Whether to write an
+implementation that may be discarded is an operator call, not a silent one.
+
+**2. §5.5's build-time variant swap forces TWO BUILDS.** §5.5 rules out an
+`if (guardEnabled)` branch inside the accessor — correctly, since it is
+hoistable and is not the shape either arm ships. The consequence was never
+stated: with one Java source tree there is no way to have both arms on one
+classpath, so `before` and `after` are **separate builds of `java/`,
+benchmarked in separate JMH runs**, and the comparison is across runs
+rather than across `@Param` values. Every existing sweep in `bench/`
+(A–G) compares arms *within* one run; this one structurally cannot.
+
+Consequences for whoever writes it: the two runs must pin the same JDK,
+the same `liblgj_abi.so`, and the same machine state, and the amendment
+naming `N` must precede **both**. The pre-registration rule (§5.2) is
+unchanged but now has two commits to order against, not one.
+
+**Not blocking the `Mask` half**, which shipped in #53 without needing any
+of this — it was never cost-gated.
+
 ## ISS-LGJ-EPOCH-UNCHECKED — RESOLVED for the `Mask` half (W1.1)
 
 `Mask.words()` now re-authorises its cached word lane with the substrate

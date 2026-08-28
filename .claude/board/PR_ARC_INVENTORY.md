@@ -8,6 +8,47 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #53 — W1.1: the §5 adversarial read, and the Mask half wired to the substrate (merged 2026-08-28, `3b4bc03` — 5 commits, head `8e2654d`)
+
+- **Added:** the `Mask` half of W1.1 — `Mask.words()` re-authorises its
+  cached word lane with the substrate on every use of that cache (one
+  `lgj_mask_describe` per whole scan, never per word), with a two-sided
+  disable-verified falsifier. Plus the §5 read against its own premises.
+- **Building it corrected the plan.** v3 §6 named `lgj_resource_info` as
+  the probe because it "already reads live". It does — but it resolves the
+  mask's OWN slot, and **that slot outlives its parent**. Measured: closing
+  the parent natively left the probe silent, `count()` correctly reported
+  `PARENT_CLOSED`, and `materializeRows()` **read freed bytes without
+  crashing**. Two keepers: *an absent segfault is not evidence of safety*
+  (Codex's #49 P1 hazard, reproduced deliberately), and *handle liveness is
+  not lane liveness*. `lgj_mask_describe` resolves WITH the parent, so the
+  fix needed **no new ABI symbol** — v3's ruling survives with its reason
+  corrected, not its conclusion.
+- **§5, six defects** — two verified numerically: a standalone
+  `delta_ns ≤ 0` auto-pass that **contradicted** the delta table beside it,
+  and per-arm-only run acceptance that made PASS **unreachable for any
+  `N ≤ 14 ns`** even for a free probe. Now one verdict function and an
+  ex-ante `hw_delta < N/2` power precondition.
+- **Then committed the defect it had just named** (row 24, found by
+  CodeRabbit and Codex independently): declared the table the whole verdict
+  function while leaving three `Ship if` / `both must pass` statements
+  standing. Struck in place. **Naming a failure mode does not confer
+  immunity to it** — the sharpest evidence the ledger has for its own
+  thesis.
+- **Two reviewer nitpicks, one of whose remedies would not have worked:**
+  narrowing the `count()` assertion to "the concrete ABI exception type"
+  cannot discriminate, because BOTH paths raise `ClosedResourceException`.
+  The message discriminates, and now does. The other was right in substance
+  (a cached scan is no longer free) and wrong in arithmetic (it is one
+  describe per cached scan, not two); both foreclosed by naming the number.
+- **Gates:** release `.so` rebuilt first; central runs at 335 then 337
+  checks, ALL PASSED; disable-run red-then-green at every stage. No new ABI
+  symbol, no public-signature change. Cursor Bugbot did not run — usage
+  limit, fifth consecutive PR.
+- **Confidence:** high on the `Mask` half (implemented, falsified, measured);
+  the §5 rule is now internally consistent as far as three passes and two
+  reviewers can establish, and its numeric `N` remains UNMEASURED.
+
 ## PR #51 — plan: CI overlap labels a verdict, it never produces one (merged 2026-08-28, `6530e2f` — 3 commits, head `7acb7fd`)
 
 - **Why it exists:** two findings landed on #49 **~2 minutes AFTER it
