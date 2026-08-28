@@ -11,10 +11,10 @@ measurement), consolidated, then three reviewers (overclaim, falsifier,
 dilution/collapse) on the draft only.
 
 **The headline reframes the deliverable.** An epoch MISMATCH is
-unreachable through `lgj_resource_info` — `close` bumps the slot
-generation, `insert` hands the advanced generation out, and the export
-opens with `resolve` — so a stale handle throws rather than returning a
-mismatched epoch. What ships is a **native generation-checked liveness
+unreachable through `lgj_resource_info` **short of a `u32` generation
+wrap on one slot** — `close` bumps the slot generation, `insert` hands the
+advanced generation out, and the export opens with `resolve` — so a stale
+handle throws rather than returning a mismatched epoch. What ships is a **native generation-checked liveness
 probe replacing a Java boolean**, not "epoch checking". Verified
 independently three times.
 

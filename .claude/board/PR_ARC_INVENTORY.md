@@ -51,10 +51,13 @@
   savants, consolidation, three reviewers on the draft only, ratified v3
   with an audit ledger (§8).
 - **Headline:** an epoch MISMATCH is unreachable through
-  `lgj_resource_info` (close bumps the slot generation, insert hands the
-  advanced generation out, the export opens with `resolve`), so what W1.1
-  ships is a **native generation-checked liveness probe replacing a Java
-  boolean** — not "epoch checking". Verified independently three times.
+  `lgj_resource_info` **short of a `u32` generation wrap on one slot**
+  (close bumps the slot generation, insert hands the advanced generation
+  out, the export opens with `resolve`), so what W1.1 ships is a **native
+  generation-checked liveness probe replacing a Java boolean** — not
+  "epoch checking". Derived independently three times from source, and
+  pinned by a committed test as a W1.1 deliverable (source reading
+  establishes today's path; only a test keeps a refactor honest).
 - **Locked:** atomicity arm (ii) scoped contract on three verified
   reasons (arm (i)'s mandatory falsifier cannot report red — no threads
   in the test tree); six obligations W1-W6 with W1/W2 given mechanical

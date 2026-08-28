@@ -17,12 +17,17 @@
 > was NOT selected despite the unreachability finding: (b) requires the
 > HAZARD unreachable, and it is not.
 >
-> **Closure terms, pre-registered:** this issue closes as **RESOLVED**
-> (the spec's status for outcome (a)) when the probe ships, and a **NEW**
-> issue is opened in the same commit for the cross-thread
-> lifecycle-vs-access window that arm (ii) documents rather than fixes.
-> Two entries, never one — a scoped resolution must not absorb an
-> unfixed window.
+> **Closure terms, pre-registered and PER-HALF** (tightened 2026-08-28
+> after external review on PR #49 — the first wording would have let this
+> close on the `Mask` half alone while `RowStore`'s cached path stayed
+> boolean-guarded, i.e. with the issue's own condition still true):
+> **RESOLVED only when BOTH halves ship.** If measurement rejects the
+> per-access `RowStore` probe, this issue stays **OPEN**, re-scoped in
+> writing to `RowStore`, and the doctrine's cached-descriptor exclusion
+> stays live for that path. A **NEW** issue is opened in the same commit
+> for the cross-thread lifecycle-vs-access window arm (ii) documents
+> rather than fixes. Two entries, never one — a scoped resolution must
+> not absorb an unfixed window.
 
 **Found.** By the 5+3 council's `handle-lifecycle-auditor` pass on PR #45
 (the zero-copy/memory-safety doctrine review). `LgjLaneDesc`/`LgjMaskDesc`

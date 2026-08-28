@@ -61,6 +61,19 @@ not fixable in place.
 boolean cannot see: close the NATIVE resource while a live Java wrapper
 still holds `closed == false`, then read an already-resolved lane.
 
+- **Populate the lane cache FIRST, or the test is vacuous** (CodeRabbit
+  Major, PR #49 — verified in source). `RowStore.lane()` resolves lazily:
+  if `lanes[laneId] == null` it calls `Engine.describeLane(handle, …)`
+  (`RowStore.java:361-368`), a **fresh downcall** that fails at `resolve`
+  after a native close and throws on its own. A test that closed without
+  first populating the cache would therefore see "it threw" **with the
+  probe disabled** — passing for the wrong reason, the exact vacuity class
+  this falsifier replaced. Order is mandatory: call `classidAt` once while
+  the wrapper is open (which populates `lanes[]`), THEN invalidate, THEN
+  call the accessor again. Note `Engine.describeLane(store.handle(), 0)` —
+  the call `RowStoreParityTest.java:186` makes and which v3 cited as the
+  route — does **not** populate `RowStore.lanes[]`; only an accessor does.
+
 - **Route (v2 was wrong here).** No `bench` bridge. `java/src/test/.../lancegraph/`
   is the **same package**, so `handle()` is directly visible, and
   `RowStoreParityTest.java:186,251` already calls `store.handle()` +
@@ -252,10 +265,17 @@ raw-segment read.
   asserting a behaviour that does not exist, in the exact file three
   savants cited without noticing. Correcting it is part of W3 whether or
   not the probe ships.
-- **W4 — Pre-registered status, two entries.** `ISS-LGJ-EPOCH-UNCHECKED`
-  closes as **RESOLVED** — the status the spec pre-registered for
-  outcome (a) — and a **NEW** issue records the cross-thread
-  lifecycle-vs-access window that (ii) documents rather than fixes.
+- **W4 — Pre-registered status, two entries, and closure is PER-HALF**
+  (CodeRabbit Major, PR #49). `ISS-LGJ-EPOCH-UNCHECKED` closes as
+  **RESOLVED** — the status the spec pre-registered for outcome (a) —
+  **only when BOTH halves ship**. If measurement rejects the `RowStore`
+  half (§7 Q1), the issue does **not** close on the `Mask` half alone: the
+  `RowStore` cached-descriptor path would still be boolean-guarded, which
+  is the condition the issue names. In that case the issue stays OPEN,
+  scoped in writing to `RowStore`, and W2's doctrine note keeps the
+  cached-descriptor exclusion live for that path specifically. And a
+  **NEW** issue records the cross-thread lifecycle-vs-access window that
+  (ii) documents rather than fixes.
   (v2 invented a `RESOLVED-SCOPED` status defined nowhere; a status minted
   at consolidation time is how a downgrade gets relabelled. The scoping
   lives in the second issue and in W2's wording, not in a new vocabulary.)
@@ -370,6 +390,15 @@ Ship **(a), renamed and re-scoped**, under arm **(ii)**:
   (`Engine.close(mask.handle())` with `mask.closed == false` and the parent
   open, so `requireUsable` at `:175-185` passes). This half carries a real
   gate at negligible cost.
+  **This closes Q2's safety half** (CodeRabbit, PR #49 — the two statements
+  were left floating): both of `requireUsable`'s conditions imply the
+  native handle is already dead — `Mask.close()` closes it when the parent
+  is open, and when the parent is gone "the selection was freed with it"
+  (`Mask.java:126-133`) — so a probe at `words()` fires in both cases and a
+  future second caller of `words()` inherits protection rather than
+  nothing. What the probe does NOT inherit is `requireUsable`'s clearer
+  PARENT_CLOSED narrative; adding the guard for message quality stays worth
+  doing, but it is a diagnostics improvement, not a safety gap.
 - **`RowStore`: per-access placement inside `lane()`, or this half does not
   ship.** See §7 — Q1 is closed.
 - Arm (ii)'s six obligations W1–W6, with W1/W2 mechanically fenced.
@@ -390,12 +419,22 @@ cached segment reads freed storage). The probe therefore defends a
 *different* hazard than the one §0 rules out, and (b)'s premise is not
 established. (b) remains available only if §5's measurement forces it.
 
-**One obligation inherited from the spec that §0 does not discharge:** the
-spec required unreachability be shown by "a falsifier-backed proof (a test
-that tries to construct the bad sequence and fails, **not prose**)". §0 is
-prose plus three independent source re-reads. Either §0's claim is pinned
-as a test that attempts the mismatch and fails, or it is labelled
-*claimed, unverified* wherever it is cited.
+**§0's proof status — resolved by pinning it, not by downgrading it**
+(CodeRabbit Major, PR #49: §0 read "verified three times" while this
+paragraph demanded a test or a *claimed, unverified* label, and the board
+files asserted high confidence — a three-way conflict). The spec required
+unreachability be shown by "a falsifier-backed proof (a test that tries to
+construct the bad sequence and fails, **not prose**)". Three independent
+source derivations establish the code path as it stands today; they cannot
+establish that a future refactor keeps it that way, which is what a test
+is for. **Deliverable, and it is cheap:** a test that opens a store, takes
+its handle, closes it, and asserts `Engine.epoch(handle)` **throws**
+rather than returning any epoch. Deterministic and UB-free by construction
+— `lgj_resource_info` fails inside `resolve` before it ever touches
+`entry.info()` (`exports.rs:214-222`), so nothing reads freed memory.
+With that test committed, §0 is pinned behaviour and every citation of it
+stands as written; without it, every citation drops to *claimed,
+unverified*. No third option.
 
 ## 7. OPEN QUESTIONS
 
@@ -409,8 +448,10 @@ as a test that attempts the mismatch and fails, or it is labelled
   per accessor call) is falsifiable. Measurement (§5) cannot rescue the
   cheap arm; if per-access proves too costly, the RowStore half does not
   ship and the Mask half does.
-- **Q2.** Does `Mask.words()`'s missing guard get fixed in this wave or
-  filed separately? Masked today by one guarded caller.
+- **Q2 — safety half CLOSED** by the `words()` probe (see §6: every
+  `requireUsable` condition implies native closure, so the probe fires in
+  both). What remains open is only message quality — whether `words()` also
+  gains `requireUsable` for its clearer PARENT_CLOSED narrative.
 - **Q3 — CLOSED** by §5 (Codex P2): neither replaces the other. The ns
   delta is primary, the 2× ratio a secondary sanity check, both must pass,
   and the numeric cutoff is recorded by a dated amendment to this file
@@ -444,3 +485,7 @@ as a test that attempts the mismatch and fails, or it is labelled
 |---|---|---|
 | 13 | P1, third round on one defect | W5 again: asserting only on the throw stopped the council from *looking* at freed bytes but not from *reading* them, so the disable arm stayed platform-dependent. Construction changed to invalidate-without-free via a test-only ABI export (the one new symbol this wave admits, a full ABI citizen). The three-round pattern is recorded in §1 C1 as its own lesson. |
 | 14 | P2, pre-registration hole | Q3 closed (ns delta primary, ratio secondary, both must pass) and the numeric cutoff bound to an amendment commit that must PRECEDE the first run — otherwise metric and threshold could both be chosen after seeing data. |
+| 15 | Major, would have made W5 vacuous | The falsifier must populate `RowStore.lanes[]` via a real accessor call BEFORE invalidating: `lane()` resolves lazily, so an unpopulated cache makes the post-close `classidAt` throw from its own fresh `describeLane` — passing with the probe disabled. `Engine.describeLane(store.handle(), 0)`, the route v3 cited, does not populate the cache. |
+| 16 | Major, proof-status conflict | §0 was "verified three times" while §6 demanded a test-or-downgrade and the board asserted high confidence. Resolved by pinning §0 with a cheap UB-free test (`Engine.epoch` on a closed handle throws), not by downgrading. |
+| 17 | Major, closure-term hole | `ISS-LGJ-EPOCH-UNCHECKED` could have closed RESOLVED on the Mask half alone while `RowStore`'s cached path stayed boolean-guarded. Closure is now per-half and conditional. |
+| 18 | Minor ×2 | The `u32` generation-wrap qualification restored to both board summaries; the Mask "ships regardless" statement reconciled with Q2. |
