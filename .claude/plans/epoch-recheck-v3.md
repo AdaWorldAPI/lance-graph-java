@@ -397,16 +397,64 @@ could then yield opposite RowStore ship decisions. Ruled:
      be < 10% of **that arm's own score**. An arm failing this voids the
      run — it is not a result to be interpreted, and neither metric is
      computed from it.
-   - **Non-positive or noise-dominated measurements.** If `delta_ns ≤ 0`,
-     or the two arms' 99.9% CIs overlap, the probe's cost is **not
-     resolvable above this harness's noise floor**. That outcome PASSES
-     both metrics — it cannot exceed a positive budget — and is recorded
-     as *"cost below the harness's resolution"*, **never** as "the probe
-     is free". The distinction matters the next time someone cites the
-     number.
+   - **Non-positive measurements.** If `delta_ns ≤ 0` the probe measured
+     no slower than baseline, so it **cannot** exceed a positive budget:
+     that outcome PASSES, recorded as *"cost below the harness's
+     resolution"*, **never** as "the probe is free". The distinction
+     matters the next time someone cites the number. **This clause rests
+     on `N > 0`** — its "cannot exceed" is an argument about a *positive*
+     budget, so a zero or negative `N` would make it contradict the
+     `delta_ns < N` gate it is supposed to be consistent with (at
+     `N = 0`, `delta_ns = 0` fails the gate while this clause passes it).
+     The amendment below is therefore constrained to `N > 0`.
+   - **The noise label is computed on the DELTA, never from arm overlap.**
+     ⊘ Corrects this file twice over, and the second correction subsumes
+     the first.
+
+     *First error (found post-merge on #49):* the rule passed **any** run
+     whose two arms' 99.9% CIs overlap, reasoning that overlap means the
+     cost is unresolvable and so cannot exceed the budget. False, and the
+     counterexample is ordinary rather than contrived: scores 100 ns and
+     118 ns with 9% half-widths give `[91, 109]` and `[107.4, 128.6]` —
+     overlapping — while `delta_ns = 18`. Under an `N = 10 ns` amendment
+     that shipped a probe at nearly 2× budget.
+
+     *Second error (found on #51, and the deeper one):* the repair kept
+     arm-CI overlap as a *label*, which is still unsound. **Overlapping
+     CIs for two separate means are not a confidence interval for their
+     difference**, and they say nothing about how that difference compares
+     to `N`. Used as a label it attaches an unsupported "noise floor"
+     claim, and — worse in the other direction — it lets a point-estimate
+     failure be written up as definitively *"too costly"* on a run that
+     cannot actually distinguish whether the true delta exceeds the
+     budget.
+
+     **So the uncertainty is computed on `delta_ns` itself** and compared
+     against the only two quantities that matter, `0` and `N`. Take
+     `hw_delta` as the 99.9% half-width of the delta — from the paired
+     per-iteration samples where the harness exposes them, else the
+     conservative `hw_delta = sqrt(hw_before² + hw_after²)`. Then:
+
+     | delta CI vs `0` and `N` | verdict |
+     |---|---|
+     | `delta_ns + hw_delta < N` | **PASS** — the true cost is under budget |
+     | `delta_ns − hw_delta ≥ N` | **FAIL** — the true cost is over budget |
+     | interval straddles `N` | **UNDERPOWERED** — not a verdict; re-run with more iterations or forks |
+     | interval contains `0` | additionally labelled *"cost below the harness's resolution"* — never *"the probe is free"* |
+
+     The straddle row is the one the old rule got wrong in both
+     directions at once. It is **not** a pass and **not** a fail: it is
+     the honest statement that this harness cannot decide, and its only
+     remedy is a better-powered run. `ratio < 2.0` stays the secondary
+     check on the point estimates, and both gates remain independent of
+     any arm-vs-arm comparison, which no longer appears in the rule at
+     all.
+
 2. **The numeric ns cutoff is recorded by an amendment to THIS file whose
-   commit precedes the first benchmark run**, and the wave's results
-   commit must cite that amendment's sha. No number is invented here
+   commit precedes the first benchmark run, and it MUST be `N > 0`**
+   (strictly — see the non-positive clause above, whose soundness depends
+   on it; an amendment naming `N ≤ 0` is not a valid cutoff and the run
+   is void). The wave's results commit must cite that amendment's sha. No number is invented here
    because none has been measured; what is fixed here is that the number
    is fixed *first*, in the repository, where its ordering is checkable.
    A results commit whose cited amendment does not precede it is not a
@@ -492,8 +540,11 @@ unverified*. No third option.
   ns/accessor-call is primary, `ratio = score(after)/score(before)` under
   2.0 is the secondary check, both must pass, each arm's own 99.9% CI
   half-width must be under 10% of its own score or the run is void, a
-  non-positive or CI-overlapping delta passes and is recorded as *below
-  the harness's resolution* rather than as free, and the numeric cutoff is
+  non-positive delta passes and is recorded as *below the harness's
+  resolution* rather than as free, **the noise label is computed on the
+  delta itself, never from arm-vs-arm CI overlap** — a delta interval
+  straddling `N` is UNDERPOWERED, neither pass nor fail (see §5's ⊘
+  double correction) — and the numeric cutoff (`N > 0`) is
   recorded by a dated amendment to this file whose commit must precede the
   first benchmark run.
 - **Q4.** Is `NativePattern`'s locked-close asymmetry worth normalizing, or
@@ -529,4 +580,7 @@ unverified*. No third option.
 | 16 | Major, proof-status conflict | §0 was "verified three times" while §6 demanded a test-or-downgrade and the board asserted high confidence. Resolved by pinning §0 with a cheap UB-free test (`Engine.epoch` on a closed handle throws), not by downgrading. |
 | 17 | Major, closure-term hole | `ISS-LGJ-EPOCH-UNCHECKED` could have closed RESOLVED on the Mask half alone while `RowStore`'s cached path stayed boolean-guarded. Closure is now per-half and conditional. |
 | 18 | Minor ×2 | The `u32` generation-wrap qualification restored to both board summaries; the Mask "ships regardless" statement reconciled with Q2. |
-| 19 | Major, form without arithmetic | §5 pre-registered the acceptance *form* but not the statistics, so identical data could still yield opposite decisions. Now defined: arms, score-to-ns/call conversion, signed delta and ratio directions, per-arm CI acceptance, and the non-positive/CI-overlap case (passes, recorded as *below the harness's resolution*, never as "free"). |
+| 19 | Major, form without arithmetic | §5 pre-registered the acceptance *form* but not the statistics, so identical data could still yield opposite decisions. Now defined: arms, score-to-ns/call conversion, signed delta and ratio directions, per-arm CI acceptance, and the non-positive case (passes, recorded as *below the harness's resolution*, never as "free"). |
+| 22 | P2, on #51 — subsumes row 20 | Row 20 kept arm-CI overlap as a *label* after removing it as a verdict. Still unsound: overlapping CIs for two means are not a CI for their difference, so the label asserts a noise-floor claim the data does not support AND lets a point-estimate failure read as definitively "too costly" on a run that cannot tell. §5 now computes `hw_delta` on the delta itself and compares the interval to `0` and `N`, with a straddling interval classified **UNDERPOWERED** — neither pass nor fail. Arm-vs-arm comparison no longer appears in the rule. |
+| 21 | Low, on #51 | The row-20 fix left the non-positive-delta auto-pass resting on an unstated premise: it argues a measurement "cannot exceed a *positive* budget", but nothing constrained the amendment's `N` to be positive. At `N = 0`, `delta_ns = 0` fails the `delta_ns < N` gate while the auto-pass clause passes it — the rule contradicting itself. §5 now states the dependency and constrains the amendment to `N > 0`. |
+| 20 | Major, post-merge on #49 | The row-19 statistics shipped a rule that auto-passed **any** CI-overlapping run, reasoning that an unresolvable cost cannot exceed the budget. False: 100 ns vs 118 ns with 9% half-widths overlap while `delta_ns = 18`, so an `N = 10 ns` budget ships a probe costing ~2× it. Arm-CI overlap and "delta under N" are different propositions. §5 now evaluates both gates independently of overlap and demotes overlap to a label. Found after #49 merged — see §8b. |
