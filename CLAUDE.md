@@ -128,15 +128,37 @@ Non-negotiables, each with its enforcement site (audited clean
 2026-08-27 — this is confirmation of existing structure, not a new
 build):
 
-- **Pointer value is not provenance.** Every native address is bound to
-  owner identity + generation + length + kind via the generation-checked
-  handle registry (`registry.rs::{encode_handle, resolve, resolve_kind}`);
-  a stale generation fails closed before dereference. Falsifiers:
-  `fabricated_handles_are_rejected_not_dereferenced`,
-  `a_reused_slot_invalidates_the_old_handle`.
-- **Bounds/overflow are checked, never wrapped.** `rowstore.rs`/
-  `kernels.rs` use `checked_mul`/`checked_add` throughout; overflow
-  fails closed, never truncates.
+- **Pointer value is not provenance, on the handle-mediated path.** Every
+  ABI *handle* (`Mask`/`RowStore`/`NativePattern` opaque `long`s) is bound
+  to owner identity + generation + kind via the generation-checked handle
+  registry (`registry.rs::{encode_handle, resolve, resolve_kind}`); a
+  stale generation fails closed before dereference, on every resolve call.
+  Falsifiers: `fabricated_handles_are_rejected_not_dereferenced`,
+  `a_reused_slot_invalidates_the_old_handle` (the latter is conditionally
+  vacuous under some registry-slot orderings — cite alongside
+  `use_after_close_is_a_status_not_a_crash`, the falsifier that holds
+  unconditionally). Generation is `u32` and wraps after 2³² closes of one
+  slot (documented in-source at the wrap site; not reachable in practice).
+  **Scope note, not covered by the registry check:** `lgj_lane_describe`/
+  `lgj_mask_describe` hand Java a raw `addr` once, which Java then caches
+  (`RowStore.java`'s `lanes[]`, `Mask.java`'s `words`) and reads directly
+  on every subsequent access with NO further registry call — that repeat
+  path is guarded only by a Java-side `closed` boolean, a strictly weaker,
+  non-generation-checked mechanism. `LgjLaneDesc` carries an `epoch` field
+  designed for exactly this re-check and it is currently unconsulted
+  anywhere in `src/main` (tracked: `.claude/board/ISSUES.md`
+  `ISS-LGJ-EPOCH-UNCHECKED`). Do not read "fails closed before dereference"
+  as covering the cached-descriptor path until that epoch check is wired.
+- **Bounds/overflow are checked, never wrapped, at the point n_rows is
+  first derived.** `rowstore.rs` uses `checked_mul` at its two allocation
+  sites (`generate_in`/`generate_with_edges_in`); overflow there fails
+  closed, never truncates. `kernels.rs` does not re-derive `n_rows` — it
+  operates on an already-allocated, already-length-checked slice and
+  bounds itself against that slice's real `.len()` via `assert_eq!`
+  (e.g. `kernels.rs:199`), not a second checked multiplication; that is a
+  sound bound, not an unchecked one, but it is a different mechanism than
+  the allocation-time check and should not be described as the same
+  `checked_mul`/`checked_add` machinery "throughout" both files.
 - **Alignment and endianness are contract fields, never inferred.**
   `LgjAbiManifest.align_of_*` are filled from `core::mem::align_of` on
   the real types (never a literal); `endianness` is verified explicit
@@ -145,23 +167,43 @@ build):
   (exact) → minor (>=) → struct sizes/alignment → endianness, in that
   order, before any dependent layout is resolved — never a speculative
   read past the guaranteed prefix. `requireMinor(N)` gates every
-  minor-N-or-later operation; an older library fails cleanly at the
-  call, not at load.
+  minor-5-or-later operation cleanly (an older library fails at the call,
+  via the lazy nested-holder pattern). **Minors 2-4 (row store, edges,
+  hop) are a tracked exception, not yet covered**: their `Downcalls`
+  holders resolve `MethodHandle`s eagerly at class-init, so an ABI-0.1
+  library fails at `Downcalls.<clinit>` before any `requireMinor` guard
+  can report a clean error (`Downcalls.java`'s own comment documents
+  this). Do not claim "fails cleanly at the call, not at load" as a
+  blanket property until minors 2-4 adopt the same lazy-holder shape.
 - **FFM is quarantined.** `java.lang.foreign.*`/`java.lang.invoke.*`
-  never appear in a public signature (`ApiSurfaceTest`); internal use in
-  `RowStore.java`/`FacetMatchView.java` is private-field-only, verified
-  by reflection, not by convention.
-- **Mutation crosses as verbs, not writable memory.** No public API
-  exposes a writable canonical segment; mutation happens through named
-  ABI operations (`mask_and`/`apply_projection`/etc.), never
-  `segment.set(...)`.
-- **Materialization is named and bounded.** The only production
-  `long[]`/`copyOf`/`toArray` call sites are `Mask.materializeRows()`
-  (the one named terminal), the manifest-name read during handshake, and
-  `rowLayoutProbe`'s ≤32-byte diagnostic — none is a hidden
-  proportional-to-n_rows population copy. Temporary kernel scratch
-  (SIMD scratch masks, decode buffers) is allowed and is NOT the same
-  claim as a second canonical copy.
+  never appear in a public signature (`ApiSurfaceTest`, verified by real
+  reflection over compiled classes — `Class.getMethods/getFields` plus a
+  `com.adaworldapi.lancegraph.internal.` package-prefix check — not a
+  source-text grep); internal use in `RowStore.java`/`FacetMatchView.java`
+  is private-field-only, and no other file in the public package touches
+  an FFM type.
+- **Mutation crosses as verbs, not writable memory — except through the
+  named Import exception.** No public API exposes a writable canonical
+  segment for general use; mutation happens through named ABI operations
+  (`mask_and`/`apply_projection`/etc.), never ad hoc `segment.set(...)`.
+  The one sanctioned exception is the **Import** path already named above
+  (`RowStore.importRows`, `Graph.from(long...)`): it does call
+  `Engine.setU64` → `segment.set(...)` on a mask lane the ABI marks
+  `LGJ_FLAG_WRITABLE` by design, and it does run a per-row Java loop over
+  the imported ids — both are the Import exception's documented cost, not
+  a second, unnamed violation of this bullet.
+- **Materialization is named and bounded.** Production `long[]`/`copyOf`/
+  `toArray` call sites, exhaustively: `Mask.materializeRows()` (the one
+  named terminal, O(n)); the manifest-name read during handshake;
+  `rowLayoutProbe`'s ≤32-byte-per-call diagnostic (bounded by facet count,
+  not row count — verified fixed-size on both the Rust and Java sides);
+  `Abi.java`'s `readCarvings` (bounded by `CARVING_SLOTS`, a manifest
+  constant, not n_rows); `Engine.facetSumResolved`'s fixed `long[2]`
+  result pair. None of the five is a hidden proportional-to-n_rows
+  population copy — keep this list exhaustive when a sixth site is added,
+  rather than letting the enumeration silently go stale again.
+  Temporary kernel scratch (SIMD scratch masks, decode buffers) is
+  allowed and is NOT the same claim as a second canonical copy.
 - **Layout parity is independently derived, not self-compared.**
   `AbiContractTest`: Java's own layout constants vs. the artifact's
   runtime self-description, with a deliberately-impossible-expectation

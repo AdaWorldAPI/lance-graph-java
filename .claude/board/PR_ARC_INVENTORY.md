@@ -8,6 +8,47 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #45 — board: PR #44 arc entry + EXP-KIA-A2-64K fresh measurement + zero-copy/memory-safety doctrine pin (merged 2026-08-28, `b2956d3` — 2 commits, head `22f3293`)
+
+- **Added:** the PR #44 backfill entry below (this file); a fresh
+  in-tree `measure_wal_curve` run answering "measure the 64k execution
+  end first" (`.claude/board/exp-kia-a2-64k-fresh-run.txt`,
+  `E-EXP-KIA-A2-64K-CONVERGENCE-TAIL-DOMINATES-1`); a 9-bullet "Zero-copy
+  + memory safety" NORMATIVE, MERGE-GATING section in root `CLAUDE.md`
+  transcribing the operator's 32-point addendum, each bullet cited to a
+  real enforcement site.
+- **Locked (at merge, before the correction below):** compute
+  parallelizes (3.27× @ workers=8) but the cast/collect/wal/apply tail is
+  flat across worker count and dominates the cycle (~90% at workers=8) —
+  evidence for prioritizing the GridLake deterministic-landing-identity
+  gate over a parallel-compute seam.
+- **Post-merge correction, same-day (2026-08-28):** PR #45 was the ONLY
+  review layer this doctrine got — CodeRabbit posted only its
+  auto-summary (PR merged before its review cycle ran), Bugbot hit its
+  usage limit twice and never ran. A 5+3 council (5 savants incl. this
+  repo's own `abi-membrane-warden`/`zero-copy-warden`/`handle-lifecycle-
+  auditor`/`java-surface-warden` cards, 3 reviewers) found 5 real
+  overclaims in the doctrine text and fixed them in a follow-up commit
+  (see `E-ZERO-COPY-MEMORY-SAFETY-OVERCLAIM-CORRECTION-1`): the
+  generation-registry claim didn't cover the cached-descriptor path;
+  `requireMinor`'s "fails cleanly at the call" claim didn't hold for
+  minors 2-4; the bounds-checking claim overclaimed `kernels.rs`
+  coverage; "never `segment.set(...)`" was contradicted by the
+  already-named Import exception; the materialization list was missing
+  two bounded call sites. Also caught: this PR's own missing arc entry
+  (this row, backfilled in the correction commit).
+- **Deferred, named:** `ISS-LGJ-EPOCH-UNCHECKED` (the `epoch`
+  re-validation field exists in the ABI but is never consulted by the
+  Java facade — currently unreachable through the public API, not yet a
+  live gap).
+- **Docs:** `CLAUDE.md` doctrine section corrected in place (5 bullets
+  reworded); `ISSUES.md` gains `ISS-LGJ-EPOCH-UNCHECKED`; this file
+  backfilled for both #44 and #45.
+- **Confidence:** the doctrine text is now council-ratified (5+3, full
+  sequencing) rather than single-pass-audited; the 64K measurement entry
+  is unaffected by the correction (a different EPIPHANIES entry, not
+  reviewed by this council).
+
 ## PR #44 — R1→minor 10: mask algebra restored, the reduction repatriated, the doctrine pinned, the columnar store landed (merged 2026-08-27, merge — 5 commits, head `bd6f666`)
 
 - **Added, as one arc** (the PR body predates its own last three commits —
