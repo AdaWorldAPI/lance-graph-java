@@ -12,7 +12,7 @@ Valhalla cheap addresses, everything else underneath.**
 
 ## The layer model (frozen — this plan implements it, never re-litigates it)
 
-```
+```text
 Application / TinkerPop         semantic intent: where()/hop()/out()/has()
         │                       (vocabulary only — never execution)
         ▼
@@ -123,14 +123,23 @@ properties. Make them tests so they cannot silently drift again:
 
 ### W1 — close the membrane (G-A + G-B)
 
-- **W1.1 Epoch re-check** (resolves `ISS-LGJ-EPOCH-UNCHECKED`; Phase-0
-  spec already written in-session, council question sets pre-registered).
+- **W1.1 Epoch re-check** (the Phase-0 council spec is COMMITTED at
+  `.claude/plans/epoch-recheck-phase0-v1.md` — frozen decisions, input
+  inventory, both accepted resolutions, pre-registered gates, and the
+  five per-savant question sets live there, not in a session transcript).
   Target resolution (a): compare the cached `LaneWindow.epoch` against the
   live resource epoch on the access path (`Engine.epoch(handle)` exists;
   a lighter epoch-only export is the fallback IF measurement shows the
-  full 32-byte `lgj_resource_info` read is too costly per access).
+  full 32-byte `lgj_resource_info` read is too costly per access — and if
+  that export is minted it is a **full ABI citizen**: its own minor bump,
+  manifest + `abi.md` entry, `requireMinor(N)` at the Java call site, and
+  an old-library rejection leg in `OldAbiCompatTest`, or the fallback
+  recreates the missing-symbol failure class W1 exists to remove).
+  Resolution (a) resolves `ISS-LGJ-EPOCH-UNCHECKED`.
   Fallback (b) — formal unreachability proof + doctrine
-  downgrade — only on measured cost, never on assumption.
+  downgrade — only on measured cost, never on assumption; under (b) the
+  issue closes as **DOWNGRADED-DOCUMENTED, never "resolved"**, and the
+  doctrine's scope-note stays live (see the W1-completion paragraph).
   **The measurement target is the cached-descriptor accessors THEMSELVES**
   (`RowStore.classidAt`/`payloadLow64At`/`payloadHi32At` through
   `lane()`, `Mask`'s cached-`words` reads) — a Codex review correction
@@ -149,14 +158,27 @@ properties. Make them tests so they cannot silently drift again:
   `MethodHandle` resolution for row store/edges/hop into per-minor lazy
   nested holders (the pattern minors 5+ already use), so an ABI-0.1
   library fails at `requireMinor(N)` with a clean message, at every minor.
-  Gates: `OldAbiCompatTest` gains the minors-2-4 leg it structurally could
-  not have before (build a real minor-1 library in a worktree beside the
-  siblings — /tmp worktrees break the path deps, measured); the
-  doctrine's original unconditional "fails cleanly at the call" wording is
-  RESTORED in CLAUDE.md only after this lands, as its own storno line.
-- On W1 completion: the two scope-notes PR #46 added to the doctrine
-  become historical (marked resolved in place per append-only rules), and
-  the membrane's safety story is unconditional for the first time.
+  **The structural requirement, stated as the invariant** (a CodeRabbit
+  addition, PR #47): every public path entering a minor-N capability
+  calls `Abi.requireMinor(N)` BEFORE its first reference to that minor's
+  lazy holder — a holder touched first re-creates the clinit failure one
+  step later.
+  Gates: `OldAbiCompatTest` gains the minors-2-4 legs it structurally
+  could not have before (build a real minor-1 library in a worktree
+  beside the siblings — /tmp worktrees break the path deps, measured),
+  with **one independent negative probe per minor** — the existing
+  minor-4 gate rides `Mask.minus` and cannot discriminate alone, so
+  either each minor gets its own probe or the "at every minor" claim is
+  narrowed to the minors actually probed; an unprobed minor may not be
+  claimed covered.
+- **On W1 completion under resolution (a) for W1.1**: the two scope-notes
+  PR #46 added to the doctrine become historical (marked resolved in
+  place per append-only rules), and the membrane's safety story is
+  unconditional for the first time. **Under fallback (b) this paragraph
+  does NOT apply**: the doctrine keeps its scoped wording permanently,
+  the cached-descriptor scope-note stays live, and no "unconditional"
+  claim is made anywhere — a measured downgrade is a documented boundary,
+  not a closed gap.
 
 ### W2 — finish the mask layer (G-C + G-D)
 
@@ -239,10 +261,19 @@ consumer-side scheduling creep F4 forbids.
 
 ## What would falsify this plan's ordering
 
-- If W1.1's measurement shows the epoch re-check costs more than the
-  fused pass gains (unlikely — one u64 compare vs a plane traversal), the
-  W1/W2 order flips for the affected path only, recorded as a dated
-  amendment here, not silently.
+- The W1/W2 flip condition, in reproducible units (a CodeRabbit
+  correction — "costs more than the fused pass gains" compared two
+  different denominators): on the SAME 65,536-row fixture, W1.1's number
+  is ns/accessor-call over ≥1M calls on the cached-descriptor accessors,
+  median of 5; the flip fires iff the epoch re-check cannot be brought
+  under **2× the accessor's measured baseline** even via the epoch-only
+  export. In that case W1.1 pauses on its (a)/(b) decision while W2.1
+  proceeds — for its OWN paths only: W2's fused pass and sweeps run
+  through native operations, not the cached-descriptor accessors, so
+  they may be investigated and shipped regardless; nothing that READS
+  through a cached descriptor ships an "unconditional safety" claim
+  while W1.1 is unresolved. Recorded as a dated amendment here, not
+  silently.
 - If the W2.1 lab claim (~10×, zero new kernels) does not survive
   real-ABI verification, W2.1 re-enters through F6 as an ndarray::simd
   primitive proposal — the plan does not pre-authorize a membrane-side

@@ -23,7 +23,10 @@ binding via the contract's clean vocabulary — the WRITE seam stays
 blocked with GridLake (F5) and deliberately carries no D-id.
 
 **Status: PROPOSED.** D-LGJ-MMV-0 (W0 fences) is the cheapest first
-action; W1.1's Phase-0 council spec is already written in-session.
+action; W1.1's Phase-0 council spec is COMMITTED at
+`.claude/plans/epoch-recheck-phase0-v1.md` (frozen decisions, both
+accepted resolutions, pre-registered gates, five per-savant question
+sets).
 
 ## 2026-08-17 — ogar-machine-v1 (EXPLORATORY; the population emulator)
 
