@@ -377,6 +377,33 @@ could then yield opposite RowStore ship decisions. Ruled:
    does not replace the ratio — at a low-single-digit-ns baseline the
    ratio alone is undecidable (§5.3), and a budget alone would hide a
    pathological multiple on a fast accessor.
+
+   **The statistics, defined so identical data cannot yield two different
+   decisions** (CodeRabbit, PR #49 — the form was pre-registered while the
+   arithmetic was not):
+   - **Arms.** `before` = the probe absent, `after` = the probe present,
+     same harness, same fixture, build-time variant swap (§5.5).
+   - **Score.** JMH `avgt` per op, converted to **ns per accessor call** by
+     dividing by the calls-per-op the benchmark performs; that divisor is
+     a constant the harness states in its own source, not a post-hoc
+     adjustment.
+   - **Primary, signed and directional.**
+     `delta_ns = score(after) − score(before)`. Ship if
+     `delta_ns < N` (N = the amendment's cutoff). A *negative* delta means
+     the probe measured faster than baseline.
+   - **Secondary, directional.** `ratio = score(after) / score(before)`.
+     Ship if `ratio < 2.0`.
+   - **Run acceptance, per arm.** Each arm's own 99.9% CI half-width must
+     be < 10% of **that arm's own score**. An arm failing this voids the
+     run — it is not a result to be interpreted, and neither metric is
+     computed from it.
+   - **Non-positive or noise-dominated measurements.** If `delta_ns ≤ 0`,
+     or the two arms' 99.9% CIs overlap, the probe's cost is **not
+     resolvable above this harness's noise floor**. That outcome PASSES
+     both metrics — it cannot exceed a positive budget — and is recorded
+     as *"cost below the harness's resolution"*, **never** as "the probe
+     is free". The distinction matters the next time someone cites the
+     number.
 2. **The numeric ns cutoff is recorded by an amendment to THIS file whose
    commit precedes the first benchmark run**, and the wave's results
    commit must cite that amendment's sha. No number is invented here
@@ -460,10 +487,15 @@ unverified*. No third option.
   `requireUsable` condition implies native closure, so the probe fires in
   both). What remains open is only message quality — whether `words()` also
   gains `requireUsable` for its clearer PARENT_CLOSED narrative.
-- **Q3 — CLOSED** by §5 (Codex P2): neither replaces the other. The ns
-  delta is primary, the 2× ratio a secondary sanity check, both must pass,
-  and the numeric cutoff is recorded by a dated amendment to this file
-  whose commit must precede the first benchmark run.
+- **Q3 — CLOSED** by §5 (Codex P2, statistics tightened by CodeRabbit):
+  neither replaces the other. `delta_ns = score(after) − score(before)` in
+  ns/accessor-call is primary, `ratio = score(after)/score(before)` under
+  2.0 is the secondary check, both must pass, each arm's own 99.9% CI
+  half-width must be under 10% of its own score or the run is void, a
+  non-positive or CI-overlapping delta passes and is recorded as *below
+  the harness's resolution* rather than as free, and the numeric cutoff is
+  recorded by a dated amendment to this file whose commit must precede the
+  first benchmark run.
 - **Q4.** Is `NativePattern`'s locked-close asymmetry worth normalizing, or
   documenting as deliberate?
 - **Q5 (new, from §4).** Does the fence gain a freshness-name stem, or is
@@ -497,3 +529,4 @@ unverified*. No third option.
 | 16 | Major, proof-status conflict | §0 was "verified three times" while §6 demanded a test-or-downgrade and the board asserted high confidence. Resolved by pinning §0 with a cheap UB-free test (`Engine.epoch` on a closed handle throws), not by downgrading. |
 | 17 | Major, closure-term hole | `ISS-LGJ-EPOCH-UNCHECKED` could have closed RESOLVED on the Mask half alone while `RowStore`'s cached path stayed boolean-guarded. Closure is now per-half and conditional. |
 | 18 | Minor ×2 | The `u32` generation-wrap qualification restored to both board summaries; the Mask "ships regardless" statement reconciled with Q2. |
+| 19 | Major, form without arithmetic | §5 pre-registered the acceptance *form* but not the statistics, so identical data could still yield opposite decisions. Now defined: arms, score-to-ns/call conversion, signed delta and ratio directions, per-arm CI acceptance, and the non-positive/CI-overlap case (passes, recorded as *below the harness's resolution*, never as "free"). |
