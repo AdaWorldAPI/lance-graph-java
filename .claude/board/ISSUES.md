@@ -303,6 +303,7 @@ path while **leaving a second, independent verdict standing beside it**:
 | #55 (8th) | — | the entry declared its own run void, then acted on it one paragraph later |
 | #57 (9th) | `abi.md`'s "**every** operation returns `PARENT_CLOSED`" | "every **handle-mediated** operation returns `PARENT_CLOSED`" — still false |
 | #58 (10th) | Q4's *conclusion*, made conditional | the *adjacent* sentence, still claiming close-after-cache is out of contract |
+| #60 (11th) | fence 1b, built to catch a missing W1 block | a whole-file scan the block's own deletion could not turn red |
 
 **The tenth arrived inside the fix for the eighth's cousin, one hop sideways.**
 Two reviewers made Q4's conclusion conditional; the qualification landed, and
@@ -316,6 +317,26 @@ paragraph rather than the diff hunk.
 implied `requireOpen()` guards nothing in contract — an invitation to delete
 the guard that makes the ordinary case safe. The ninth instance cost a
 quantifier; this one could have cost a check.
+
+**The eleventh is the one I had the evidence to catch and did not.** Fence 1b
+was written to fail when the W1 class block is deleted; it scanned the whole
+FILE, and `Mask.materializeRows()` independently names *happens-before* — so
+the very regression it targets left it green. Codex found it on #60.
+
+**The disproof was inside my own disable run.** Turning 1b red required
+stripping **two** occurrences. I noticed the second, removed it to finish the
+disable, and never asked why two were needed. **A disable that removes more
+than the regression does not demonstrate the regression is caught** — it
+demonstrates that removing everything works, which was never in doubt. The rule
+this adds to the falsifier discipline: *the disable must be exactly the
+regression; if it has to be widened to go red, the widening IS the finding.*
+
+**A second, smaller lesson from the repair.** Scoping the scan to the class
+javadoc immediately failed four arms on prose that plainly said the right
+thing — because javadoc WRAPS, and "no guard detects it" split across two
+lines matches no literal. A doc fence must normalize the region (strip the
+`*` furniture, collapse whitespace, fold case) or it enforces where an author
+pressed return.
 
 **What generalizes past instance nine:** nine was the same *sentence* narrowed
 and still wrong. Ten is a *neighbouring* sentence left asserting the stronger
