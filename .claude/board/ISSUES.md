@@ -249,9 +249,21 @@ closing that parent is **in-contract** and still invalidates the child's cached
 words — the W1.1 falsifier. A `RowStore` is only ever a *parent*; its bytes are
 allocate-once `Arc<[u8]>` with **no realloc surface**; its constructor is
 private and every factory mints a fresh handle; and its one closer sets the
-flag `requireOpen` reads. So within the sole-closer contract there is no state
-where its cached lane is stale and `closed` is false — the weaker mechanism is
-sufficient **for this resource**, structurally rather than by luck.
+flag `requireOpen` reads. So **within** the sole-closer contract there is no
+state where its cached lane is stale and `closed` is false — the weaker
+mechanism is sufficient **for this resource, inside that contract**,
+structurally rather than by luck.
+
+**The conditional is load-bearing and belongs here, not in a footnote** (both
+reviewers on #58 said so independently). The contract landed in #57 as
+**documentation, not enforcement**: `Engine.close(long)` is still `public
+static`, `windowOf`'s segment is unbounded-lifetime, and `closed` is a plain
+non-volatile boolean. A contract violation, or a concurrent close against a
+live reader, *can* produce a stale cached lane with `closed == false`. **Q4
+does not claim that is impossible — it claims it is out of contract**, and the
+probe would defend only that territory, incompletely (re-describing narrows the
+window, never closes it). The stronger form needs **enforcement**, not more
+argument.
 
 **Not acted on, and that is the point.** Full argument, its adversarial check,
 and its single load-bearing dependency are `epoch-recheck-v3.md` **Q4**, filed

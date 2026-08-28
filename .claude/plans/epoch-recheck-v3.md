@@ -617,11 +617,31 @@ unverified*. No third option.
      handle, so two facades cannot share one. `RowStore.close()` sets `closed`,
      which `requireOpen` checks on every accessor call.
 
-  **Therefore:** within the sole-closer contract there is *no* state in which a
+  **Therefore — and this conclusion is CONDITIONAL, which both reviewers on #58
+  were right to insist be said first rather than left in the adversarial
+  check:** *within* the sole-closer contract there is no state in which a
   `RowStore`'s cached lane is stale while `closed` is false. The Java boolean —
   a mechanism this plan and the root `CLAUDE.md` both correctly call "strictly
-  weaker" — is nonetheless **sufficient for this specific resource**, for a
-  structural reason rather than a lucky one.
+  weaker" — is **sufficient for this specific resource, inside that contract**,
+  for a structural reason rather than a lucky one.
+
+  **What the condition costs, stated plainly.** The contract landed in #57 and
+  is **documented, not enforced**: `Engine.close(long)` is still `public
+  static` and reachable outside the owning facade, `windowOf`'s segment is
+  unbounded-lifetime, and `RowStore.closed` is a plain non-volatile boolean.
+  A caller who violates the contract — or a second thread closing while a
+  reader is live — *can* therefore produce a stale cached lane with
+  `closed == false`. **Q4 does not claim that state is structurally
+  impossible.** It claims the state is **out of contract**, which is weaker and
+  is the honest form. The probe would defend only that out-of-contract
+  territory, and cannot do so completely: re-describing narrows the window and
+  never closes it (`ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW`).
+
+  **So adoption is gated twice, not once:** the ruling below, *and* the
+  contract being real. #57 makes it real as **documentation**. If a future
+  session wants the stronger form — "impossible" rather than "out of contract"
+  — the missing piece is **enforcement** (a concurrent-access protocol in the
+  ABI), not more argument.
 
   **What this does and does not say.** It does *not* contradict Q1: per-access
   remains the only falsifiable *placement*, exactly as Q1 argues. It asks the
@@ -644,10 +664,13 @@ unverified*. No third option.
   verified: its parent's close is by the parent's own sole closer, and the W1.1
   falsifier reproduced it through the sanctioned route.
 
-  **This is a PROPOSAL and it is deliberately not acted on.** W4's rejection
-  route for the `RowStore` half is a §7 Q1 *measurement*; rejection on
-  architectural grounds is a **different route that this plan does not
-  currently define**. Adopting it is an amendment, not a session's own call —
+  **This is a PROPOSAL and it is deliberately not acted on.** W4 routes rejection of
+  the `RowStore` half through §7 Q1 — whose cost arm is *measured under §5*,
+  with Q3 fixing the verdict statistics. (⊘ An earlier draft called this "a §7
+  Q1 *measurement*", conflating W4's pointer with the route it points at: Q1 is
+  closed on **falsifiability** and defers cost to §5.) Either way the route is
+  a measurement, and rejection on architectural grounds is a **different route
+  that this plan does not currently define**. Adopting it is an amendment, not a session's own call —
   and closing `ISS-LGJ-EPOCH-UNCHECKED` on the strength of an argument I wrote
   today would repeat instance eight exactly (`ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST`),
   one PR after it was caught. **The issue stays OPEN pending a ruling.**
