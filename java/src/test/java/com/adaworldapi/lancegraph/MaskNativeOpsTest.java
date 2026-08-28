@@ -34,6 +34,7 @@ public final class MaskNativeOpsTest {
      * factories, and the W1.1 cached-lane liveness probe.
      */
     public static void run(Checks c) {
+        orphanCloseActuallyReleases(c);
         c.section("Mask.minus(): parity vs a hand-computed scalar expected set, at a"
                 + " non-multiple-of-64 row count (the tail rule, docs/abi.md §13)");
         int n70 = 70;
@@ -292,6 +293,52 @@ public final class MaskNativeOpsTest {
             arr[i] = out.get(i);
         }
         return arr;
+    }
+
+    /**
+     * A selection whose parent closed is <strong>not</strong> freed with it, and closing it must
+     * actually release it.
+     *
+     * <p>{@code Mask.close()} used to skip the native close when its parent was already gone, on
+     * the stated belief that "the selection was freed with it". <strong>That belief is false and
+     * the registry says so:</strong> {@code registry::close} touches only the handle's own slot
+     * and never cascades, and a mask owns its own {@code Box&lt;[u64]&gt;} words. So the skip
+     * leaked both the allocation and the registry slot for the life of the process.
+     *
+     * <p>Found while resolving two reviewers who contradicted each other on the same doc line —
+     * one said an orphan's close returns {@code OK}, the other {@code INVALID_HANDLE}. The ABI
+     * test {@code a_mask_whose_parent_closed_reports_parent_closed} settles it: its last line is
+     * {@code assert_eq!(lgj_close(m), LGJ_OK)}. Neither reviewer was arguing about the leak; it
+     * was behind the disagreement.
+     *
+     * <p><strong>How this falsifies rather than asserts.</strong> A leaked slot is invisible from
+     * the outside, so the test does not look for the leak — it looks for its complement. After
+     * {@code close()}, closing the same handle again must FAIL: a second close can only be
+     * rejected if the first one actually happened. Under the old skip, the handle is still live
+     * and the second close returns {@code OK}, so this goes red.
+     */
+    private static void orphanCloseActuallyReleases(Checks c) {
+        RowStore rs = RowStore.open(128, SEED);
+        Mask m = rs.importRows(1L, 2L, 3L);
+        long maskHandle = m.handle();
+
+        // Close the parent through the sanctioned route. In-contract: RowStore is its own sole
+        // closer, and nothing says a child may not outlive it.
+        rs.close();
+
+        // The child is still a real resource at this point -- that is the fact the old comment
+        // denied. Closing it must release it.
+        m.close();
+
+        boolean secondCloseRejected = false;
+        try {
+            com.adaworldapi.lancegraph.internal.ffm.Engine.close(maskHandle);
+        } catch (RuntimeException e) {
+            secondCloseRejected = true;
+        }
+        c.that("closing an orphaned selection actually released it -- a second close on the same"
+                        + " handle is rejected, which can only happen if the first one ran",
+                secondCloseRejected);
     }
 
     /** Set-equality, independent of the order either array's elements arrived in. */

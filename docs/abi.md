@@ -252,7 +252,7 @@ plan falsifies it directly rather than assuming it.
 | Question | Answer |
 |---|---|
 | Who owns this memory? | Rust. Always. Java never allocates a lane. |
-| How long does a `MemorySegment` remain valid? | Until `lgj_close` on the owning handle. Java models this with an `Arena` whose lifetime is *nested inside* the resource's, so closing the resource is what ends the segment's usefulness — and the `epoch` field lets Java detect a stale segment it still holds. |
+| How long does a `MemorySegment` remain valid? | Until `lgj_close` on the owning handle. ⚠ **Java does not model this with a scope.** A lane/mask window is `MemorySegment.ofAddress(addr).reinterpret(len)` (`Engine.windowOf`) — an **unbounded-lifetime** segment that cannot observe its resource closing. (The `Arena`s in the facade back *output scratch*, e.g. `RowStore`'s result buffer; they never back a lane window, so an earlier claim that segment lifetime is "nested inside" a resource's arena was wrong.) What actually detects staleness is **re-asking the substrate**: `Mask.words()` re-describes through `lgj_mask_describe` on every use of its cache and compares the returned `epoch` with the stamp it holds. `RowStore`'s cached lanes do **not** do this — see `ISS-LGJ-EPOCH-UNCHECKED`, and *The sole-closer contract* below. |
 | What invalidates a view? | Closing the owner, or closing the owner's parent. |
 | Can native storage relocate? | **No.** Lanes are allocated once at `lgj_pattern_open` and never reallocated, resized, or moved while the resource is alive. This is a hard ABI guarantee; any future growable lane requires a `major` bump. |
 | Can Java mutate it? | Only where `LGJ_FLAG_WRITABLE` is set on the descriptor. Pattern lanes are **read-only**; mask words are writable. |

@@ -1,5 +1,38 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-ORPHAN-MASK-CLOSE-LEAKED (2026-08-28) — RESOLVED same day (#57)
+
+**A real leak, found behind a disagreement between two reviewers about a doc
+line.** `Mask.close()` guarded its native close with `if (parent.isOpen())`,
+commented *"the selection was freed with it; calling close again would only earn
+an INVALID_HANDLE. Nothing leaks either way."* **Both halves were false**, and
+the registry says so plainly: `registry::close` takes only the handle's **own**
+slot and never cascades to children, and `create_mask` gives a mask its own
+`Box<[u64]>`. So an orphaned selection is still a live resource holding a live
+allocation, and skipping the call leaked **both the words and the registry
+slot** for the life of the process.
+
+**How it surfaced, which is the part worth keeping.** Codex (P2) said an
+orphan's `lgj_close` returns `OK`; CodeRabbit said `INVALID_HANDLE` and asked
+for the latter to be documented. They cannot both be right, so it went to
+source: `exports.rs`'s `a_mask_whose_parent_closed_reports_parent_closed` ends
+`assert_eq!(lgj_close(m), LGJ_OK)`. Codex had the fact; CodeRabbit had the
+inconsistency; **neither was arguing about a leak, and the leak was what the
+disagreement was standing on.** Following the more confident reviewer, or
+splitting the difference, would have documented the bug as correct behaviour.
+
+**Falsified via the complement, because the leak itself is invisible.** Nothing
+observable distinguishes a leaked slot from a live one — so
+`MaskNativeOpsTest.orphanCloseActuallyReleases` asserts that a **second** close
+on the same handle is REJECTED, which can only happen if the first one really
+ran. Red-then-green confirmed: red under the old skip (`condition was false`),
+green after. Suite 337 → **338**.
+
+**Fixed** by closing unconditionally, with the registry facts in the comment
+rather than a bare "always close" instruction — the old comment was wrong
+because it reasoned from a plausible assumption about cascade, so the
+replacement records what the registry actually does.
+
 ## ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW (2026-08-28) — OPEN
 
 **Opened late, and the lateness is the first thing worth recording.** v3 W4

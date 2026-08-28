@@ -135,11 +135,21 @@ public final class Mask implements AutoCloseable {
             throw new ClosedResourceException("close() called on a selection that is already closed");
         }
         closed = true;
-        if (parent.isOpen()) {
-            Engine.close(handle);
-        }
-        // If the parent is already gone, the selection was freed with it; calling close again
-        // would only earn an INVALID_HANDLE. Nothing leaks either way.
+        // Closed UNCONDITIONALLY, including when the parent is already gone.
+        //
+        // This used to be guarded by `if (parent.isOpen())`, with the comment "the selection was
+        // freed with it; calling close again would only earn an INVALID_HANDLE. Nothing leaks
+        // either way." Both halves were false, and the registry says so: `registry::close` takes
+        // only the handle's OWN slot and never cascades to children, and a mask owns its own
+        // `Box<[u64]>` words. An orphaned selection is therefore still a live resource holding a
+        // live allocation -- `lgj_close` on it returns OK and releases it, which the ABI's own
+        // `a_mask_whose_parent_closed_reports_parent_closed` asserts on its last line. Skipping
+        // the call leaked both the words and the registry slot for the life of the process.
+        //
+        // Pinned by `MaskNativeOpsTest.orphanCloseActuallyReleases`, which falsifies via the
+        // complement: a second close on the same handle must be REJECTED, which can only happen
+        // if the first one really ran.
+        Engine.close(handle);
     }
 
     // ── package-private: the native handle, for peers that build further native operations from
