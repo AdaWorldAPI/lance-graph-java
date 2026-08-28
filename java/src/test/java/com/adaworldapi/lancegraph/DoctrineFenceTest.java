@@ -221,12 +221,121 @@ public final class DoctrineFenceTest {
                 + " java files >= 20)", javaFiles.size() >= 20);
 
         fenceMaterialization(c, javaFiles);
+        fenceThreadSafetyJavadoc(c, javaMain);
+        fenceDoctrineWording(c, repo);
         fenceTopology(c, javaFiles, abiSrc);
         fenceTopologyReflective(c);
         fenceBackendDiagnosticOnly(c, javaFiles);
     }
 
     // ── Fence 1 ────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * <strong>Fence 1b — W1: the thread-safety scope exists on both facade classes.</strong>
+     *
+     * <p>Plan W1 requires a thread-safety block on {@code RowStore} and {@code Mask} stating that
+     * the caller must establish <em>happens-before</em> between {@code close()} and every access,
+     * and it names the literal to check for. Until this leg existed the obligation was recorded
+     * as discharged while neither class carried a word of it — found by Codex on #59.
+     *
+     * <p><strong>Reads RAW lines, not {@code codeLines}.</strong> Every other fence strips
+     * comments because it hunts code; this one hunts <em>javadoc</em>, so the shared filter would
+     * delete exactly what it is looking for and the leg would pass vacuously on an empty haystack.
+     *
+     * <p>Anti-vacuity is checked rather than assumed: a control file that should NOT carry the
+     * literal is asserted clean, so a scanner that matched everything could not pass this leg.
+     */
+    private static void fenceThreadSafetyJavadoc(Checks c, Path javaMain) {
+        c.section("fence 1b: both facade classes carry the W1 thread-safety scope");
+        String literal = "happens-before";
+        String[] required = {"RowStore.java", "Mask.java"};
+        for (String fileName : required) {
+            Path f = javaMain.resolve("com/adaworldapi/lancegraph/" + fileName);
+            c.that(fileName + " exists to be scanned", java.nio.file.Files.isRegularFile(f));
+            boolean found = false;
+            for (String line : readLines(f)) {
+                if (line.contains(literal)) {
+                    found = true;
+                    break;
+                }
+            }
+            c.that(fileName + " states the W1 caller obligation verbatim (\"" + literal
+                    + "\") — plan W1, arm (ii)", found);
+        }
+        // The discriminating half: a facade class W1 does not name must NOT carry it, or this
+        // leg would pass for a scanner that matches any file at all.
+        Path control = javaMain.resolve("com/adaworldapi/lancegraph/NativePattern.java");
+        if (java.nio.file.Files.isRegularFile(control)) {
+            boolean leaked = false;
+            for (String line : readLines(control)) {
+                if (line.contains(literal)) {
+                    leaked = true;
+                    break;
+                }
+            }
+            c.that("the scan discriminates: NativePattern.java (not named by W1) does not carry"
+                    + " the literal, so a match-everything scanner fails this leg", !leaked);
+        }
+    }
+
+    /**
+     * <strong>Fence 1c — W2: the doctrine wording matches the mechanism it describes.</strong>
+     *
+     * <p>Plan W2 requires root {@code CLAUDE.md}'s cached-descriptor scope note to say the path is
+     * re-validated <em>at each top-level facade call</em> and is <em>not atomic</em> with respect
+     * to a concurrent close — and never to say "unconditional" or "on every dereference". W2 also
+     * notes that fence 1 cites {@code CLAUDE.md} as an out-of-band list it never reads, and that
+     * <em>this precedent must be built, not merely cited</em>. This leg builds it: the first fence
+     * in this class that actually opens the doctrine file.
+     *
+     * <p><strong>Scoped to the note, not the file, and that is load-bearing.</strong> The same
+     * bullet legitimately contains "unconditionally" about a falsifier that holds unconditionally
+     * — a true sentence. A whole-file or whole-bullet scan would fire on it, and a fence that
+     * flags a correct sentence is the fires-on-everything defect this repo's own rules name.
+     */
+    private static void fenceDoctrineWording(Checks c, Path repo) {
+        c.section("fence 1c: the cached-descriptor doctrine says what the mechanism does (W2)");
+        Path doctrine = repo.resolve("CLAUDE.md");
+        c.that("root CLAUDE.md is readable — W2's 'build the precedent, do not cite it'",
+                java.nio.file.Files.isRegularFile(doctrine));
+        List<String> lines = readLines(doctrine);
+
+        int start = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).contains("Scope note") && lines.get(i).contains("cached-descriptor")) {
+                start = i;
+                break;
+            }
+        }
+        c.that("the cached-descriptor scope note is present and locatable", start >= 0);
+        if (start < 0) {
+            return;
+        }
+        int end = lines.size();
+        for (int i = start + 1; i < lines.size(); i++) {
+            if (lines.get(i).startsWith("- **")) {
+                end = i;
+                break;
+            }
+        }
+        StringBuilder note = new StringBuilder();
+        for (int i = start; i < end; i++) {
+            note.append(lines.get(i)).append('\n');
+        }
+        String text = note.toString();
+        c.that("the note is a real region, not an empty match (" + (end - start) + " lines >= 5)",
+                end - start >= 5);
+
+        for (String forbidden : new String[] {"unconditional", "on every dereference"}) {
+            c.that("the note never claims the re-validation is \"" + forbidden
+                    + "\" — it is per-call and racy, not that", !text.contains(forbidden));
+        }
+        for (String req : new String[] {"at each top-level facade call", "not atomic"}) {
+            c.that("the note states W2's required wording: \"" + req + "\"", text.contains(req));
+        }
+        c.that("the note keeps the two halves apart — RowStore is named as still unguarded",
+                text.contains("RowStore") && text.contains("ISS-LGJ-EPOCH-UNCHECKED"));
+    }
 
     private static void fenceMaterialization(Checks c, List<Path> javaFiles) {
         c.section("fence 1: materialization census matches the doctrine's exhaustive list");

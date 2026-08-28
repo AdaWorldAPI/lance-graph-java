@@ -29,10 +29,21 @@
   observable distinguishes a leaked slot from a live one, so
   `orphanCloseActuallyReleases` asserts a **second** close is REJECTED — which
   can only happen if the first one ran. Red-then-green verified; 337 → **338**.
-- **Arm (ii)'s written contract, finally landed.** `docs/abi.md` "Concurrency"
+- **Arm (ii)'s written contract, PARTLY landed.** `docs/abi.md` "Concurrency"
   gains *The sole-closer contract (normative for callers; NOT enforced)*,
   carried at all three `close()` sites, stated **with the three facts that make
   it unenforceable** rather than as a bare rule.
+  - ⊘ **Corrected on #60 (Codex P2, raised on #59 after it merged).** This line
+    read *"finally landed"*, which **hid two ratified obligations**: W1 (a
+    thread-safety block on `RowStore` and `Mask` naming the caller's
+    *happens-before* duty, plus a `DoctrineFenceTest` leg asserting the literal)
+    and W2 (root `CLAUDE.md`'s wording matching the mechanism, plus a fence leg
+    that actually READS the doctrine file — W2's own words: *"this precedent
+    must be built, not merely cited"*). Neither existed. Worse, `CLAUDE.md` had
+    gone **stale the day W1.1 shipped**: it still said the cached path takes
+    "NO further registry call" and that `epoch` "is unconsulted anywhere in
+    `src/main`" — both false for `Mask` since #53, in the file every session
+    reads first. All four landed in #60 with two disable-runs red-then-green.
 - **Three doc overclaims corrected, each verified in source first.** (1) *"every
   operation on an orphaned child returns `PARENT_CLOSED`"* — this PR's own first
   correction narrowed it to *"every **handle-mediated** operation"* and that was
