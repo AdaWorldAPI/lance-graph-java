@@ -19,6 +19,7 @@ public final class AllTests {
     public static void main(String[] args) {
         Map<String, Consumer<Checks>> suites = new LinkedHashMap<>();
         suites.put("ApiSurfaceTest", ApiSurfaceTest::run);
+        suites.put("DoctrineFenceTest", DoctrineFenceTest::run);
         suites.put("AbiContractTest", AbiContractTest::run);
         suites.put("SmokeTest", SmokeTest::run);
         suites.put("FixtureParityTest", FixtureParityTest::run);
@@ -34,14 +35,38 @@ public final class AllTests {
         suites.put("ColumnarStoreTest", ColumnarStoreTest::run);
 
         if (!NativeRuntime.isAvailable()) {
-            // ApiSurfaceTest needs no native library — the API's shape is a compile-time property —
-            // so run it anyway before reporting the skip. It is exactly the check most worth having
-            // before the artifact exists.
-            System.out.println();
-            System.out.println("=== ApiSurfaceTest ===");
-            Checks shape = new Checks("ApiSurfaceTest");
-            ApiSurfaceTest.run(shape);
-            int shapeCode = shape.report();
+            // ApiSurfaceTest and DoctrineFenceTest need no native library — the API's shape is a
+            // compile-time property and the doctrine fences scan source — so run them anyway
+            // before reporting the skip. They are exactly the checks most worth having before the
+            // artifact exists.
+            int shapeCode = 0;
+            for (String name : new String[] {"ApiSurfaceTest", "DoctrineFenceTest"}) {
+                Consumer<Checks> suite = suites.get(name);
+                if (suite == null) {
+                    // A renamed registry key must fail as a report, not as an NPE mid-loop
+                    // (CodeRabbit, PR #48).
+                    System.out.println("      FAIL unregistered native-independent suite " + name);
+                    shapeCode = 1;
+                    continue;
+                }
+                System.out.println();
+                System.out.println("=== " + name + " ===");
+                Checks shape = new Checks(name);
+                try {
+                    suite.accept(shape);
+                } catch (Throwable t) {
+                    // Same rule as the main loop: one suite blowing up must not silently
+                    // prevent the next from running (CodeRabbit, PR #48).
+                    System.out.println("      FAIL suite threw " + t);
+                    t.printStackTrace(System.out);
+                    shapeCode = 1;
+                    continue;
+                }
+                int code = shape.report();
+                if (shapeCode == 0) {
+                    shapeCode = code;
+                }
+            }
             int skipCode = Checks.reportUnavailable("AllTests");
             System.exit(shapeCode != 0 ? shapeCode : skipCode);
         }
