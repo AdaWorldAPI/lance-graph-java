@@ -157,11 +157,20 @@ public final class Mask implements AutoCloseable {
      * absent segfault is not evidence of safety.) {@code lgj_mask_describe} resolves the mask
      * WITH its parent, so it is the answer that actually covers these bytes.
      *
-     * <p><strong>One downcall per whole scan, never per word.</strong> Callers resolve the window
-     * once and then read every element in-process from the returned segment; the crossing is a
-     * lifecycle question asked at the boundary, not work proportional to the population. This is
-     * the {@code Mask} half of W1.1 (`.claude/plans/epoch-recheck-v3.md` §6): a native
-     * generation-checked liveness probe replacing a Java boolean's sole authority.
+     * <p><strong>Exactly one downcall per whole scan, never per word</strong> — and, stated
+     * plainly because it is a real change: <strong>a cached scan is no longer free.</strong>
+     * Before this probe, the first scan cost one {@code lgj_mask_describe} and every later scan
+     * cost nothing; now every scan costs exactly one, first or hundredth. (Not two: a cached
+     * scan re-describes and does not also re-resolve.) What the cache still buys is the
+     * segment construction and, more importantly, the previous descriptor to compare the new one
+     * against — it is a reference value for change detection, no longer a crossing-avoidance
+     * device. Do not read "cached" here as "free".
+     *
+     * <p>What that cost is NOT is work proportional to the population: callers resolve the window
+     * once and then read every element in-process from the returned segment, so the crossing is a
+     * lifecycle question asked once at the boundary. This is the {@code Mask} half of W1.1
+     * (`.claude/plans/epoch-recheck-v3.md` §6): a native generation-checked liveness probe
+     * replacing a Java boolean's sole authority.
      *
      * <p>Two conditions are distinguished on purpose, because "stop" is a weaker signal than
      * "stop, and here is what moved":
