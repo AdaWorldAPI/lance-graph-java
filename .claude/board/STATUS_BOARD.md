@@ -1,3 +1,27 @@
+## mask-membrane-valhalla-integration-v1 (2026-08-28)
+
+Plan: `.claude/plans/mask-membrane-valhalla-integration-v1.md` — the
+layered consolidation of the PR #44→#46 arc (masking underneath / Panama
+the membrane / Valhalla cheap addresses / everything else underneath).
+
+| D-id | Deliverable | Status |
+|---|---|---|
+| D-LGJ-MMV-0 | Mechanical fences: materialization-list gate, §E worker-topology fence (+ reflective arm 2b), SIMD-branch fence — each proven able to fire | Shipped (PR #48, merged `42fba54`) |
+| D-LGJ-MMV-1a | Resolve `ISS-LGJ-EPOCH-UNCHECKED`. **5+3 council COMPLETE** — ratified at `.claude/plans/epoch-recheck-v3.md`: ship (a) as a native generation-checked liveness probe (NOT "epoch checking" — the compare is unreachable), arm (ii) scoped contract, six obligations W1-W6, C1's rewritten falsifier, no new ABI symbol on the production path (the one the wave admits is test-only) | Council done, implementation Queued |
+| D-LGJ-MMV-1a-mask | The `Mask` half — probe at `words()`, one downcall per whole scan, falsifiable at negligible cost. **Ships regardless of measurement** | Queued |
+| D-LGJ-MMV-1a-rowstore | The `RowStore` half — probe per-access inside `lane()`; forced by falsifiability, not chosen on cost (a first-resolve probe is blind to the only scenario it could catch). Does not ship if per-access proves too costly | Queued, gated on §5 |
+| D-LGJ-MMV-1a-hook | Test-only ABI export: invalidate a registry slot (bump generation) while deliberately leaking the `Arc`, so the allocation stays mapped — without it W5's disable arm performs a read-after-free and cannot report failure deterministically (Codex P1, PR #49). Full ABI citizen: minor bump, manifest + `abi.md`, lazy holder, `requireMinor`, `OldAbiCompatTest` leg. The ONLY new symbol this wave admits | Queued |
+| D-LGJ-MMV-1a-bench | Isolated per-accessor JMH benchmark (build-time variant swap, Blackhole, ≥5 forks) — does not exist today; §5's gate is undecidable without it | Queued |
+| D-LGJ-MMV-1b | Minors 2-4 lazy `Downcalls` holders; `OldAbiCompatTest` minor-1 leg; doctrine "fails cleanly at the call" wording restored by storno | Queued |
+| D-LGJ-MMV-2a | Fused single-plane columnar pass — the lab arm's ~10× claim verified through the real ABI, equivalence before timing | Queued |
+| D-LGJ-MMV-2b | Register-sweep family (§14-16) answers facet-major; −18 refusal re-pinned two-sided, kept reachable | Queued |
+| D-LGJ-MMV-3 | Valhalla value-class promotions where the three-truths lab shows a measured facade-path win; each reversible | Queued (evidence-gated) |
+| D-LGJ-MMV-4 | Temporal read binding via `LanceVersion`/`VersionRange`/`TemporalPov` (contract vocabulary, never the Kanban-entangled types) | Queued (substrate-first per F6) |
+
+W4.2 (the write seam) deliberately has NO row — blocked with GridLake
+(plan F5) and substrate-side by the F7 measurement; a row here would be
+the consumer-side scheduling creep §E forbids.
+
 ## the mask-native SWEEP arc — ABI minors 5-8 (2026-08-25)
 
 The execution half of the mask path. The BUILD half (`lgj_op_eq_classid`)

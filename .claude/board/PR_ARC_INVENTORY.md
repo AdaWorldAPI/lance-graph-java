@@ -41,6 +41,226 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #51 — plan: CI overlap labels a verdict, it never produces one (merged 2026-08-28, `6530e2f` — 3 commits, head `7acb7fd`)
+
+- **Why it exists:** two findings landed on #49 **~2 minutes AFTER it
+  merged**, so no gate on that PR could have caught them and the merge
+  could not have waited. One was a real defect in the ratified plan's own
+  decision rule. The generalizable lesson, recorded in `ISSUES.md`: **a
+  subscription is not finished at merge — the last review can land after
+  it.** Both #49 and #50 merged with a review still in flight.
+- **The defect chain (three rounds on ONE rule, each subsuming the last):**
+  §5 first auto-passed **any** CI-overlapping run, reasoning an
+  unresolvable cost cannot exceed a positive budget — false, and the
+  counterexample is ordinary: 100 ns vs 118 ns at 9% half-widths overlap
+  while `delta_ns = 18`, so an `N = 10 ns` budget ships a probe at ~2×.
+  The repair demoted overlap to a *label*; **that was still unsound**
+  (Codex P2) — overlapping CIs for two means are not a CI for their
+  difference, so the label asserted unsupported noise AND let a
+  point-estimate failure read as definitively "too costly" on a run that
+  could not tell. Final shape: uncertainty is computed on `delta_ns`
+  itself and its interval compared to `0` and `N`, with a straddling
+  interval classified **UNDERPOWERED** — neither pass nor fail, remedy a
+  better-powered run. Arm-vs-arm comparison no longer appears in the rule.
+- **Also locked:** `N > 0` required at both the non-positive clause and
+  the amendment procedure (an `N ≤ 0` amendment voids the run) — the
+  premise the `delta_ns ≤ 0` auto-pass silently rested on; and the
+  two-delivery-paths correction to #49's headline (`Mask` unconditional,
+  `RowStore` benchmark-gated), recorded as a **dated append-only
+  correction line** after Codex caught that editing it into the Headline
+  broke this file's own lines 2-4 rule. `ISSUES.md` got a storno, not an
+  edit, for the same reason.
+- **Gates:** doc-only. CodeRabbit clean on `f9e6938` and on `7acb7fd`
+  (⚪ Minimal); Codex 2×P2, both fixed; all three threads answered then
+  resolved. Cursor Bugbot did not run — usage limit, third consecutive PR.
+- **Confidence:** high on the final rule's *form* (it now compares the
+  right interval against the right quantities); the numeric `N` is still
+  UNMEASURED and pre-registration-gated, unchanged.
+- **Standing recommendation, NOT yet done:** four consecutive findings in
+  §5, each a rule resting on an unstated premise, and the third subsumed
+  the second's fix. The cheap move before the benchmark amendment is
+  written is ONE adversarial read of §5 against its own premises rather
+  than another round-trip — each of which now also costs money
+  (CodeRabbit is on usage-based billing at $0.25/file; this PR drew $1.00
+  across its runs).
+
+## PR #47 — plan: mask-membrane-valhalla-integration-v1, the layered consolidation (merged 2026-08-28, `9f6e9a2` — 6 commits, head `586d081`)
+
+- **Added:** `.claude/plans/mask-membrane-valhalla-integration-v1.md` —
+  the PR #44→#46 arc consolidated under the layer model (masking
+  underneath / Panama the membrane / Valhalla cheap addresses /
+  everything else substrate-private): frozen decisions F1–F7 (incl. the
+  measured F7 convergence-tail ground truth that keeps the W4.2 write
+  seam blocked and D-id-less), the honesty-gap layer table (G-A..G-E),
+  waves W0–W4.1, pre-registered falsification conditions.
+  `.claude/plans/epoch-recheck-phase0-v1.md` — the committed W1.1
+  Phase-0 council spec (frozen decisions, input inventory, resolutions
+  (a)/(b), gates, five per-savant question sets).
+  `.claude/knowledge/github-access-paths.md` — the measured
+  three-paths/two-identities GitHub access map (session-proxy credential
+  vs the shared user-200276742 identity; secondary-limit signature;
+  thread resolution as the one no-fallback operation).
+  Board: `INTEGRATION_PLANS.md` prepend + `STATUS_BOARD.md`
+  D-LGJ-MMV-0..4 rows.
+- **Locked (review-hardened, 9 findings across Codex + CodeRabbit, all
+  verified-then-fixed):** the ABI-citizen requirement on any epoch-only
+  export; DOWNGRADED-DOCUMENTED (never "resolved") for fallback (b); the
+  requireMinor-before-lazy-holder invariant for W1.2; the W1/W2 flip
+  condition in reproducible units (ns/accessor-call, 2× threshold),
+  measured ON THE CACHED-DESCRIPTOR ACCESSORS (the banked benches are
+  structurally blind to them); the check-then-read ATOMICITY constraint
+  as a mandatory W1.1 council output (serialize/lease + interleaving
+  falsifier, or a written scoped contract — wording never exceeds the
+  chosen arm); the measurement runs UNDER the chosen arm; W0 scope
+  honesty (lexical fences are tripwires, not proofs) and the standing
+  gate-observability question for every future gate.
+- **Confidence:** high on the frozen decisions (each cites its ruling);
+  the plan itself is PROPOSED→ratified-by-merge; wave outcomes are
+  gated, not promised.
+
+## PR #49 — W1.1: the epoch-recheck 5+3 council, ratified (v3) (merged 2026-08-28, `0efb757` — 7 commits, head `490b71d`)
+
+- **Merge-time addendum (post-entry):** the external round landed **8
+  findings — Codex 2 (one P1, one P2), CodeRabbit 6** — every one
+  verified against source before it was fixed, and every one fixed
+  (`d2393fa`..`490b71d`). The P1 is the one that changed a deliverable
+  rather than prose: asserting only that the accessor *throws* stopped
+  the test *looking* at freed bytes but did not stop it *reading* them,
+  so W5 now mandates invalidate-without-free via a test-only ABI export
+  (queued as its own row) **and** populate-the-lane-cache-first ordering
+  — neither reviewer's literal fix works alone (CodeRabbit's ends in
+  `Engine.close`, the very UAF Codex flagged; Codex's alone leaves the
+  cache unpopulated, so `classidAt` re-resolves and throws on its own,
+  passing with the probe disabled). The P2 forced the benchmark
+  *statistics* to be pre-registered, not just its acceptance form.
+  **Honesty note:** the merge (13:09Z) preceded CodeRabbit's re-review of
+  `490b71d` completing — its last posted finding is 13:01:50Z, i.e. it
+  had reviewed nothing newer than `9a0e058`; and Cursor Bugbot never ran
+  at all on this PR (usage limit). The eight threads are answered by
+  reply but left **unresolved** — thread resolution is GraphQL-only and
+  the account-wide secondary limit blocked it (see
+  `.claude/knowledge/github-access-paths.md`: the one operation with no
+  fallback).
+- **Added:** `.claude/plans/epoch-recheck-v3.md` (RATIFIED — implement
+  from this) and `epoch-recheck-v2-draft.md` (SUPERSEDED, retained: the
+  Phase-3 findings are only auditable against the draft they attacked).
+  Full 5+3 for `mask-membrane-valhalla-integration-v1` W1.1 — five
+  savants, consolidation, three reviewers on the draft only, ratified v3
+  with an audit ledger (§8).
+- **Headline:** an epoch MISMATCH is unreachable through
+  `lgj_resource_info` **short of a `u32` generation wrap on one slot**
+  (close bumps the slot generation, insert hands the advanced generation
+  out, the export opens with `resolve`), so what W1.1 ships is a **native
+  generation-checked liveness probe replacing a Java boolean** — not
+  "epoch checking". Derived independently three times from source, and
+  pinned by a committed test as a W1.1 deliverable (source reading
+  establishes today's path; only a test keeps a refactor honest).
+- **Locked:** atomicity arm (ii) scoped contract on three verified
+  reasons (arm (i)'s mandatory falsifier cannot report red — no threads
+  in the test tree); six obligations W1-W6 with W1/W2 given mechanical
+  fence legs; no new ABI symbol **on the production path** (the one the
+  wave admits is test-only, and a full ABI citizen — v3 §8 row 13);
+  the `Mask` half ships regardless, the
+  `RowStore` half is per-access-or-not-at-all and gated on a benchmark
+  that does not yet exist.
+- **Reviewers changed the deliverable, not just its prose:** one BLOCKING
+  defect (the draft's own falsifier asserted on use-after-free bytes —
+  the evidence class it disqualified arm (i) for), one open question
+  closed on falsifiability, a wrongly-routed falsifier, an invented
+  closure status, two normative corrections rescued from under a "CLEAN"
+  heading, five factual errors — including a storno on the merged plan's
+  false "benches are structurally blind" claim, and a live `main` defect
+  nobody had noticed (`Engine.epoch`'s javadoc claims a re-check with
+  zero callers).
+- **Gates:** doc-only — no Rust, Java, `abi.md`, or public-API change; the
+  suite is untouched at 331/331 from PR #48. Every file:line in v3 was
+  either given with evidence by a savant or verified by the consolidation;
+  the load-bearing ones were re-verified a third time by a reviewer.
+- **Confidence:** high on the headline (three independent source
+  derivations) and on the arm decision; the implementation's cost
+  question is explicitly UNRESOLVED and gated, not assumed.
+- **Correction 2026-08-28 (post-merge, from #51):** the Headline above
+  reads "what W1.1 ships is a native generation-checked liveness probe"
+  without its condition, which would mark the `RowStore` half delivered
+  before its gate closes. **Two delivery paths, never one:** the `Mask`
+  half ships UNCONDITIONALLY (one downcall per whole scan); the
+  `RowStore` half ships ONLY if the per-access benchmark passes §5's
+  gate, and otherwise does not ship at all. Recorded here rather than
+  edited into the Headline — this file's own rule is that only the
+  Confidence line is updatable in place and corrections append as dated
+  lines, so an in-place headline edit (as first attempted in #51) erases
+  the distinction between what was recorded at merge and what was learned
+  after it.
+
+## PR #48 — W0: the three doctrine fences, each proven able to fire (merged 2026-08-28, `42fba54` — 7 commits, head `fc281e0`)
+
+- **Merge-time addendum (rounds 4-5, post-entry):** the review cycle ran
+  FIVE bot rounds total; beyond what the entry below records, the last
+  two added: the loud unreadable-file rule (`readLines` rethrows —
+  an unreadable `abi.rs` can no longer scan as empty), split-line
+  materialization matching (filtered lines re-joined so `\s+` spans
+  breaks), the resilient no-native suite loop, `for(`/`while(` branch
+  markers, loud partial reflective discovery, and the Rust raw-string
+  TRIPWIRE (which corrected this PR's own "fails loud" doc claim — a
+  raw string mis-lexed SILENTLY; the opener now trips fence 2 outright
+  rather than growing a Rust lexer for two files with zero raw strings).
+  Every fix plant- or suite-verified; final suite 331/331.
+
+- **Added:** `DoctrineFenceTest` (17 checks) — the plan
+  `mask-membrane-valhalla-integration-v1.md` W0 / D-LGJ-MMV-0 deliverable,
+  turning the PR #46-corrected doctrine's three prose claims into
+  executable fences: **fence 1** pins the exact per-file occurrence count
+  of every materialization-shaped pattern in `java/src/main` against the
+  doctrine's exhaustive five-site list (an unfenced site, new file or
+  old, fails until list AND pin move together); **fence 2** asserts zero
+  worker-topology tokens on the consumer surface — all of `java/src/main`
+  plus the ABI's consumer-facing files only (`abi.rs` + `exports.rs`;
+  substrate-internal scheduling deliberately out of scope, per §E's own
+  ownership logic); **fence 3** confines backend tokens to their three
+  define/relay homes and rejects any code line that both carries a
+  backend token and branches; **fence 2b** (added in review) re-checks
+  §E REFLECTIVELY — no public facade method may be topology-named — the
+  spelling-immune arm no lexical scan can equal (`ApiSurfaceTest`'s own
+  footing applied to §E). All fences read ONE shared comment filter
+  (`codeLines`), so prose in a javadoc can neither move a pinned count
+  nor report a leak; fence 3's branch markers match the canonicalized
+  line and cover ternaries/boolean operators, closing the in-place
+  ternary rewrite that kept the carrier census unchanged. Registered in
+  `AllTests` including the no-native path (source fences need no `.so`,
+  same rationale as `ApiSurfaceTest`).
+- **Locked:** each fence arm observed red-then-green on a planted
+  violation before landing — unfenced `Arrays.copyOf`+`new long[` in
+  `View.java` (fence 1, both patterns), `public View workers(int)`
+  (fence 2), the SAME method with its name and paren split across two
+  lines (invisible to any per-line lexical scan — ONLY fence 2b fired,
+  proving the reflective arm adds coverage rather than redundancy),
+  `if (simdBackend().equals("avx512"))` (fence 3, both halves), a stray
+  `SIMD_AVX2` reference in `View.java` (fence 3 homes half), and a
+  pinned `Layouts.java` carrier line rewritten IN PLACE to a ternary —
+  census count unchanged, caught by the widened marker half alone.
+  Stay-silent twin: a planted comment line carrying `Arrays.copyOf` +
+  `new long[64]` + `workers(8)` moves nothing (prose is filtered by the
+  shared `codeLines`). A second round closed the shared-line hole
+  (`/* c */ new long[4];` was blanked whole-line by the prefix skip —
+  the filter now removes comment SPANS, honoring string/char literals
+  so a `//` inside a URL neither starts a comment nor truncates code).
+  Anti-vacuity guards pin the corpus as real (≥20 files scanned, ≥20
+  compiled public types against the measured 29, ≥5 backend-token code
+  lines) so an empty-scan pass cannot masquerade as clean.
+- **Deliberately source-text where the property lives only in source**
+  (call sites, branches), reflective where it lives in the compiled
+  surface (topology-named methods, fence 2b) — and honest about the
+  split: lexical fences are TRIPWIRES, not proofs; the census pins are
+  what force a determined evasion to touch the pin table in the same
+  diff, making it reviewable.
+- **Gates:** full Java suite 331/331 (314 prior + 17 new), zero
+  regressions; no Rust/`abi.md`/public-API change of any kind.
+- **Board note:** the `STATUS_BOARD` D-LGJ-MMV-0 row lives on PR #47 (the
+  plan, in flight when this opened); it flips Queued → Shipped once both
+  are on `main`.
+- **Confidence:** high — every claim is a pinned count, a red-then-green
+  disable-run, or the 331-check suite.
+
 ## PR #45 — board: PR #44 arc entry + EXP-KIA-A2-64K fresh measurement + zero-copy/memory-safety doctrine pin (merged 2026-08-28, `b2956d3` — 2 commits, head `22f3293`)
 
 - **Added:** the PR #44 backfill entry below (this file); a fresh

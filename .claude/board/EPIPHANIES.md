@@ -1,3 +1,33 @@
+## E-THE-GUARD-YOU-WIRE-IS-NOT-THE-GUARD-YOU-NAMED-1 (2026-08-28)
+
+**Finding.** A wave chartered as "wire the epoch re-check" cannot deliver
+an epoch check at all. `registry::close` bumps the slot generation and
+`insert` hands the already-advanced generation out on reuse, while
+`lgj_resource_info` opens with `resolve` — so a stale handle throws before
+any epoch is returned, and the cached-vs-live comparison the issue was
+named for can only fire after a `u32` generation wrap. What the wave
+actually ships is a **native generation-checked liveness probe replacing a
+Java boolean**.
+
+**Why it generalizes.** The issue, the doctrine bullet, the plan row and
+the council spec all carried the same name for a mechanism none of them
+had traced end to end — and the name survived four documents because each
+inherited it from the last. The field `LgjLaneDesc.epoch` existing was
+read as evidence that comparing it was the fix; existence is not a
+mechanism. **Before a wave is chartered around a named mechanism, trace
+the mechanism's failure path in source once.** The cost of not doing so
+here was small (a council caught it); the cost of shipping it would have
+been a guard whose javadoc named a check it does not perform.
+
+**Second-order, same day.** `Engine.epoch`'s own javadoc already says
+*"Java re-checks this before trusting a cached lane segment"* while having
+**zero callers** — the doc-comment-is-not-a-behaviour rule violated in the
+exact file three savants cited without noticing. A stale javadoc is how a
+mechanism gets believed into a plan.
+
+**Status:** FINDING (verified independently three times in source).
+**Confidence:** high.
+
 # Epiphanies Log — Findings, Corrections, "Aha" Moments (APPEND-ONLY)
 
 > Prepend new entries at the top. Never edit a past entry except its

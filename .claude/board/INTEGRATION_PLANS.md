@@ -1,3 +1,65 @@
+## 2026-08-28 — epoch-recheck v1→v2→v3 (RATIFIED; the W1.1 5+3 council)
+
+Plans: `.claude/plans/epoch-recheck-phase0-v1.md` (spec),
+`epoch-recheck-v2-draft.md` (Phase-2 consolidation, SUPERSEDED but
+retained — the reviewers' findings are only auditable against the draft
+they attacked), `epoch-recheck-v3.md` (**RATIFIED, implement from this**).
+
+Full 5+3 run for `mask-membrane-valhalla-integration-v1` W1.1: five
+savants (handle safety, ABI membrane, zero-copy, Java surface,
+measurement), consolidated, then three reviewers (overclaim, falsifier,
+dilution/collapse) on the draft only.
+
+**The headline reframes the deliverable.** An epoch MISMATCH is
+unreachable through `lgj_resource_info` **short of a `u32` generation
+wrap on one slot** — `close` bumps the slot generation, `insert` hands the
+advanced generation out, and the export opens with `resolve` — so a stale
+handle throws rather than returning a mismatched epoch. What ships is a **native generation-checked liveness
+probe replacing a Java boolean**, not "epoch checking". Verified
+independently three times.
+
+Also: the spec's own pre-registered disable-run was unconstructible and
+its nearest approximation vacuous (replaced); the fallback ABI export is
+struck (no new symbol needed, and one that skipped `resolve` would pass
+the disable-run while losing the guarantee); the merged plan's "banked
+benches are structurally blind" claim is FALSE for bench G (storno in the
+same PR); and `Engine.epoch`'s javadoc claims a re-check with zero callers.
+
+**Status: RATIFIED.** Implementation is D-LGJ-MMV-1a's four rows on
+`STATUS_BOARD.md`; the `Mask` half ships regardless, the `RowStore` half
+is gated on a per-accessor benchmark that does not yet exist.
+
+## 2026-08-28 — mask-membrane-valhalla-integration-v1 (ACTIVE; the layered consolidation)
+
+Plan: `.claude/plans/mask-membrane-valhalla-integration-v1.md`. The
+synthesis of the PR #44→#46 arc into one wave plan under the operator's
+layer model: **masking underneath** (hop = MASK × CLASSVIEW → MASK, the
+execution currency), **Panama the membrane** (shape/meaning/operations
+cross, ownership does not), **Valhalla cheap addresses** (describe the one
+substrate, never become a second one), **everything else underneath**
+(placement, publication, worker topology, the sealed horizon — all
+substrate-private). Seven frozen decisions cited (F1–F7), including the
+measured F7 ground truth that the convergence tail, not compute, is ~90%
+of a 64K cycle.
+
+Waves: **W0** mechanical fences for the council-corrected doctrine
+(materialization-list gate, §E topology fence, SIMD-branch fence — each
+proven able to fire); **W1** close the membrane's two named honesty gaps
+(`ISS-LGJ-EPOCH-UNCHECKED` epoch re-check; minors 2-4 lazy holders so
+`requireMinor` covers every minor); **W2** finish the mask layer (the
+fused single-plane pass' ~10× lab claim verified through the real ABI;
+register sweeps answering facet-major instead of −18); **W3** Valhalla
+value-class promotions on measured evidence only; **W4** temporal READ
+binding via the contract's clean vocabulary — the WRITE seam stays
+blocked with GridLake (F5) and deliberately carries no D-id.
+
+**Status: ACTIVE** (ratified by the PR #47 merge, `9f6e9a2`; W0 shipped
+same day via PR #48, `42fba54` — D-LGJ-MMV-0 Shipped). Next action:
+W1.1 — cast the Phase-0 council per the COMMITTED spec at
+`.claude/plans/epoch-recheck-phase0-v1.md` (frozen decisions, both
+accepted resolutions, pre-registered gates, five per-savant question
+sets).
+
 ## 2026-08-17 — ogar-machine-v1 (EXPLORATORY; the population emulator)
 
 Plan: `.claude/plans/ogar-machine-v1.md`. Captured from the operator's
