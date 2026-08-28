@@ -8,6 +8,69 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #55 — Component H: one crossing measured, and a verdict withdrawn (merged 2026-08-28, `b55c1e8` — 5 commits, head `b101ba3`)
+
+- **Opened claiming a verdict, and the claim was wrong.** Title and body read
+  *"the RowStore per-access gate, measured; answer is 'not at all'"*. **Both
+  halves withdrawn** after two P1s. The entry, the PR body, and the source
+  javadoc are struck in place, never deleted — the withdrawn claims and their
+  reasons are both readable.
+- **Added, and this survives:** bench Component H (`H_CachedAccessorProbe`,
+  5 forks × 8 iters, `rows=65536`, release `.so`) measuring a bare
+  `lgj_lane_describe` crossing on a hot read loop at **+35.5 ns** over a cached
+  read — `cached` 9.398 ±0.362, `probed` 44.932 ±0.931, delta CI
+  **[34.54, 36.53]**, both arms clearing per-arm acceptance. Real, reproducible,
+  and an order-of-magnitude input to a future `N`. Results banked at
+  `bench/results/jmh-results-H.json`.
+- **Why it decides nothing — two independent grounds, and that independence is
+  the point.** (1) No `N` was pre-registered, so §5.2 voids it. (2) Both arms
+  call `Engine.describeLane` directly, so neither is `RowStore.classidAt` —
+  they bypass the cached `lanes[]` lookup, `requireOpen`, the `FacetId`
+  null-check and bounds, where §5.4 says the accessor "is an inlining/compile
+  barrier… That total is the right thing to gate on." **A pre-registered `N`
+  alone would not have rescued the closure**, which is what makes ground 2
+  worth stating separately rather than folding into ground 1.
+- **The eighth instance of the arc's own pattern, and its worst shape.** The
+  entry declared its run void in one paragraph and acted on it in the next —
+  two verdicts in adjacent paragraphs of one document. Codex and CodeRabbit
+  found it **independently**, which is the strongest external signal the
+  `ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST` ledger has yet drawn.
+- **A correction that was itself wrong, retracted.** #55 claimed to correct
+  `ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT`'s "forces TWO BUILDS". It follows
+  from ground 2 that two *production* variants cannot share one classpath
+  without the hoistable branch §5.5 forbids. **The original finding was right;
+  the correction was not.** Restored unamended.
+- **Three board obligations discharged that #55 did not set out to touch**, each
+  found by checking this PR's own unwind against the rules rather than by
+  review: `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` opened (W4 requires it
+  in the same commit that scopes `ISS-LGJ-EPOCH-UNCHECKED` to `RowStore` —
+  overdue since #53, its three facts re-verified in-tree because the plan's line
+  numbers had shifted); #54's arc entry backfilled (mixed PR, so the hygiene-only
+  termination clause does not reach it); two `STATUS_BOARD` rows corrected, one
+  claiming "implementation Queued" ten days after the `Mask` half shipped and one
+  showing no trace that the §5 gate had been attempted at all — the second being
+  the costlier, since the next session would have rebuilt Component H to learn
+  what this PR already measured.
+- **Locked:** `ISS-LGJ-EPOCH-UNCHECKED` OPEN, scoped to `RowStore`. A valid gate
+  needs all three in order — amendment naming `N > 0` committed first,
+  before/after variants of the **production** accessor in two builds of `java/`,
+  a results commit citing that amendment's sha.
+- **Deferred:** the `RowStore` half itself. Nothing about it is settled by this
+  PR in either direction.
+- **Scope:** `bench/` + board only. **No change to `java/src/main`, no ABI
+  symbol, no public signature.** Gate: 337 checks, 0 failures.
+- **Review coverage, stated rather than assumed:** CodeRabbit reviewed through
+  `ec5dc18` and then hit its hourly allowance, returning "No actionable comments"
+  and Merge Risk *Minimal*. The last three commits (`e0e1a84`, `130b302`,
+  `b101ba3`) are **board-only and went unreviewed**. Bugbot did not run on any
+  commit — a Cursor usage/spend limit, on every PR this session, not a drafting
+  artifact.
+- **Confidence:** high on the measurement (banked JSON, both arms cross-checked
+  in `@Setup`) and on the scoping (two reviewers, converging). Medium on the
+  board being *complete* — three missing obligations surfaced here only because
+  the unwind forced a re-read of W4, and nothing systematically checks that a
+  paired obligation was discharged.
+
 ## PR #54 — the fifth instance, and making `Engine.epoch`'s javadoc true (merged 2026-08-28, `cc53c8c` — 4 commits, head `fd1df59`)
 
 > ⊘ **Entry backfilled on #55 (2026-08-28).** #54 merged without it. #54 is a
