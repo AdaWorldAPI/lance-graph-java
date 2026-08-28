@@ -257,7 +257,7 @@ plan falsifies it directly rather than assuming it.
 | Can native storage relocate? | **No.** Lanes are allocated once at `lgj_pattern_open` and never reallocated, resized, or moved while the resource is alive. This is a hard ABI guarantee; any future growable lane requires a `major` bump. |
 | Can Java mutate it? | Only where `LGJ_FLAG_WRITABLE` is set on the descriptor. Pattern lanes are **read-only**; mask words are writable. |
 | What happens when the resource closes? | Its lanes are freed, its generation is bumped, its children fail with `PARENT_CLOSED`. |
-| Can a child view outlive the parent? | It can *exist* but not *work* — every operation on it returns `PARENT_CLOSED`. |
+| Can a child view outlive the parent? | It can *exist* but not *work* — every **handle-mediated** operation on it returns `PARENT_CLOSED`. ⚠ This does **not** cover a descriptor address Java has already cached and reads directly: that read consults no handle, so nothing returns a status at all. See *The sole-closer contract* below. |
 | How are errors represented? | Negative `i32` status. Never a panic across the boundary (§9). |
 
 ### Concurrency
@@ -268,6 +268,42 @@ registry to resolve and clone the `Arc`, releases it, then locks only the entry.
 So bulk ops on distinct resources run concurrently, and only
 open/close serialize globally. Stated honestly: this has not been benchmarked
 under contention, and the POC's Java layer is single-threaded.
+
+#### The sole-closer contract (normative for callers; NOT enforced)
+
+**A resource handle has exactly one closer: the facade object that owns it.**
+Closing a handle by any other route, or from any other thread, is outside this
+ABI version's contract, and the result is undefined behaviour rather than an
+error status.
+
+This is a **documented contract, not an enforced one**, and the distinction is
+load-bearing — three facts make it unenforceable from the Java side, so a
+caller who violates it gets no diagnostic:
+
+1. `Engine.close(long)` is reachable outside the owning facade object, so
+   nothing structurally prevents a second closer.
+2. `Engine.windowOf` builds an **unbounded-lifetime** `MemorySegment` from a
+   descriptor address. The segment cannot observe its resource closing; it has
+   no FFM scope tied to the resource's lifetime.
+3. The facade's own `closed` flags are plain non-volatile booleans, so they
+   carry both a check-then-act race and a *visibility* race across threads.
+
+**Why the generation-checked registry does not close this.** It fails closed on
+every *handle resolve*, which is why every handle-mediated operation on a closed
+parent returns `PARENT_CLOSED`. But a cached descriptor read resolves no handle:
+Java holds the address, reads through it, and the registry is never consulted.
+Re-authorising the cached address before each use (as `Mask.words()` does, via
+`lgj_mask_describe`) **narrows** the window — the probe's read is a native
+acquire through the registry `RwLock` — and does not close it, because a close
+landing between the probe's return and the segment read is still unguarded.
+
+So the contract's scope is precisely the residue: single-closer, and no
+concurrent close against a live reader. A concurrent Java writer would need a
+documented protocol, which this ABI version does not define.
+
+Tracked as `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW`. It closes when the
+ABI defines a concurrent access protocol that makes this enforceable rather than
+merely stated.
 
 ## 5. Descriptors describe lanes, not pointers
 

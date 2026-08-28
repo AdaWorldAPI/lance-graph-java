@@ -41,10 +41,25 @@ need a documented protocol, which this ABI version does not define"*
 window is **tracked** rather than absorbed into a scoped resolution that does
 not cover it.
 
-**Closure terms.** Closes when the sole-closer contract is written into
-`docs/abi.md` and the facade javadoc, *or* when the ABI defines a concurrent
-access protocol that makes the contract enforceable. Not gated on any
-measurement — nothing here is a cost question.
+**Closure terms — HALF DISCHARGED 2026-08-28, and the half matters.** The
+written-contract half is done: `docs/abi.md` "Concurrency" carries *The
+sole-closer contract (normative for callers; NOT enforced)* with all three
+unenforceability facts, and `Engine.close` / `RowStore.close` / `Mask.close`
+each state it where a caller actually reads. Arm (ii)'s deliverable is
+discharged.
+
+**The issue stays OPEN**, because writing a contract down is not enforcing it —
+which is precisely what arm (ii) was scoped to deliver and what W4 declined to
+call a fix. It closes only when the ABI defines a concurrent access protocol
+that makes the contract enforceable. Not gated on any measurement; nothing here
+is a cost question.
+
+**Corrected while writing it:** `abi.md`'s own resource table claimed *"every
+operation on [a child of a closed parent] returns `PARENT_CLOSED`"* — false for
+the cached-descriptor path, which resolves no handle and therefore returns no
+status at all. The row now says **handle-mediated** operation and points at the
+contract. The doc had been overclaiming exactly the guarantee this issue exists
+to deny.
 
 ## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — EXPLORATORY, decides nothing
 

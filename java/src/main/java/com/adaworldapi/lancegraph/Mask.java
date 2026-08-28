@@ -118,7 +118,17 @@ public final class Mask implements AutoCloseable {
         return java.util.Arrays.copyOf(out, size);
     }
 
-    /** Release the packed bits. Idempotency is not offered — a double close is an error. */
+    /**
+     * Release the packed bits. Idempotency is not offered — a double close is an error.
+     *
+     * <p><strong>This object is the sole closer of its handle</strong> (abi.md, "Concurrency").
+     * Unlike {@link RowStore}, this class re-authorises its cached word window with the substrate
+     * on every use of that cache, so a close landing <em>before</em> a scan is caught. What is
+     * still unguarded is a close landing <em>between</em> that re-authorisation and the segment
+     * read — the probe narrows the window because its read is a native acquire through the
+     * registry lock, but it cannot close it. Documented, not enforced; see
+     * {@code ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW}.
+     */
     @Override
     public void close() {
         if (closed) {
