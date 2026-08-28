@@ -1,3 +1,30 @@
+## 2026-08-28 — mask-membrane-valhalla-integration-v1 (PROPOSED; the layered consolidation)
+
+Plan: `.claude/plans/mask-membrane-valhalla-integration-v1.md`. The
+synthesis of the PR #44→#46 arc into one wave plan under the operator's
+layer model: **masking underneath** (hop = MASK × CLASSVIEW → MASK, the
+execution currency), **Panama the membrane** (shape/meaning/operations
+cross, ownership does not), **Valhalla cheap addresses** (describe the one
+substrate, never become a second one), **everything else underneath**
+(placement, publication, worker topology, the sealed horizon — all
+substrate-private). Seven frozen decisions cited (F1–F7), including the
+measured F7 ground truth that the convergence tail, not compute, is ~90%
+of a 64K cycle.
+
+Waves: **W0** mechanical fences for the council-corrected doctrine
+(materialization-list gate, §E topology fence, SIMD-branch fence — each
+proven able to fire); **W1** close the membrane's two named honesty gaps
+(`ISS-LGJ-EPOCH-UNCHECKED` epoch re-check; minors 2-4 lazy holders so
+`requireMinor` covers every minor); **W2** finish the mask layer (the
+fused single-plane pass' ~10× lab claim verified through the real ABI;
+register sweeps answering facet-major instead of −18); **W3** Valhalla
+value-class promotions on measured evidence only; **W4** temporal READ
+binding via the contract's clean vocabulary — the WRITE seam stays
+blocked with GridLake (F5) and deliberately carries no D-id.
+
+**Status: PROPOSED.** D-LGJ-MMV-0 (W0 fences) is the cheapest first
+action; W1.1's Phase-0 council spec is already written in-session.
+
 ## 2026-08-17 — ogar-machine-v1 (EXPLORATORY; the population emulator)
 
 Plan: `.claude/plans/ogar-machine-v1.md`. Captured from the operator's
