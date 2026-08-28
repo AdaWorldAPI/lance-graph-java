@@ -478,8 +478,11 @@ could then yield opposite RowStore ship decisions. Ruled:
      not block; it is **recorded in the results commit as a flag to
      investigate** (a large multiple on a fast accessor is worth knowing
      even when the absolute cost is under budget). An UNDERPOWERED delta
-     is **not** rescued by any ratio: it yields no ship decision, and
-     "both must pass" is void in that case rather than half-satisfied.
+     is **not** rescued by any ratio: it yields no ship decision. (An
+     earlier phrasing here said *"both must pass" is void in that case* —
+     reworded, because "in that case" implies the struck rule still
+     applies in the others. It applies in none: there is no conjunction
+     left to satisfy, only the table.)
    - **The delta's uncertainty estimator is FIXED BY THE AMENDMENT, and
      the arms are INDEPENDENT.** ⊘ The rule offered *"paired per-iteration
      samples where the harness exposes them, else
