@@ -1,7 +1,7 @@
 # mask-membrane-valhalla-integration-v1 — the layered integration plan
 
 **Status: PROPOSED (2026-08-28).** Written after the PR #44→#46 arc closed:
-the mask algebra restored and made fast (minor 10 columnar store, 4.7–5.9×
+the mask algebra restored and made fast (minor 10 columnar store, 3.8–5.9×
 through the real ABI), the simd.rs isomorphism pinned as CLAUDE.md's
 ENFORCEMENT LAYER (E1–E6), the zero-copy/memory-safety doctrine pinned and
 then council-corrected (5+3, PR #46), and the 64K execution end measured
@@ -88,7 +88,7 @@ Frozen decisions this diagram carries (cited, not re-arguable here):
 | Facade | layout-blind (disable-run red at first divergent address); geometry derived from `Layouts` only (J2 closed); no compute path (G2 + reflective allowlist) | nothing structural — grows only names for W2/W4 verbs |
 | Valhalla | descriptors are already ABI-shaped records (`LaneWindow`, `LgjLaneDesc` mirror); three-truths lab method stands | value-class promotion is a LAB question until measured (E4 keeps Vector API permanently lab) |
 | Panama | manifest-first handshake (magic→major→minor→sizes→endianness); generation-checked handles, 23/23 registry falsifiers green; FFM quarantine reflection-enforced | **G-A**: cached-descriptor path is `closed`-boolean-guarded only — `epoch` field designed, unconsulted (`ISS-LGJ-EPOCH-UNCHECKED`). **G-B**: minors 2-4 fail at `Downcalls.<clinit>`, not at the `requireMinor` call |
-| Mask algebra | hop = `src ∧ class_f ∧ struct_f` word-parallel (R1); facet-match reduction native (minor 9); columnar store (minor 10) 4.7–5.9× over AoS through the real ABI | **G-C**: fused single-plane columnar pass (~10× further per the lab arm, zero new kernels). **G-D**: register-sweep family answers columnar with an honest −18, not a result |
+| Mask algebra | hop = `src ∧ class_f ∧ struct_f` word-parallel (R1); facet-match reduction native (minor 9); columnar store (minor 10) 3.8–5.9× over AoS through the real ABI (3.8× all-rows / 4.7× classid / 5.9× hop2 — the full measured range, slowest arm included) | **G-C**: fused single-plane columnar pass (~10× further per the lab arm, zero new kernels). **G-D**: register-sweep family answers columnar with an honest −18, not a result |
 | ndarray::simd | every kernel routes through the polyfill; backend diagnostic-only above | any new mask primitive (e.g. `mask_xor`) lands HERE first (F6) |
 | Substrate | 64K compute proven parallel + digest-stable; sole-writer publication sequential-by-design | **G-E**: the convergence tail is where the time is (F7); the seam waits on the F5 landing-key gate — substrate-side work, never this repo's |
 
@@ -128,13 +128,23 @@ properties. Make them tests so they cannot silently drift again:
   Target resolution (a): compare the cached `LaneWindow.epoch` against the
   live resource epoch on the access path (`Engine.epoch(handle)` exists;
   a lighter epoch-only export is the fallback IF measurement shows the
-  full 32-byte `lgj_resource_info` read regresses the banked hop/columnar
-  benchmarks). Fallback (b) — formal unreachability proof + doctrine
+  full 32-byte `lgj_resource_info` read is too costly per access).
+  Fallback (b) — formal unreachability proof + doctrine
   downgrade — only on measured cost, never on assumption.
+  **The measurement target is the cached-descriptor accessors THEMSELVES**
+  (`RowStore.classidAt`/`payloadLow64At`/`payloadHi32At` through
+  `lane()`, `Mask`'s cached-`words` reads) — a Codex review correction
+  (PR #47): the banked hop/columnar benchmarks run entirely through
+  native operations and never touch the cached-descriptor path, so they
+  are structurally blind to per-access epoch overhead and would stay
+  unchanged even if every accessor gained a native crossing. A
+  before/after micro-measure of the actual accessors is the gate; the
+  banked native benches remain only a regression backstop for the
+  operations they do exercise.
   Gates: a disable-run test constructing same-slot-reuse-while-cached goes
   red with the check off, green with it on; all existing
   `LifetimeTest`/`RowStoreLifetimeTest` falsifiers stay green; measured
-  per-access overhead banked before/after.
+  per-accessor overhead banked before/after.
 - **W1.2 Lazy-holder migration for minors 2-4**: move the eager
   `MethodHandle` resolution for row store/edges/hop into per-minor lazy
   nested holders (the pattern minors 5+ already use), so an ABI-0.1
