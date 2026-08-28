@@ -1,5 +1,40 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST — §5 adversarial read, FIXED
+
+**The pattern, which is the point of this entry.** Three successive
+repairs to ONE rule (audit rows 20, 22, 23), and each fixed a verdict
+path while **leaving a second, independent verdict standing beside it**:
+
+| repair | fixed | left standing |
+|---|---|---|
+| row 20 | overlap as a verdict | overlap as a *label* |
+| row 22 | the label | the standalone `delta_ns ≤ 0` auto-pass |
+| row 23 | the auto-pass | — (one verdict function now) |
+
+Each version read correctly *in isolation*, which is why three review
+rounds did not catch it: a diff review sees the rule that changed, not
+the rule that did not. Only reading §5 whole, against its own premises,
+surfaces two rules that disagree on the same input.
+
+**Verified contradictions, with numbers.** `delta_ns = −1`,
+`hw_delta = 50`, `N = 10`: the auto-pass clause returns PASS, the delta
+table returns UNDERPOWERED, and nothing said which wins. And per-arm-only
+run acceptance at its own 10% ceiling gives `hw_delta = 14.1 ns` for two
+100 ns arms, making the PASS row **unreachable for every `N ≤ 14`** even
+when the probe is free — a gate that cannot return its own PASS.
+
+**Four further defects in the same pass:** the ratio still compared on
+bare point estimates (the error just fixed for the delta, left on the
+secondary metric, able to veto a passing delta); "paired per-iteration
+samples" incoherent with §5.5's build-time variant swap; a choose-at-
+analysis-time estimator reopening the freedom Q3 closed; and the retained
+"median of 5" contradicting the `avgt`-with-CI score every rule uses.
+
+**Standing lesson:** when a rule is repaired under review pressure, read
+the *whole* rule afterwards, not the diff. Three of these six survived
+three review rounds precisely because each round looked at what changed.
+
 ## ISS-LGJ-CI-OVERLAP-AUTOPASS — post-merge finding on #49, FIXED in the follow-up
 
 **What:** `epoch-recheck-v3.md` §5's first statement of the measurement
