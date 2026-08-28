@@ -41,10 +41,18 @@ public final class AllTests {
             // artifact exists.
             int shapeCode = 0;
             for (String name : new String[] {"ApiSurfaceTest", "DoctrineFenceTest"}) {
+                Consumer<Checks> suite = suites.get(name);
+                if (suite == null) {
+                    // A renamed registry key must fail as a report, not as an NPE mid-loop
+                    // (CodeRabbit, PR #48).
+                    System.out.println("      FAIL unregistered native-independent suite " + name);
+                    shapeCode = 1;
+                    continue;
+                }
                 System.out.println();
                 System.out.println("=== " + name + " ===");
                 Checks shape = new Checks(name);
-                suites.get(name).accept(shape);
+                suite.accept(shape);
                 int code = shape.report();
                 if (shapeCode == 0) {
                     shapeCode = code;
