@@ -74,6 +74,26 @@ CodeRabbit review addition, PR #47): its own ABI minor bump, manifest +
 old-library rejection leg in `OldAbiCompatTest` — otherwise the fallback
 recreates the missing-symbol failure class W1 exists to remove.
 
+**Atomicity constraint (a second CodeRabbit review addition, PR #47 —
+the check-then-read TOCTOU):** the epoch fetch and the cached
+`LaneWindow`/`words` read are TWO steps; a `close(handle)` between them
+(or same-slot reuse) defeats the check. Two facts frame the resolution
+honestly: (1) the CURRENT `closed`-boolean guard carries the IDENTICAL
+race — the epoch re-check neither introduces nor widens it; (2) within
+one thread the window is unreachable (user code cannot call `close`
+inside an accessor), so the residual window is exclusively
+cross-thread lifecycle-vs-access. The council must therefore decide the
+CONCURRENCY CONTRACT the check ships under, as an explicit output, one
+of: (i) serialize epoch-fetch + cached read against close (a
+read/close lock or a native lifetime lease covering both steps) — then
+an INTERLEAVING falsifier for both cached paths is mandatory; or (ii)
+scope the guarantee in writing to stale-cache detection BETWEEN
+top-level calls, with the facade's lifecycle-vs-access thread contract
+stated in `RowStore`/`Mask` javadoc and the doctrine wording matching
+that scope (never "unconditional"). Silently shipping (ii)'s semantics
+under (i)'s wording is the overclaim class the PR #46 council already
+corrected once — not again.
+
 **(b) Prove permanent unreachability, formally, and downgrade the
 doctrine wording** — only if (a)'s cost is measured unacceptable AND a
 falsifier-backed proof (a test that tries to construct the bad sequence
@@ -118,7 +138,7 @@ restoration in `CLAUDE.md` never happens under (b).
 
 | # | lens | card | questions |
 |---|---|---|---|
-| 1 | handle safety | `handle-lifecycle-auditor` | Is `Engine.epoch(handle)` itself generation-checked (does its `lgj_resource_info` call go through `resolve`)? Does the recheck introduce a new TOCTOU between the epoch fetch and the subsequent read? |
+| 1 | handle safety | `handle-lifecycle-auditor` | Is `Engine.epoch(handle)` itself generation-checked (does its `lgj_resource_info` call go through `resolve`)? Which arm of §3's atomicity constraint — serialize/lease (i) or scoped-contract (ii) — is right, and why? (This is a mandatory decision output, not just a question — see §3; the TOCTOU is pre-existing, shared with the `closed` boolean, and cross-thread-only.) |
 | 2 | ABI membrane | `abi-membrane-warden` | Does an epoch-only export need a minor bump (yes per the resolution text — verify nothing cheaper suffices)? Does it fit the bulk/lifecycle taxonomy (`abi.md` §6)? |
 | 3 | zero-copy law | `zero-copy-warden` | Is the recheck O(1) per access with zero row-proportional allocation? Does caching the comparison RESULT risk becoming a second staleness authority? |
 | 4 | Java surface | `java-surface-warden` | Does the fix stay entirely inside `internal.ffm`/`RowStore`/`Mask` — no new public API, no freshness method leaking implementation physics? |

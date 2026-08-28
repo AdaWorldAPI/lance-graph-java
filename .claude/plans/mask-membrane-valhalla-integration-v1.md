@@ -149,7 +149,15 @@ discipline remain the last layer.
   manifest + `abi.md` entry, `requireMinor(N)` at the Java call site, and
   an old-library rejection leg in `OldAbiCompatTest`, or the fallback
   recreates the missing-symbol failure class W1 exists to remove).
-  Resolution (a) resolves `ISS-LGJ-EPOCH-UNCHECKED`.
+  The epoch fetch and the cached read are two steps — the council's
+  spec carries the check-then-read ATOMICITY constraint as a mandatory
+  decision output (serialize/lease with an interleaving falsifier, or a
+  written scoped contract; the spec's §3 "Atomicity constraint" is
+  authoritative — a CodeRabbit review addition, and the race is
+  pre-existing in the `closed`-boolean guard, cross-thread-only).
+  Resolution (a) resolves `ISS-LGJ-EPOCH-UNCHECKED` at the scope the
+  chosen atomicity arm actually delivers — the doctrine wording matches
+  that scope, never exceeds it.
   Fallback (b) — formal unreachability proof + doctrine
   downgrade — only on measured cost, never on assumption; under (b) the
   issue closes as **DOWNGRADED-DOCUMENTED, never "resolved"**, and the
