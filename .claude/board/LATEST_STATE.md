@@ -1,3 +1,65 @@
+## 2026-09-03 — mask-risc-lowering ratified and then AMENDED: the vertical axis is enumerated, not cached
+
+**PR #68** (`dfb4ab1`), plan-only. Four commits: SPEC v1 completed to the
+council bar → draft v2 (5 savants, 40 findings) → **ratified v3** (3
+reviewers, 2 BLOCK + 14 FIX, 2 external Codex P1s) → **v4 amendment**.
+
+**What v3's council caught, and it was worth the run.** Two BLOCKs, neither
+argued away: §8 carried model identifiers by product name into a committed
+artifact (two reviewers passed that section, one blocked, stricter verdict
+won); §4's cost ladder headlined `~25 ns` while its own provenance cell said
+`~100 ns`, so a reader quoting the table re-derived a retracted 200×. And two
+reviewers independently found the change ledger recording a gate that did not
+exist — the `ISS-LGJ-G11-FENCE-WAS-PROSE` shape, one layer up, caught
+pre-ship this time.
+
+**What v4 changes.** The vertical axis does not need a cache; it is small
+enough to enumerate. Three states per HHTL tier (must-match / must-not-match
+/ don't-care) over three tiers is a 27-cell cube of which only **9 primitives
+are built — 72 KB at 65,536 rows, 11.25 MB at 10M**; the other 18 cells are
+an AND of three, the op `plan_eval` already composes. Hit rate becomes 100%
+by construction, so five v3 open items are STRUCK on that axis rather than
+answered: composed-AND hit rate, key aliasing, the one-writer rule, the
+close-and-requery hazard, the version-mismatch refusal. F2's immutability
+survives and is strengthened.
+
+**The boundary is stated with the claim**, not left to be discovered:
+3⁶ = 5.7 MB is borderline, 3¹² = **4.2 GB** is never. So enumeration is
+tier-granularity only, and the horizontal rail axis keeps a real cache with
+`D-MRL-0b′` / G9 unchanged. Q3's pinning-budget question is now
+horizontal-only — vertical masks are not competing for the budget because
+they are not in it.
+
+**The reuse rule.** *Hierarchical few-valued axes → voxel; real-cardinality
+coupling → blasgraph.* OSM is the NATIVE case on shipped evidence, not
+analogy: `ogar-osm/src/lib.rs:212` already binds rails 0–3 as the HHTL tiers
+with x and y literal, so rail is the zoom choice and a viewport query is *k*
+indexes and an AND. Weather SPLITS — wind perturbation is neighbour-local
+integer work and goes to the cube; humidity across 13 pressure levels is
+real-cardinality coupling and goes to `blasgraph`, already in-house. Weather
+is a candidate to RECEIVE voxelmasking, never evidence FOR it: its own specs
+are 11/11 NOT SOUND.
+
+**Two probes, both Wave 0, both with an anti-vacuity twin.** `D-MRL-0f`
+builds the cube on a real OSM population and settles the 27-vs-8 cardinality
+question (do real queries use must-not-match per tier, or only
+match/don't-care?). `D-MRL-0g` replays an ordered viewport path against the
+horizontal cache — the most favourable honest stream the trie will ever get,
+so failing G9 there kills Wave 1c rather than sending it somewhere friendlier
+— with a shuffled control proving the measurement reads locality, not
+capacity.
+
+**Still true after all of it: nothing here is built and nothing is measured.**
+Culling (§14.6) and prefetch (§14.7) are labelled CLAIMED, UNMEASURED with
+the numbers they owe. `E-HHTL-COMPILES-HIERARCHY-INTO-MASK-GEOMETRY-1` proves
+the nesting algebra and explicitly disclaims novelty; the reuse half is
+measured nowhere. Zero external review landed on the arc — CodeRabbit skipped
+it as a draft, Bugbot was spend-capped.
+
+**#67 closed unmerged**, superseded (its commit is the first of the four).
+`ISS-LGJ-STACK-TAIL-STRANDED` did NOT recur, checked with the exact command
+the issue prescribes.
+
 ## 2026-08-27 — ABI minor 10: the columnar store LANDS, and Java is proven layout-blind
 
 The R2 that #44 measured as a lab arm is now the substrate change R11
