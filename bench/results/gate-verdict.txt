@@ -1,0 +1,6 @@
+amendment 43a08d1  N = 40.0 ns/call  CALLS_PER_OP = 1
+before       8.645 ± 0.284 ns/call  (40 samples; arm sanity ok)
+after       61.405 ± 1.464 ns/call  (40 samples; arm sanity ok)
+delta      +52.760 ± 1.492 ns/call   ratio 7.103
+VERDICT FAIL  — delta - hw = 51.268 >= N 40.0
+FLAG    ratio >= 2.0: record for investigation; blocks nothing

@@ -63,15 +63,19 @@ public final class Harness {
         // CSV (its Samples column is below 5 forks x 8 iterations), so a quick run can never be
         // mistaken for evidence.
         boolean quick = "1".equals(System.getenv("LGJ_BENCH_QUICK"));
-        var options = new OptionsBuilder()
+        // JMH rejects a negative count, so the annotation defaults are kept by NOT calling the
+        // setters at all outside quick mode. (The first version passed -1 as "use the
+        // annotation" and every non-quick run died at startup — a path the quick-mode smoke
+        // run, by construction, never walked.)
+        var builder = new OptionsBuilder()
                 .include(args.length > 0 ? args[0] : "com.adaworldapi.lancegraph.bench")
                 .resultFormat(ResultFormatType.CSV)
                 .result(System.getProperty("lgj.bench.result", "results/jmh-results.csv"))
-                .shouldDoGC(true)
-                .forks(quick ? 1 : -1)
-                .warmupIterations(quick ? 1 : -1)
-                .measurementIterations(quick ? 2 : -1)
-                .build();
+                .shouldDoGC(true);
+        if (quick) {
+            builder.forks(1).warmupIterations(1).measurementIterations(2);
+        }
+        var options = builder.build();
         new Runner(options).run();
     }
 

@@ -531,6 +531,42 @@ could then yield opposite RowStore ship decisions. Ruled:
 
 ---
 
+### Amendment A1 (2026-09-03) — the §5.2 cutoff, recorded BEFORE the first run
+
+**`N = 40 ns` per accessor call.** Estimator, as ruled above: `hw_delta =
+sqrt(hw_before² + hw_after²)`, independent arms. Instrument:
+`bench/gate-run.sh` + `I_ProductionAccessorGate` (#64); verdict function:
+`bench/gate.py`, which requires this amendment's commit sha and refuses a
+run without it.
+
+**Derivation, so the number can be overruled on its reasoning rather than
+re-litigated from nothing.** The budget is derived from a measurement that
+predates the instrument and is already banked — Component H's bare
+`lgj_lane_describe` crossing: **+35.5 ns, 99.9% CI [34.54, 36.53]** (#55,
+`jmh-results-H`, 5 forks × 8 iterations, rows = 65,536). The RowStore probe
+is by construction ONE such crossing per accessor call (the `Mask.words()`
+shape, #53: re-describe, compare, no second resolve), and `classidAt` is a
+documented low-level inspection accessor, *"never an execution engine"*
+(root `CLAUDE.md`). The budget therefore admits exactly one crossing at
+its measured CI ceiling plus ~10% for the accessor's own overhead around
+it — `36.53 × 1.1 ≈ 40.2`, rounded down to a whole number — and admits
+nothing beyond that: a probe that costs two crossings, or that perturbs
+the surrounding loop by more than that margin, FAILS.
+
+**What this amendment is not.** It is not derived from the instrument's
+own output. A quick-mode smoke run of `gate-run.sh` (1 fork, 2 iterations,
+refused by `gate.py` as sub-threshold — `bench/README.md` § "The §5 gate")
+was performed on 2026-09-03 while validating the instrument, before this
+amendment, and showed ≈ +30 ns. That run is not evidence and this number
+is not fitted to it: the derivation above uses H alone and would yield
+40 ns had the smoke run never happened. Stated because §5.2's ordering
+rule is about *information*, not just commit order, and a reader deserves
+to know the author had seen a non-evidential number. If the operator
+judges that contamination disqualifying, strike this amendment and
+re-derive; the gate run must then be repeated after the new commit.
+
+**Power precondition this implies:** `hw_delta < 20 ns`.
+
 ## 6. THE RESOLUTION
 
 Ship **(a), renamed and re-scoped**, under arm **(ii)**:
