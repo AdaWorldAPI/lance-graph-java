@@ -8,6 +8,20 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #68 — mask-risc-lowering v1 → v4: SPEC completion, the 5+3 council, voxelmasking (merged 2026-09-03 as `dfb4ab1`, head `4ad9377`)
+
+**Added.** Four commits on `.claude/plans/mask-risc-lowering-v1.md`, plan-only — no kernel, no ABI symbol, no mint, no production code. `51dcffc` completed SPEC v1 to the council bar (non-goals, pre-registered gates G1–G8, per-savant question sets); `00570a0` draft v2 (5 savants, 40 findings, 24 amendments); `0212d21` ratified v3 (3 reviewers, 2 BLOCK + 14 FIX, 2 external Codex P1s); `4ad9377` the v4 amendment — §14 voxelmasking, §3c reuse map, §15 two probes. `STATUS_BOARD` rows `D-MRL-0f` and `D-MRL-0g`.
+
+**Locked.** The vertical axis is ENUMERATED, not cached: 3 states per HHTL tier over 3 tiers, 9 primitives built (72 KB at 65,536 rows), the other 18 cells an AND of three. That strikes S5-Q4 / L8 / F7 / F12 / F10 on that axis by construction. The boundary is fixed with the claim — 3⁶ borderline at 5.7 MB, 3¹² never at 4.2 GB — so enumeration is tier-granularity only and the horizontal rail axis keeps a real cache with `D-MRL-0b′` / G9 verbatim. F2's immutability rule survives and is strengthened. The reuse rule: **hierarchical few-valued axes → voxel; real-cardinality coupling → blasgraph.** OSM is the native case on shipped evidence (`ogar-osm/src/lib.rs:212`, rails 0–3 = HHTL tiers, x/y literal); weather splits wind→voxel / humidity×13→blasgraph.
+
+**Deferred.** Every wave. Wave 0 gates all of Wave 1 and nothing in Wave 0 has run. Culling (§14.6) and prefetch (§14.7) are labelled CLAIMED, UNMEASURED with the numbers they owe — cull fraction on D-MRL-0f, frame-to-frame overlap on D-MRL-0g. Q1–Q5 remain open; Q3's pinning-budget half is now horizontal-only, since vertical masks are not in the budget.
+
+**Superseded.** PR #67 closed unmerged — its single commit is the first of these four. Its two Codex P1s were verified against the file, not taken on the review's word: the close-and-requery hazard is F12 + G11-GATE, and `cargo clippy … -D warnings` without `--` (which meant the mandatory central gate could not run at all) is fixed. `ISS-LGJ-STACK-TAIL-STRANDED` did NOT recur — checked with `git log origin/main..origin/claude/mask-risc-v2`, empty.
+
+**Docs.** Plan header v4 status; `STATUS_BOARD` status flip + two new rows; this entry.
+
+**Confidence.** High in the arithmetic (§14.2 is `N/8` bytes times a state count — no measurement in it) and in the boundary table. Low, and labelled so, in every reuse and cull claim: nothing in this plan has been measured, and `E-HHTL-COMPILES-HIERARCHY-INTO-MASK-GEOMETRY-1` proves nesting algebra while explicitly disclaiming novelty — the reuse half is measured nowhere. Zero external review landed on the arc: CodeRabbit skipped the PR as a draft, Bugbot hit its usage cap, and the merge came before either could re-run.
+
 ## PR #65 — the §5 gate, run as pre-registered: FAIL; the RowStore half does not ship (opened 2026-09-03, head `cad704c`)
 
 **Added.** Amendment A1 (`43a08d1`, N = 40 ns/call, derived from the banked H crossing, committed BEFORE any run); the results commit (`37e5f95`) citing it: `before 8.645 ± 0.284`, `after 61.405 ± 1.464`, `delta +52.76 ± 1.49 ns/call`, powered, **FAIL**, ratio 7.10 flagged; the four banked result files; a `Harness` fix (non-quick runs died at startup after #64 — `-1` passed to JMH setters).
