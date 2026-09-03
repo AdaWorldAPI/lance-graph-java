@@ -683,3 +683,120 @@ keeps the measurement about the cube rather than about the domain.
 It measures the **vertical** axis only. `D-MRL-0b′` (per-class rail hit rate under a real
 capacity bound) and `G9` (`hit_rate × (cold − warm) > 0`) remain the gate for the horizontal
 axis, unchanged and still unmeasured. A green D-MRL-0f is **not** evidence for the trie.
+
+---
+
+## §16 — v4.1 PRIOR-ART AMENDMENT: D-MRL-2a is BLOCKED, and D-MRL-1a's op already exists
+
+> **Status:** AMENDMENT, filed 2026-09-03 BEFORE D-MRL-2a moves. Every claim carries
+> `file:line` verified at lance-graph `c7002ee6` / OGAR HEAD. This is a prior-art finding the
+> 5+3 council could not have made: two of the three artifacts below landed AFTER the council
+> ran, and the third was verified only as a plan reference, never against the tree.
+
+### §16.1 — F1 (the mint) is retracted: `BELNAP_JOIN` names a carrier that no longer exists
+
+`D-MRL-2a` mints `BELNAP_JOIN` at `0x8C` with semantics quoted from `#1129`:
+*OR of support planes ∥ OR of refute planes* over `EpistemicBassin24`'s
+`(support_mask, refute_mask)` two-bit-per-axis encoding.
+
+**That carrier was deleted.** The September semantic-family recovery
+(`E-SIX-SEMANTIC-FAMILIES-MUST-NOT-IMPERSONATE-EACH-OTHER-1`,
+`.claude/board/EPIPHANIES.md:438`) lists under *"Removed in this cleanup"*:
+`epistemic_bassin.rs`, and **`OGAR: ogar-epistemic (0x0334), the loco calls 0x87..0x8B
+(BELNAP_JOIN, INFO_GAIN, SIGMA_TENSION, ACCUMULATE, STANCE_ENTROPY; census 101 → 96)`**
+(`:484-485`).
+
+Verified in the tree, not inferred: `grep -rn "EpistemicBassin24\|epistemic_bassin\|support_mask"
+--include=*.rs crates/` returns **zero occurrences** across all of lance-graph. `ogar-loco`
+records the retraction at its own mint site (`crates/ogar-loco/src/lib.rs:596-599`): *"Slots
+0x87..0x8B are reserved core slots: the pair-specific band minted there on 2026-09-01 was
+retracted on 2026-09-02 **with the model it encoded**."*
+
+**The plan's own citation is stale.** `D-MRL-2a` cites `EPIPHANIES.md:438` for the join
+identity; line 438 is now the heading of the ruling that *retracted* it. The join theorem of
+#1129 is not disproven — it is a theorem about a carrier that was removed for reasons
+unrelated to the algebra.
+
+**Consequence:** `D-MRL-2a` is **BLOCKED**, not merely amended. Minting `BELNAP_JOIN` at
+`0x8C` would re-mint, one slot over, a verb retracted the day before this plan's council ran —
+against `ogar-loco`'s own stated rule at the same site: *reserve, don't reclaim — a future mint
+takes the next free slot **deliberately***. A deliberate mint requires a live carrier, and
+there is none.
+
+### §16.2 — F2: `TERNLOG` is ALREADY MINTED, and D-MRL-1a should consume it
+
+`D-MRL-1a` proposes `LgjOpDesc` kind `TERNLOG(imm, a, b, c)`. **`ogar_loco::TERNLOG =
+FnIndex(0x86)` ships**, minted 2026-09-01 (`crates/ogar-loco/src/lib.rs:607`), and its
+description is this plan's op verbatim: *"Any 3-input boolean over stacked masks: pops three
+masks, and the call's ONE VALUE BYTE is the 8-bit truth table (IMM bit index =
+`(a << 2) | (b << 1) | c`) — one FnIndex covers all 256 stacked-mask combinators."*
+It is explicitly **preserved** by the same cleanup that retracted the band around it
+(`EPIPHANIES.md:488`: *"the generic `TERNLOG` 0x86 (independently justified by ndarray's
+`ternlog`)"*), and it names the same backend this plan names.
+
+**And it has ZERO consumers.** `grep -rn "TERNLOG" --include=*.rs` across both trees returns
+only the mint site itself — no caller in lance-graph, none in OGAR outside `ogar-loco/src`.
+By the rule PR #1154 landed the same day
+(`E-A-RULED-HOME-NEEDS-A-FIRST-CONSUMER-OR-IT-IS-A-VACANCY-1`: *"a ruled home with no caller
+is not a home; it is a vacancy the next session re-implements beside"*), `TERNLOG` 0x86 is
+today a vacancy — and `D-MRL-1a` minting its own op kind beside it is **literally the
+re-implementation that rule predicts**. Consuming it makes Wave 1 that address's first
+consumer and discharges the vacancy.
+
+This is the **good** case of `F-RLR-2` firing: the loco carrier exists, so Wave 1 consumes an
+address rather than inventing one. The falsifier is unchanged; what changes is that
+`D-MRL-1a` no longer needs a mint at all, and Wave 2's lowering table for `TERNLOG` is
+already written upstream.
+
+### §16.3 — F3: `witness_fabric` is a DIFFERENT semantic family, and that is the point
+
+`crates/lance-graph-contract/src/witness_fabric.rs` (379 lines, landed after the council)
+computes quorum and contradiction over a window of peer rows: `elect_peers` (`:254`),
+`absolute_agreement` (`:210`), `quorum_mantissa` (`:1227`), `opinion_strength` (`:1367`),
+each with a `_lens` zero-copy twin.
+
+The tempting read — *"contradiction is already implemented, so `BELNAP_JOIN` is a duplicate"* —
+is **wrong, and the ruling says so explicitly**. `E-SIX-SEMANTIC-FAMILIES-MUST-NOT-IMPERSONATE-
+EACH-OTHER-1` separates **family (1) episodic / Markov loci** (`CausalWitnessFacet`, tenant 14
+— what `witness_fabric` computes) from **family (3) epistemic population basins**, which it
+records as *"an accepted VACANCY"* with no shipped ABI, tenant, ClassView or axis vocabulary.
+Its invariants are stated as: *same physical shape ≠ same semantics; same codec ≠ same
+ClassView; locus ≠ magnitude ≠ population basin ≠ causal graph.*
+
+So the two contradiction surfaces are **not** redundant — and a future session that "unifies"
+them commits precisely the impersonation the ruling forbids. What IS a real finding:
+
+- **`witness_fabric` carries no mask vocabulary at all.** Zero `u64`, zero `mask`, zero
+  `ndarray::simd` in the file; 119 scalar loop/iterator sites. If this plan's premise holds
+  anywhere, family (1)'s agreement topology is a candidate for the same lowering — but that is
+  a **new, separate D-id**, not a re-use of `D-MRL-2a`'s slot, and it needs its own
+  insufficiency argument.
+- Its module doc reaches this plan's own §14 conclusion independently: *"FUNCTIONS over a slice
+  of `(position, CausalWitnessFacet)` rows — never a materialized `W×W` fabric struct."*
+  Convergent, not derived — worth recording as corroboration rather than as evidence.
+
+### §16.4 — What changes, concretely
+
+| item | before | after this amendment |
+|---|---|---|
+| **D-MRL-1a** | mint a `TERNLOG` op kind | **consume `ogar_loco::TERNLOG` (0x86)**; no mint. Falsifier unchanged |
+| **D-MRL-2a** | mint `BELNAP_JOIN` at `0x8C` | **BLOCKED.** Carrier deleted; re-minting a verb retracted 2026-09-02 one slot over is the reclaim its own mint site forbids |
+| **D-MRL-2b** (`where`/`scan`) | unchanged | unchanged — it lowers to `TERNARY_MATCH` + prefix AND, neither of which depends on the retracted band |
+| **F8** (the `0x8C` slot decision) | ⊘ **SUPERSEDED** | a slot is not the blocker; a live carrier is |
+| **Q5** (which deferred verb takes a core slot) | open | **answered NO for all five** — the whole `0x87..0x8B` band went with the model it encoded. Q5 is closed, not deferred |
+| **NEW: D-MRL-2c** | — | *proposed, not scheduled:* lower family (1)'s agreement topology (`witness_fabric`) onto mask ops. Needs its own F-RLR-2 insufficiency argument and must NOT be conflated with family (3) |
+
+### §16.5 — The process finding, which outlives the specifics
+
+The council ratified `D-MRL-2a` on 2026-09-03 citing an epiphany line that had been the
+*retraction* since 2026-09-02. Nothing in the 5+3 protocol caught it: the code-truth savant
+verifies `file:line` claims about **this repo**, and the retraction is in a **sibling repo's
+board**. Prior-art coverage stops at the repo boundary, and this workspace's plans routinely
+cite across it.
+
+**Rule extracted:** a plan that cites a sibling repo's board line must re-verify that line
+**against the sibling's current HEAD at ratification time**, not at drafting time — and a
+citation to a *removal* ruling reads identically to a citation to the thing removed. The
+cheap mechanical check is the one used here: grep the sibling tree for the **symbol**, not the
+epiphany id. `EpistemicBassin24` returning zero hits took one command and would have blocked
+the mint three commits earlier.

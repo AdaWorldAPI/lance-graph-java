@@ -1,5 +1,28 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-CROSS-REPO-CITATION-GOES-STALE-SILENTLY (2026-09-03) — OPEN
+
+**A citation to a REMOVAL reads identically to a citation to the thing removed.**
+`mask-risc-lowering-v1.md`'s `D-MRL-2a` cited `lance-graph` `EPIPHANIES.md:438`
+for the Belnap join identity. By ratification day that line was the heading of
+`E-SIX-SEMANTIC-FAMILIES-MUST-NOT-IMPERSONATE-EACH-OTHER-1` — the ruling that
+*retracted* the verb and deleted its carrier. The plan ratified a mint over a
+carrier with zero occurrences in the tree.
+
+**Why the council could not catch it.** The code-truth savant verifies `file:line`
+claims about THIS repo; the retraction lives in a sibling repo's board. Prior-art
+coverage stops at the repo boundary, and this workspace's plans routinely cite
+across it. Line numbers in an append-only board also shift under every prepend,
+so a citation can come to point at a different entry with no edit to either side.
+
+**The cheap check, used to find this:** grep the sibling tree for the **symbol**,
+not the epiphany id. `EpistemicBassin24` returning zero hits is one command and
+would have blocked the mint three commits earlier.
+
+**Open because the mechanism is unfixed**, not the instance — the instance is
+resolved in v4.1 §16. A plan citing a sibling board needs symbol-level
+verification at ratification time; nothing enforces that today.
+
 ## ISS-LGJ-G11-FENCE-WAS-PROSE (2026-09-03) — RESOLVED same day
 
 **The gate that the doctrine names, the source cites, and nothing built.**
