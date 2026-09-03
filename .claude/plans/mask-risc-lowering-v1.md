@@ -1,5 +1,10 @@
 # mask-risc-lowering-v1 — the API speaks database, the backend does photolithography
 
+> **Status:** v4.2 COUNCIL-CORRECTED (2026-09-03) — a 5+3 verification council ran because
+> #68/#70 merged with zero external review. 8 claims struck-and-regraded (§17), two reviewer
+> BLOCKs, one blocking row D-MRL-G2, and a firewall violation the v3 council left shipped.
+> ⊘ The v4 status below is superseded on one point in particular: **there WAS a council re-run.**
+>
 > **Status:** v4 AMENDED — §14 (voxelmasking: the vertical axis is enumerated, not cached),
 > §3c (reuse map: OSM native, weather splits wind/humidity), §15 (D-MRL-0f OSM probe,
 > D-MRL-0g frame-sequence probe). v4 does not retract v3; it narrows the axis v3's cache
@@ -526,7 +531,7 @@ touched. So:
 - **Zone-map skipping** — already the plan's own framing of the vertical axis (§2). A tier
   whose primitive AND yields a zero accumulator word means that entire 64-row block is
   skipped, which is exactly **D-MRL-1b's survivor-word skip** — ⊘ v4.2 §17: **that skip is PROPOSED, not shipped** (`plan_eval_impl` has no zero-accumulator skip today; D-MRL-1b is a deliverable with its own KILL). The struck text called it "the existing one", so this bullet's conclusion has NO mechanism under it until D-MRL-1b lands. Voxelmasking does not add a
-  culling mechanism; it makes the mask that drives the existing one free to obtain.
+  culling mechanism; it makes the mask for the **proposed** D-MRL-1b skip free to obtain (⊘ v4.2 §17: the struck tail read "the existing one" — the v4.2 correction fixed the sentence's first half and left its tail asserting the same false existence, found by BOTH reviewers).
 - **Occlusion / LOD** — the tiers ARE the level-of-detail ladder (`GEO_V3_FACET` rails 0–3,
   heel→leaf). Culling at a coarse tier costs one index and one AND regardless of how many
   rows it removes, which is the property that makes hierarchical culling worth doing at all.
@@ -806,7 +811,12 @@ the mint three commits earlier.
 ## §17 — v4.2: the VERIFICATION COUNCIL (2026-09-03) — the review that did not happen
 
 > **Why.** #68 and #70 merged with **zero external review**: CodeRabbit spend-capped
-> (84 attempts/7 days ⇒ 1/hour), Bugbot usage-capped. A 5+3 council was convened as
+> 85 attempts over 7 days **and** an org spending cap, together setting an allowance of
+> 1 review/hour. ⊘ v4.2: the struck text wrote this as *"(84 attempts/7 days ⇒ 1/hour)"*, a
+> **false derivation** — 84 over 7 days is 0.5/hour, and 1/hour is the allowance the provider
+> SET, not a rate computed from usage. A reviewer flagged the arrow correctly and proposed
+> substituting 0.5/hour, which would swap one wrong reading for another: neither number is
+> derived from the other. Bugbot usage-capped. A 5+3 council was convened as
 > the substitute. Every correction below is a **strike-and-regrade** — the original
 > text is retained and marked ⊘, never replaced (append-only).
 
