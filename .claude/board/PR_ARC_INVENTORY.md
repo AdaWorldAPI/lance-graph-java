@@ -8,6 +8,32 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #63 — G11 built: the fence the doctrine named and nothing enforced (opened 2026-09-03, head `5a25b60`)
+
+- **Opened because a gate existed only as a sentence.** `CLAUDE.md` § Enforcement,
+  `Cargo.toml`, and `class_view_provider.rs:73` all cite "the G11 contract-import
+  fence" as structural enforcement. No test existed. Found while surveying the
+  R2IL / `ogar-loco` seam — the allowlist is about to grow by a vocabulary
+  provider, and a list enforced by nothing would have taken that silently too.
+- **Added:** `native/lgj-abi/tests/g11_contract_import_fence.rs` — scans `src/*.rs`
+  for every `lance_graph_contract::<module>` reference (plain / brace group /
+  doc-link), rejects any outside `{canonical_node, class_view, facet, ontology}`
+  by file:line. Anti-vacuity asserted in-test; scanner pinned separately.
+- **Locked:** the allowlist has ONE spelling in two places (`ALLOWED` + the
+  `CLAUDE.md` paragraph), and the test keeps them together. `facet` added — it had
+  been live in three files with the list never growing. Old list struck, not deleted.
+- **Disable:** one appended `use lance_graph_contract::kanban::KanbanMove;` →
+  red at `fixture.rs:298`; checkout → green. The narrowest disable that exists,
+  so the #60 widening rule was not triggered.
+- **Board:** `ISS-LGJ-G11-FENCE-WAS-PROSE` (opened + resolved); ledger row 13;
+  `FANOUT-UNREVIEWED` / `TARGET-DIR-SIZE-WATCH` / `DEV-BRANCH-STILL-UNCOMMITTED`
+  closed by dated appended paragraphs.
+- **Deferred:** the vocabulary-provider growth of the allowlist (`ogar_loco`) —
+  gated on W4 of `r2il-machine-semantic-contract-v1.md` and the OGAR custom-space
+  ruling, not on anything here.
+- **Confidence:** high on the fence (red-then-green, narrowest disable); the
+  three closures are supersession/expiry, not new evidence.
+
 ## PR #60 — W1+W2 built, and the fence that had to be fixed twice (merged 2026-08-28, `97f25c5` — 4 commits, head `c6d8a4c`)
 
 - **Opened because a board entry hid two obligations behind two words.** #57's
