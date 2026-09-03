@@ -10,6 +10,8 @@
 
 ## PR #63 — G11 built: the fence the doctrine named and nothing enforced (opened 2026-09-03, head `5a25b60`)
 
+**Merged 2026-09-03 as `f1c8aef`** (recorded post-merge, per the rule; final head `5983e4b`, three commits).
+
 - **Opened because a gate existed only as a sentence.** `CLAUDE.md` § Enforcement,
   `Cargo.toml`, and `class_view_provider.rs:73` all cite "the G11 contract-import
   fence" as structural enforcement. No test existed. Found while surveying the

@@ -283,6 +283,8 @@ unchanged but now has two commits to order against, not one.
 **Not blocking the `Mask` half**, which shipped in #53 without needing any
 of this — it was never cost-gated.
 
+**2026-09-03 — consequence 2 is now mechanised, consequence 1 is answered.** `bench/gate-run.sh` performs the two builds itself: the production tree as shipped, and the production tree with ONE file (`LaneProbe.java`, a package-private no-op seam `RowStore.lane()` calls) swapped for `bench/variants/probed/LaneProbe.java`. Same JDK, same `.so`, same machine, one script — the pinning this entry asked for is the script's own structure. The "implement, measure, then keep or discard" question is answered without a discardable implementation: the probe exists only as the bench variant until a PASS moves it into `java/src/main`, one file copy. `gate.py` refuses a run without the amendment sha, so the pre-registration ordering this entry names is enforced by the tool, not remembered. **Still open:** the amendment naming `N`. Nothing here runs the gate; nothing here decides.
+
 ## ISS-LGJ-EPOCH-UNCHECKED — RESOLVED for the `Mask` half (W1.1)
 
 `Mask.words()` now re-authorises its cached word lane with the substrate
