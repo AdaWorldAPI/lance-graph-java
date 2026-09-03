@@ -59,11 +59,18 @@ public final class Harness {
         System.out.println("=".repeat(96));
         System.out.println();
 
+        // LGJ_BENCH_QUICK=1 shrinks forks/iterations for a smoke run. gate.py refuses such a
+        // CSV (its Samples column is below 5 forks x 8 iterations), so a quick run can never be
+        // mistaken for evidence.
+        boolean quick = "1".equals(System.getenv("LGJ_BENCH_QUICK"));
         var options = new OptionsBuilder()
                 .include(args.length > 0 ? args[0] : "com.adaworldapi.lancegraph.bench")
                 .resultFormat(ResultFormatType.CSV)
-                .result("results/jmh-results.csv")
+                .result(System.getProperty("lgj.bench.result", "results/jmh-results.csv"))
                 .shouldDoGC(true)
+                .forks(quick ? 1 : -1)
+                .warmupIterations(quick ? 1 : -1)
+                .measurementIterations(quick ? 2 : -1)
                 .build();
         new Runner(options).run();
     }

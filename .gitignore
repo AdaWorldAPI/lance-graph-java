@@ -9,6 +9,9 @@ Cargo.lock.bak
 /java/out/
 /java/target/
 /bench/out/
+# gate-run.sh's two API builds (before/after) + its bench build. Its results/gate-*.csv are
+# NOT ignored: a real gate run is banked deliberately, by the results commit §5 requires.
+/bench/out-gate/
 /bench/lib/*.jar
 /valhalla-lab/out/
 # run.sh's own compiled output (results/*-api, results/*-lab class trees) — the

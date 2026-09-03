@@ -377,8 +377,11 @@ public final class RowStore implements NativeResource, AutoCloseable {
         if (w == null) {
             w = Engine.describeLane(handle, laneId);
             lanes[laneId] = w;
+            return w;
         }
-        return w;
+        // The §5 build-time seam (see LaneProbe): a no-op in the shipping build, the per-access
+        // liveness probe in the gate's `after` build. Not a flag — the file is swapped.
+        return LaneProbe.check(handle, laneId, w);
     }
 
     private long checkedRow(long row) {

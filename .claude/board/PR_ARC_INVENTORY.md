@@ -8,7 +8,21 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #64 — the §5 gate instrument: production accessor in two builds, verdict table as a tool (opened 2026-09-03, head `55b7648`)
+
+**Added.** `D-LGJ-MMV-1a-bench`. A package-private no-op seam `LaneProbe` in `RowStore.lane()`; its probed twin under `bench/variants/probed/` (re-describe + epoch/length compare, the `Mask.words()` shape); `bench/gate-run.sh` compiling `java/` twice with that one file swapped and running `I_ProductionAccessorGate` (the PRODUCTION `classidAt`, Blackhole, `@Fork(5)`, 65,536 rows) against each; `bench/gate.py`, the §5 verdict table with a self-test pinning the plan's own struck cases, refusing `N ≤ 0`, sub-5×8-sample CSVs, and a missing amendment sha. `Harness` gains `-Dlgj.bench.result` and `LGJ_BENCH_QUICK`.
+
+**Locked.** Both arms are the production accessor as the JIT sees it; no flag, no branch (§5.5). Quick runs are structurally not evidence. A verdict without a preceding amendment sha is not producible by the tool.
+
+**Deferred.** The gate run itself and any `RowStore` behaviour change: blocked on the `N` amendment, an operator budget. The shipped seam is a no-op, so `ISS-LGJ-EPOCH-UNCHECKED` stays OPEN for `RowStore`.
+
+**Docs.** `bench/README.md` § "The §5 gate"; `STATUS_BOARD` `-bench` → In PR, `-rowstore` blocker narrowed; `ISSUES.md` append on `BENCH-GATE-PRECEDES-ITS-SUBJECT`; #63 merge sha recorded.
+
+**Confidence.** High that the instrument measures what §5 asks (the smoke delta ≈ +30 ns reproduces H's bare-crossing cost through the real accessor). None claimed for any verdict — none was produced.
+
 ## PR #63 — G11 built: the fence the doctrine named and nothing enforced (opened 2026-09-03, head `5a25b60`)
+
+**Merged 2026-09-03 as `f1c8aef`** (recorded post-merge, per the rule; final head `5983e4b`, three commits).
 
 - **Opened because a gate existed only as a sentence.** `CLAUDE.md` § Enforcement,
   `Cargo.toml`, and `class_view_provider.rs:73` all cite "the G11 contract-import

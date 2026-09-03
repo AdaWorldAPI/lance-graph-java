@@ -27,6 +27,44 @@ cd native/lgj-abi && CARGO_TARGET_DIR=$(cd ../.. && pwd)/target cargo build --re
 Output: `results/jmh-run.txt` (full log, including every warm-up iteration) and
 `results/jmh-results.csv` (machine-readable).
 
+## The §5 gate — two builds, one verdict function
+
+The `RowStore` half of W1.1 (`.claude/plans/epoch-recheck-v3.md` §5) is gated on a per-accessor
+cost measurement that Component H could not supply: H times a bare `lgj_lane_describe` crossing,
+not the production accessor (Codex P1 on #55). Component I is the instrument that does, and it is
+deliberately split from `run.sh` because it cannot share one classpath between its arms:
+
+```sh
+cd bench && ./gate-run.sh                     # builds java/ TWICE, runs Component I against each
+cd bench && ./gate.py --selftest              # the §5 verdict table, pinned on the plan's own cases
+cd bench && ./gate.py --n <N> --amendment <sha> results/gate-before.csv results/gate-after.csv
+```
+
+- **The seam.** `java/src/main/java/.../LaneProbe.java` is a package-private no-op that
+  `RowStore.lane()` calls on every cached read. `bench/variants/probed/LaneProbe.java` is the same
+  class with the per-access liveness probe (re-describe + epoch/length compare, the `Mask.words()`
+  shape from #53). `gate-run.sh` compiles the production tree once as shipped and once with that
+  single file swapped — §5.5's build-time variant swap, and the two-build consequence
+  `ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT` names, taken literally. There is no flag and no branch
+  in either arm; both are `RowStore.classidAt` as the JIT sees it.
+- **The instrument.** `I_ProductionAccessorGate` has one `@Benchmark`, `store.classidAt(row, f)`,
+  Blackhole-consumed, `@Fork(5)`, §5's 65,536-row fixture, `CALLS_PER_OP = 1`. It emits one CSV
+  and decides nothing.
+- **The verdict.** `gate.py` is the §5 table and only the §5 table: `delta_ns = after − before`,
+  `hw_delta = sqrt(hw_a² + hw_b²)`, ex-ante power `hw_delta < N/2`, then PASS / FAIL /
+  UNDERPOWERED from the delta interval against `N`; the "below resolution" label when the interval
+  contains 0; the 2× ratio recorded as a flag that blocks nothing. `--selftest` pins the plan's
+  own worked examples, including the three verdict rules §5 struck. It refuses `N ≤ 0`, refuses a
+  CSV with fewer than 5 × 8 samples (so `LGJ_BENCH_QUICK=1` smoke runs can never be mistaken for
+  evidence), and requires the sha of the amendment that recorded `N` — a run whose `N` was chosen
+  after the numbers is not pre-registered and this tool will not bless it.
+
+**What has NOT happened:** the gate has not been run as evidence. No amendment names `N`, and §5.2
+says that commit must precede both runs. A quick-mode smoke run on 2026-09-03 (1 fork, 2
+iterations — refused by `gate.py` by design) showed the swap takes: before ≈ 11 ns/call, after ≈
+41 ns/call, consistent with H's +35.5 ns bare crossing. That is a plumbing check, not a
+measurement, and it is not banked.
+
 ## The components, and why each is isolated
 
 | | class | question it answers alone |
