@@ -43,6 +43,41 @@ keep: the blocking finding was against the orchestrator's own draft, and
 the draft would otherwise have shipped a mandatory falsifier that cannot
 reliably report failure.
 
+## 2026-09-03 — 5+3 council on `mask-risc-lowering-v1` (D-MRL-0..3) — RATIFIED v3
+
+**The 5 (Phase 1, one parallel spawn, no cross-briefing):** prior-art, iron-rules, code-truth,
+cascade-impact, different-views. **40 findings.** Two lenses ran at accumulation tier
+(prior-art sweeps ~100 board docs; different-views is alternative-reading synthesis); three ran
+bounded against the spec's question sets, which is what the Phase-0 bar buys.
+
+**Phase 2 (consolidate FIRST, before any reviewer existed):** draft v2, 24-row ledger. The four
+that reshaped the plan: the `mammal` ALGEBRA is already proven 7/7 (`E-HHTL-COMPILES-HIERARCHY-
+INTO-MASK-GEOMETRY-1`) so D-MRL-1d's mechanism was retired; the 200× was not supported by the
+plan's own numbers (~50×, and composed-AND demoted to a hypothesis); the memo key aliased across
+classes sharing a prefix (correctness hole → `(version, classid, prefix)`); and re-minting
+`0x87..0x8B` VIOLATES "reserve, don't reclaim" — found independently by two lenses, leaving four
+free core slots for five verbs.
+
+**The 3 (Phase 3, on draft v2 only):** overclaim-auditor, dilution-collapse-sentinel,
+firewall-warden. **2 BLOCK, 14 FIX.**
+- **BLOCK R2 §8** — model identifiers in a committed artifact. R1 and R3 both PASSED that same
+  section; **the stricter verdict won**, no operator escalation. Rewritten by role.
+- **BLOCK R1 §4** — the warm cell headlined the very number the plan had retracted one paragraph
+  below it. Every rung regraded `[E]`; only the 21.911 ns crossing floor is measured.
+- **R1 + R2 independently on L12** — v2's ledger recorded a resolve-time version check as an
+  existing gate. `registry.rs` has **zero** `version` occurrences (verified). This is the
+  `ISS-LGJ-G11-FENCE-WAS-PROSE` shape, caught before shipping → F10 as a NEW requirement.
+- **R1 narrowed a claim I had already repeated as fact**: the entry proves nesting algebra and
+  says "Novelty explicitly NOT claimed"; the reuse half is measured nowhere.
+
+**External (Codex on #67), both verified against source and folded in:** the mandatory central
+gate could not run (`clippy … -D warnings` without `--` exits before linting — reproduced); and
+a trie hit handing back the cached handle lets a caller's `Mask.close()` destroy the memo entry
+while the hit counter still reports reuse → F12 + G11-GATE.
+
+**v3:** 12 frozen decisions, 11 gates, waves 0/1/2/3 with Wave 0 gating all of Wave 1. Nothing
+built; no kernel, no ABI symbol, no mint. Board hygiene in this commit.
+
 ## 2026-08-25 — ABI minors 6→8 + board hygiene (main thread, no fan-out)
 
 Straight-line main-thread work; no subagents spawned, so no tag-files to
