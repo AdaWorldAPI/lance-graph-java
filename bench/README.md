@@ -59,7 +59,14 @@ cd bench && ./gate.py --n <N> --amendment <sha> results/gate-before.csv results/
   evidence), and requires the sha of the amendment that recorded `N` — a run whose `N` was chosen
   after the numbers is not pre-registered and this tool will not bless it.
 
-**What has NOT happened:** the gate has not been run as evidence. No amendment names `N`, and §5.2
+**The gate ran on 2026-09-03** (Amendment A1 `43a08d1`, N = 40 ns/call, committed first; results
+commit cites it). `before 8.645 ± 0.284`, `after 61.405 ± 1.464`, **delta +52.76 ± 1.49 ns/call**,
+powered, **FAIL**; ratio 7.10 flagged. The RowStore probe does not ship. Banked in
+`results/gate-{before,after}.csv`, `gate-run.txt`, `gate-verdict.txt`. The seam stays a no-op so
+the instrument stays runnable. Below is the pre-run text, kept as the record of what was claimed
+before the number existed.
+
+**What had NOT happened as of #64:** the gate had not been run as evidence. No amendment names `N`, and §5.2
 says that commit must precede both runs. A quick-mode smoke run on 2026-09-03 (1 fork, 2
 iterations — refused by `gate.py` by design) showed the swap takes: before ≈ 11 ns/call, after ≈
 41 ns/call, consistent with H's +35.5 ns bare crossing. That is a plumbing check, not a

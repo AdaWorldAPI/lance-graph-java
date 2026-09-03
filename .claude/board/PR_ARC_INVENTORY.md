@@ -10,6 +10,8 @@
 
 ## PR #64 — the §5 gate instrument: production accessor in two builds, verdict table as a tool (opened 2026-09-03, head `55b7648`)
 
+**Merged 2026-09-03 as `c2b9344`** (recorded post-merge; final head `31576e0`). Zero external review landed — CodeRabbit rate-limited, Bugbot spend-capped, Codex silent. The first real gate run then caught a defect this PR shipped: `Harness` passed `-1` to JMH's fork/iteration setters outside quick mode and every non-quick run died at startup. Fixed in the results PR.
+
 **Added.** `D-LGJ-MMV-1a-bench`. A package-private no-op seam `LaneProbe` in `RowStore.lane()`; its probed twin under `bench/variants/probed/` (re-describe + epoch/length compare, the `Mask.words()` shape); `bench/gate-run.sh` compiling `java/` twice with that one file swapped and running `I_ProductionAccessorGate` (the PRODUCTION `classidAt`, Blackhole, `@Fork(5)`, 65,536 rows) against each; `bench/gate.py`, the §5 verdict table with a self-test pinning the plan's own struck cases, refusing `N ≤ 0`, sub-5×8-sample CSVs, and a missing amendment sha. `Harness` gains `-Dlgj.bench.result` and `LGJ_BENCH_QUICK`.
 
 **Locked.** Both arms are the production accessor as the JIT sees it; no flag, no branch (§5.5). Quick runs are structurally not evidence. A verdict without a preceding amendment sha is not producible by the tool.

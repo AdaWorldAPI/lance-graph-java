@@ -113,7 +113,7 @@ fields, so it still becomes an orphan when its parent closes — which is correc
 by design (the caller owns it) and is now safe precisely because this fix makes
 `Mask.close()` release an orphan.
 
-## ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW (2026-08-28) — OPEN
+## ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW (2026-08-28) — OPEN (its specified remedy FAILED the §5 gate, 2026-09-03)
 
 **Opened late, and the lateness is the first thing worth recording.** v3 W4
 requires this issue to be opened **in the same commit** that re-scopes
@@ -173,6 +173,8 @@ the cached-descriptor path, which resolves no handle and therefore returns no
 status at all. The row now says **handle-mediated** operation and points at the
 contract. The doc had been overclaiming exactly the guarantee this issue exists
 to deny.
+
+**2026-09-03.** The per-access probe that would have narrowed this window on `RowStore` was measured at +52.76 ± 1.49 ns/call against a pre-registered N = 40 and does not ship (see `ISS-LGJ-EPOCH-UNCHECKED`). This entry stays OPEN as a *documented, measured* gap: closing it now needs a mechanism that is not one crossing per accessor call — e.g. a per-scan probe on a bulk accessor, or the enforcement wave that makes `Engine.close(long)` unreachable from outside the owning facade — and either is its own plan.
 
 ## ISS-LGJ-ROWSTORE-PER-ACCESS-MEASURED — EXPLORATORY, decides nothing
 
@@ -253,7 +255,7 @@ standing beside it. This is the eighth and the worst shape of it: the entry
 *correctly* declared its own run void in one paragraph and then *acted on that
 run anyway* in the next. Naming a failure mode does not confer immunity to it.
 
-## ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT — the RowStore gate cannot be run as specified
+## ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT — RESOLVED 2026-09-03 (the gate ran as specified)
 
 Found while starting the benchmark v3 names as the `RowStore` half's gate.
 Two ordering problems, both in the plan rather than in the code:
@@ -284,6 +286,8 @@ unchanged but now has two commits to order against, not one.
 of this — it was never cost-gated.
 
 **2026-09-03 — consequence 2 is now mechanised, consequence 1 is answered.** `bench/gate-run.sh` performs the two builds itself: the production tree as shipped, and the production tree with ONE file (`LaneProbe.java`, a package-private no-op seam `RowStore.lane()` calls) swapped for `bench/variants/probed/LaneProbe.java`. Same JDK, same `.so`, same machine, one script — the pinning this entry asked for is the script's own structure. The "implement, measure, then keep or discard" question is answered without a discardable implementation: the probe exists only as the bench variant until a PASS moves it into `java/src/main`, one file copy. `gate.py` refuses a run without the amendment sha, so the pre-registration ordering this entry names is enforced by the tool, not remembered. **Still open:** the amendment naming `N`. Nothing here runs the gate; nothing here decides.
+
+**RESOLVED 2026-09-03.** Both ordering problems dissolved in practice: the amendment (`43a08d1`) preceded both builds and both runs, and the two builds were one script. Verdict FAIL — recorded under `ISS-LGJ-EPOCH-UNCHECKED`.
 
 ## ISS-LGJ-EPOCH-UNCHECKED — RESOLVED for the `Mask` half (W1.1)
 
@@ -537,7 +541,7 @@ headline stated one delivery path where the plan has two (Mask
 unconditional, RowStore benchmark-gated).
 
 
-## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — OPEN (council ruled; implementation queued)
+## ISS-LGJ-EPOCH-UNCHECKED (2026-08-28) — RESOLVED per half: `Mask` SHIPPED (#53), `RowStore` MEASURED WON'T-FIX (gate FAIL, 2026-09-03)
 
 > **⊕ COUNCIL RULING (2026-08-28, `epoch-recheck-v3.md`).** The 5+3 council
 > found this issue's own framing narrower than the truth: an epoch
@@ -596,6 +600,8 @@ corrected 2026-08-28 to name this gap explicitly rather than imply
 measurement shows the facade's own close-discipline makes it provably
 unreachable, downgrade this entry to a documented invariant rather than
 a live gap — either resolution needs the measurement, not assumption.
+
+**2026-09-03 — the `RowStore` half is closed by the §5 gate, run as pre-registered.** Amendment A1 (`43a08d1`, N = 40 ns/call, derived from the banked Component H crossing, committed before any run) → `bench/gate-run.sh` (two builds of `java/`, the production `classidAt` in both, #64) → results commit `37e5f95`. `delta +52.76 ± 1.49 ns/call`, powered, **FAIL** by 11 ns beyond budget at the interval's LOWER bound; ratio 7.1× flagged. The remedy §6 specified — per-access re-describe inside `lane()` — costs more than one bare crossing through the real accessor (+17 ns over H's 35.5: the §5.4 inlining barrier, measured), and §6 says *"or this half does not ship."* It does not ship. Both halves now have a status, which is what W4 required; `RowStore`'s cached lanes remain guarded by `closed` alone, and that residue lives in `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW`, which this closure does NOT absorb. A different mechanism (not per-access describe) would need its own plan and its own gate.
 
 ## ISS-LGJ-HOP-LAYOUT-BLOCKS-THE-ALGEBRA (2026-08-27) — RESOLVED (same day; ABI minor 10)
 

@@ -166,6 +166,12 @@ build):
   - **`RowStore`** does **not**: its `lanes[]` reads consult only the
     Java-side `closed` boolean, a strictly weaker, non-generation-checked
     mechanism. `ISS-LGJ-EPOCH-UNCHECKED` stays OPEN, scoped to `RowStore`.
+    ⊘ **2026-09-03:** the per-access probe was measured (+52.76 ± 1.49
+    ns/call, pre-registered N = 40, `epoch-recheck-v3.md` Amendment A1) and
+    FAILS; per §6 that half does not ship. `ISS-LGJ-EPOCH-UNCHECKED` is
+    now RESOLVED for `RowStore` as measured won't-fix — the mechanism above
+    is the SHIPPED state, not a pending one — and the residue is
+    `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW`, still OPEN.
 
   ⊘ Struck: the earlier claim that this path reads "with NO further registry
   call" and that `epoch` "is currently unconsulted anywhere in `src/main`".
