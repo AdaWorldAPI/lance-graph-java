@@ -8,6 +8,18 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #65 — the §5 gate, run as pre-registered: FAIL; the RowStore half does not ship (opened 2026-09-03, head `cad704c`)
+
+**Added.** Amendment A1 (`43a08d1`, N = 40 ns/call, derived from the banked H crossing, committed BEFORE any run); the results commit (`37e5f95`) citing it: `before 8.645 ± 0.284`, `after 61.405 ± 1.464`, `delta +52.76 ± 1.49 ns/call`, powered, **FAIL**, ratio 7.10 flagged; the four banked result files; a `Harness` fix (non-quick runs died at startup after #64 — `-1` passed to JMH setters).
+
+**Locked.** `D-LGJ-MMV-1a-rowstore` CLOSED, does not ship (§6). `ISS-LGJ-EPOCH-UNCHECKED` resolved per half; `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` stays OPEN as a measured gap; `ISS-LGJ-BENCH-GATE-PRECEDES-ITS-SUBJECT` resolved. §5.4's inlining-barrier hypothesis is now a measurement: +17 ns over the bare crossing.
+
+**Deferred.** Any other mechanism for the RowStore window (per-scan probe on a bulk accessor; the `Engine.close` enforcement wave) — its own plan and gate. The `LaneProbe` no-op seam stays.
+
+**Docs.** Plan §5 Amendment A1; `STATUS_BOARD` `-1a`/`-rowstore`/`-bench` rows; three `ISSUES.md` appends; `CLAUDE.md` scope note storno; `bench/README.md` results; #64 merge sha + its shipped defect recorded.
+
+**Confidence.** High in the number (powered, 5 forks, pre-registered N and estimator, FAIL at the lower bound). The one caveat is stated in the amendment itself: the author had seen a non-evidential smoke figure before deriving N from H.
+
 ## PR #64 — the §5 gate instrument: production accessor in two builds, verdict table as a tool (opened 2026-09-03, head `55b7648`)
 
 **Merged 2026-09-03 as `c2b9344`** (recorded post-merge; final head `31576e0`). Zero external review landed — CodeRabbit rate-limited, Bugbot spend-capped, Codex silent. The first real gate run then caught a defect this PR shipped: `Harness` passed `-1` to JMH's fork/iteration setters outside quick mode and every non-quick run died at startup. Fixed in the results PR.
