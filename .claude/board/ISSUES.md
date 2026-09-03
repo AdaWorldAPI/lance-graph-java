@@ -1,5 +1,48 @@
 # Issues Log — Open + Resolved (double-entry, append-only)
 
+## ISS-LGJ-G11-FENCE-WAS-PROSE (2026-09-03) — RESOLVED same day
+
+**The gate that the doctrine names, the source cites, and nothing built.**
+Root `CLAUDE.md` § Enforcement listed "the G11 contract-import fence" beside
+the reflective allowlist and the allocation gates as *structural, not
+aspirational* enforcement. `Cargo.toml` said `src/` "may import ONLY
+`lance_graph_contract::{class_view, canonical_node, ontology}`".
+`class_view_provider.rs:73` referred to "the G11 contract-import fence's
+concern". **No test existed.** The sentence was the fence.
+
+**And the sentence was already false.** Three files import
+`lance_graph_contract::facet::CascadeShape` — `class_view_provider.rs:65`,
+`kernels.rs:35`, `rowstore.rs:506` — the lane-carving enum, a legitimate
+member of the surface this crate consumes, imported without the allowlist
+ever growing. Found while surveying the R2IL / `ogar-loco` seam: the
+allowlist is about to grow by a vocabulary provider, and a list enforced by
+nothing would have taken that growth silently too. The cognitive modules
+(`kanban`, `mul`, `cognition`, `soa_view`, `scheduler`, …) compile
+unconditionally in `lance-graph-contract`, so this list is the ONLY thing
+between `lgj-abi` and the engine it must never depend on.
+
+**Fixed:** `native/lgj-abi/tests/g11_contract_import_fence.rs` scans
+`src/*.rs` for every `lance_graph_contract::<module>` reference (plain path,
+brace group, doc-link) and rejects any module outside
+`{canonical_node, class_view, facet, ontology}`, naming file and line. The
+allowlist is widened in `CLAUDE.md` and `Cargo.toml` with the omission
+struck in place, not deleted.
+
+**Disable-verified, and the disable is the narrowest one that exists:** one
+line, `use lance_graph_contract::kanban::KanbanMove;`, appended to
+`fixture.rs` → red at `fixture.rs:298` naming `kanban`; `git checkout` →
+green. Nothing wider had to be removed to turn it red, so the fence catches
+exactly the regression it names (the #60 rule: *"if it has to be widened to
+go red, the widening IS the finding"* — here it did not). Anti-vacuity is
+asserted in the test itself: ≥5 files scanned, ≥3 referencing the contract,
+and the two known-live modules (`class_view`, `facet`) actually seen — a
+scanner pointed at an empty or wrong directory cannot pass.
+
+**The pattern, thirteenth instance.** `ISS-LGJ-SECOND-VERDICT-BESIDE-THE-FIRST`:
+the doctrine verified that the allowlist was *stated*; nobody verified it
+was *enforced*, and the stated list had drifted from the code beside it.
+Ledger row added below.
+
 ## ISS-LGJ-ORPHAN-MASK-CLOSE-LEAKED (2026-08-28) — RESOLVED same day (#57)
 
 **A real leak, found behind a disagreement between two reviewers about a doc
@@ -305,6 +348,7 @@ path while **leaving a second, independent verdict standing beside it**:
 | #58 (10th) | Q4's *conclusion*, made conditional | the *adjacent* sentence, still claiming close-after-cache is out of contract |
 | #60 (11th) | fence 1b, built to catch a missing W1 block | a whole-file scan the block's own deletion could not turn red |
 | #60→#62 (12th) | fence 1c, disable-tested against DELETION | a REWRITE keeping both phrases while gutting what they describe |
+| G11 (13th) | the allowlist, *stated* in `CLAUDE.md` + `Cargo.toml` and cited by source | the allowlist *enforced* — no test existed, and the stated list was already missing `facet` |
 
 **The tenth arrived inside the fix for the eighth's cousin, one hop sideways.**
 Two reviewers made Q4's conclusion conditional; the qualification landed, and
@@ -821,7 +865,7 @@ half via render_classid decomposition), never by bounds-truncating the
 full u32 — the fixture ignores the value, so behavior is unaffected
 today.
 
-## ISS-LGJ-FANOUT-UNREVIEWED (2026-08-17) — PARTIALLY RESOLVED
+## ISS-LGJ-FANOUT-UNREVIEWED (2026-08-17) — RESOLVED 2026-09-03 (Lab half superseded by a board row)
 
 **Resolution for the core (Rust ABI + Java facade), same day:** all three
 closing conditions this entry names ran for real. (1) D-LGJ-AUDIT ran, one
@@ -854,7 +898,9 @@ spawned agent, per `TECH_DEBT.md`'s cargo-hygiene entry — actually passes.
 Closes when all three have run and their results are folded into
 `LATEST_STATE.md`.
 
-## ISS-LGJ-TARGET-DIR-SIZE-WATCH (2026-08-17) — OPEN
+**RESOLVED 2026-09-03 — the open half is tracked elsewhere and a standalone issue duplicated it.** `bench/` has since produced source and been reviewed and gated through the #49–#62 arc (Component H, the R-series measurements, the JMH harness); `valhalla-lab/`'s three-truths measurements are cited in `CLAUDE.md` (R4/R10) and its production consequence is `D-LGJ-MMV-3` on `STATUS_BOARD.md`, *Queued (evidence-gated)*. What this entry still asked for — "the same audit + central-verification treatment" — is exactly that D-row's gate. Two trackers for one obligation is the shape the one-writer rule exists to prevent; the board row is the survivor.
+
+## ISS-LGJ-TARGET-DIR-SIZE-WATCH (2026-08-17) — RESOLVED 2026-09-03 (watch expired)
 
 `/home/user/ndarray/target` measured 2.7 GB and
 `/home/user/lance-graph-java/target` measured 602 MB partway through the
@@ -866,7 +912,9 @@ at last check, 22G free) before any further large parallel work is
 dispatched. Not urgent at last measurement; filed so it's watched rather
 than rediscovered as a surprise "no space left on device" failure.
 
-## ISS-LGJ-DEV-BRANCH-STILL-UNCOMMITTED (2026-08-17) — OPEN
+**RESOLVED 2026-09-03 — the condition it watched no longer exists.** Agents have not been permitted to run cargo since `agent-cargo-hygiene.md` landed; every build in the #49–#62 arc ran orchestrator-side in the one shared `target/`, and no ENOSPC occurred. A watch with no trigger left is a stale row, not an open issue. If disk pressure returns it gets a NEW dated entry with the measurement that raised it.
+
+## ISS-LGJ-DEV-BRANCH-STILL-UNCOMMITTED (2026-08-17) — RESOLVED same day (header regraded 2026-09-03)
 
 `claude/lance-graph-java-panama-valhalla-sus9w8` (the designated dev
 branch per the mission's cross-repo branch instructions) has zero commits
@@ -884,3 +932,5 @@ sequencing the audit first.
 violation was fixed BEFORE this commit rather than after. First commit on
 the dev branch lands in the same action as this board update, containing
 already-audited, already-green code.
+
+**Header regraded 2026-09-03.** The body's last paragraph already said *RESOLVED same day* on 2026-08-17; only the header still read OPEN, so every status grep since has counted a closed issue as open. Body untouched; header brought in line with it.
