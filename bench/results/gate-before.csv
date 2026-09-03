@@ -1,0 +1,2 @@
+"Benchmark","Mode","Threads","Samples","Score","Score Error (99.9%)","Unit","Param: rows"
+"com.adaworldapi.lancegraph.bench.I_ProductionAccessorGate.classidAt","avgt",1,40,8.645018,0.284185,"ns/op",65536

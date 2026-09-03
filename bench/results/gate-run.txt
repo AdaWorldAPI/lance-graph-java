@@ -1,0 +1,334 @@
+== run before
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+================================================================================================
+lance-graph-java :: benchmark harness
+================================================================================================
+jdk              OpenJDK 64-Bit Server VM 26.0.2.1+1-7
+vm args          [--enable-native-access=ALL-UNNAMED, --add-modules=jdk.incubator.vector, -Dstdout.encoding=UTF-8, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, -Dlgj.bench.result=results/gate-before.csv]
+os / arch        Linux amd64
+cpu              Intel(R) Xeon(R) Processor @ 2.80GHz  (4 logical processors)
+vector species   Species[int, 16, S_512_BIT]  (16 int lanes, 512 bit)
+native runtime   lance-graph native runtime: abi 0.10, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
+predicate        class == 7 AND value > 100
+================================================================================================
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 26.0.2.1, OpenJDK 64-Bit Server VM, 26.0.2.1+1-7
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so -Dlgj.bench.result=results/gate-before.csv --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.I_ProductionAccessorGate.classidAt
+# Parameters: (rows = 65536)
+
+# Run progress: 0.00% complete, ETA 00:00:32
+# Fork: 1 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 9.200 ns/op
+# Warmup Iteration   2: 9.635 ns/op
+# Warmup Iteration   3: 10.306 ns/op
+# Warmup Iteration   4: 10.474 ns/op
+# Warmup Iteration   5: 8.504 ns/op
+Iteration   1: 8.063 ns/op
+Iteration   2: 8.293 ns/op
+Iteration   3: 9.005 ns/op
+Iteration   4: 8.126 ns/op
+Iteration   5: 8.280 ns/op
+Iteration   6: 8.424 ns/op
+Iteration   7: 8.356 ns/op
+Iteration   8: 8.323 ns/op
+
+# Run progress: 20.00% complete, ETA 00:01:02
+# Fork: 2 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 8.820 ns/op
+# Warmup Iteration   2: 8.465 ns/op
+# Warmup Iteration   3: 8.771 ns/op
+# Warmup Iteration   4: 8.540 ns/op
+# Warmup Iteration   5: 8.364 ns/op
+Iteration   1: 8.242 ns/op
+Iteration   2: 9.490 ns/op
+Iteration   3: 9.489 ns/op
+Iteration   4: 9.053 ns/op
+Iteration   5: 8.920 ns/op
+Iteration   6: 8.670 ns/op
+Iteration   7: 9.129 ns/op
+Iteration   8: 9.736 ns/op
+
+# Run progress: 40.00% complete, ETA 00:00:45
+# Fork: 3 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 9.414 ns/op
+# Warmup Iteration   2: 8.878 ns/op
+# Warmup Iteration   3: 8.613 ns/op
+# Warmup Iteration   4: 8.879 ns/op
+# Warmup Iteration   5: 8.642 ns/op
+Iteration   1: 8.823 ns/op
+Iteration   2: 8.499 ns/op
+Iteration   3: 8.149 ns/op
+Iteration   4: 8.207 ns/op
+Iteration   5: 8.172 ns/op
+Iteration   6: 8.392 ns/op
+Iteration   7: 8.285 ns/op
+Iteration   8: 8.707 ns/op
+
+# Run progress: 60.00% complete, ETA 00:00:30
+# Fork: 4 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 8.324 ns/op
+# Warmup Iteration   2: 8.271 ns/op
+# Warmup Iteration   3: 8.112 ns/op
+# Warmup Iteration   4: 8.224 ns/op
+# Warmup Iteration   5: 8.046 ns/op
+Iteration   1: 8.240 ns/op
+Iteration   2: 8.285 ns/op
+Iteration   3: 8.137 ns/op
+Iteration   4: 8.650 ns/op
+Iteration   5: 8.424 ns/op
+Iteration   6: 8.618 ns/op
+Iteration   7: 8.571 ns/op
+Iteration   8: 9.191 ns/op
+
+# Run progress: 80.00% complete, ETA 00:00:15
+# Fork: 5 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 8.863 ns/op
+# Warmup Iteration   2: 8.667 ns/op
+# Warmup Iteration   3: 8.263 ns/op
+# Warmup Iteration   4: 9.398 ns/op
+# Warmup Iteration   5: 8.891 ns/op
+Iteration   1: 8.627 ns/op
+Iteration   2: 8.749 ns/op
+Iteration   3: 9.322 ns/op
+Iteration   4: 8.621 ns/op
+Iteration   5: 8.277 ns/op
+Iteration   6: 8.498 ns/op
+Iteration   7: 8.394 ns/op
+Iteration   8: 10.366 ns/op
+
+
+Result "com.adaworldapi.lancegraph.bench.I_ProductionAccessorGate.classidAt":
+  8.645 ±(99.9%) 0.284 ns/op [Average]
+  (min, avg, max) = (8.063, 8.645, 10.366), stdev = 0.505
+  CI (99.9%): [8.361, 8.929] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:01:15
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                           (rows)  Mode  Cnt  Score   Error  Units
+I_ProductionAccessorGate.classidAt   65536  avgt   40  8.645 ± 0.284  ns/op
+
+Benchmark result is saved to results/gate-before.csv
+== run after
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+================================================================================================
+lance-graph-java :: benchmark harness
+================================================================================================
+jdk              OpenJDK 64-Bit Server VM 26.0.2.1+1-7
+vm args          [--enable-native-access=ALL-UNNAMED, --add-modules=jdk.incubator.vector, -Dstdout.encoding=UTF-8, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, -Dlgj.bench.result=results/gate-after.csv]
+os / arch        Linux amd64
+cpu              Intel(R) Xeon(R) Processor @ 2.80GHz  (4 logical processors)
+vector species   Species[int, 16, S_512_BIT]  (16 int lanes, 512 bit)
+native runtime   lance-graph native runtime: abi 0.10, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
+predicate        class == 7 AND value > 100
+================================================================================================
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 26.0.2.1, OpenJDK 64-Bit Server VM, 26.0.2.1+1-7
+# VM invoker: /opt/jdks/jdk-26.0.2/bin/java
+# VM options: --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -Dstdout.encoding=UTF-8 -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so -Dlgj.bench.result=results/gate-after.csv --enable-native-access=ALL-UNNAMED
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 500 ms each
+# Measurement: 8 iterations, 500 ms each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.adaworldapi.lancegraph.bench.I_ProductionAccessorGate.classidAt
+# Parameters: (rows = 65536)
+
+# Run progress: 0.00% complete, ETA 00:00:32
+# Fork: 1 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 79.342 ns/op
+# Warmup Iteration   2: 62.450 ns/op
+# Warmup Iteration   3: 62.584 ns/op
+# Warmup Iteration   4: 61.221 ns/op
+# Warmup Iteration   5: 59.520 ns/op
+Iteration   1: 63.532 ns/op
+Iteration   2: 65.371 ns/op
+Iteration   3: 62.730 ns/op
+Iteration   4: 64.623 ns/op
+Iteration   5: 62.797 ns/op
+Iteration   6: 65.347 ns/op
+Iteration   7: 63.347 ns/op
+Iteration   8: 58.432 ns/op
+
+# Run progress: 20.00% complete, ETA 00:01:00
+# Fork: 2 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 67.814 ns/op
+# Warmup Iteration   2: 56.551 ns/op
+# Warmup Iteration   3: 60.346 ns/op
+# Warmup Iteration   4: 66.662 ns/op
+# Warmup Iteration   5: 62.318 ns/op
+Iteration   1: 62.857 ns/op
+Iteration   2: 65.526 ns/op
+Iteration   3: 60.304 ns/op
+Iteration   4: 59.577 ns/op
+Iteration   5: 57.386 ns/op
+Iteration   6: 63.429 ns/op
+Iteration   7: 61.684 ns/op
+Iteration   8: 59.845 ns/op
+
+# Run progress: 40.00% complete, ETA 00:00:45
+# Fork: 3 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 65.333 ns/op
+# Warmup Iteration   2: 71.647 ns/op
+# Warmup Iteration   3: 61.788 ns/op
+# Warmup Iteration   4: 64.767 ns/op
+# Warmup Iteration   5: 63.085 ns/op
+Iteration   1: 62.670 ns/op
+Iteration   2: 63.820 ns/op
+Iteration   3: 64.242 ns/op
+Iteration   4: 62.469 ns/op
+Iteration   5: 63.503 ns/op
+Iteration   6: 63.534 ns/op
+Iteration   7: 60.214 ns/op
+Iteration   8: 63.047 ns/op
+
+# Run progress: 60.00% complete, ETA 00:00:30
+# Fork: 4 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 62.994 ns/op
+# Warmup Iteration   2: 57.745 ns/op
+# Warmup Iteration   3: 60.159 ns/op
+# Warmup Iteration   4: 59.679 ns/op
+# Warmup Iteration   5: 60.126 ns/op
+Iteration   1: 61.054 ns/op
+Iteration   2: 63.875 ns/op
+Iteration   3: 66.458 ns/op
+Iteration   4: 58.714 ns/op
+Iteration   5: 59.838 ns/op
+Iteration   6: 59.025 ns/op
+Iteration   7: 59.109 ns/op
+Iteration   8: 58.654 ns/op
+
+# Run progress: 80.00% complete, ETA 00:00:15
+# Fork: 5 of 5
+Picked up JAVA_TOOL_OPTIONS: 
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/home/user/lance-graph-java/bench/lib/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 62.718 ns/op
+# Warmup Iteration   2: 60.805 ns/op
+# Warmup Iteration   3: 59.225 ns/op
+# Warmup Iteration   4: 59.328 ns/op
+# Warmup Iteration   5: 59.701 ns/op
+Iteration   1: 60.242 ns/op
+Iteration   2: 59.072 ns/op
+Iteration   3: 58.593 ns/op
+Iteration   4: 58.479 ns/op
+Iteration   5: 58.176 ns/op
+Iteration   6: 57.920 ns/op
+Iteration   7: 57.579 ns/op
+Iteration   8: 59.118 ns/op
+
+
+Result "com.adaworldapi.lancegraph.bench.I_ProductionAccessorGate.classidAt":
+  61.405 ±(99.9%) 1.464 ns/op [Average]
+  (min, avg, max) = (57.386, 61.405, 66.458), stdev = 2.603
+  CI (99.9%): [59.941, 62.869] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:01:15
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                           (rows)  Mode  Cnt   Score   Error  Units
+I_ProductionAccessorGate.classidAt   65536  avgt   40  61.405 ± 1.464  ns/op
+
+Benchmark result is saved to results/gate-after.csv
