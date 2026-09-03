@@ -172,6 +172,83 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
 - **F4.** Rail grouping is a per-class policy selected by classid, never a global constant.
 - **F5.** Ship order is 0 → 1 → 2 → 3, and Wave 0 is not skippable: D-MRL-0b can kill 1c.
 
+## §7b — NON-GOALS (explicit, each with why)
+
+| out of scope | why |
+|---|---|
+| A general SQL surface, an optimiser, hash joins between arbitrary relations, spilling | DuckDB territory (§3). We serve one shape: fixed population per version, bit-pattern predicates, prefix reuse |
+| Making the value semirings (HammingMin / SimilarityMax / Resonance / NarsTruth) mask-native | §2 fence: masks select, kernels score. Collapsing them is the exact overclaim this plan must not make |
+| Any change to `RowStore`'s liveness model, `LaneProbe`, or the `closed` flag | measured and closed 2026-09-03 (Amendment A1, gate FAIL). Orthogonal: this plan's memo lives over immutable versions where the question does not arise |
+| A basin/population tenant, ClassView, or 16-vs-24 dimensions for the epistemic axes | explicitly deferred by the post-#1132 teardown ("falsifier-first"); re-minting `0x87..0x8B` needs a producer, which is Wave 2, not a tenant |
+| Java-side compute of any kind | root `CLAUDE.md` E1/E2: the glove never grows a compute path; scalar Java is licensed only as a test oracle |
+| `ENVELOPE_LAYOUT_VERSION` bumps or any re-carving of the 12-byte register | the rail grouping (§5) is a cache policy over the existing `G6D2` reading, never a new carving |
+
+## §7c — PRE-REGISTERED GATES (decided before any agent or worker runs)
+
+**G1 — parity.** Every new `plan_eval` op kind agrees byte-for-byte with `lgj_plan_eval_scalar`
+on the same fixture. A disable of the `care` mask must flip a planted miss into a hit
+(two-sided, or the op is unfalsified).
+**G2 — anti-vacuity on the memo.** A trie hit must be *observable as a hit* (hit counter), not
+inferred from timing. A run where every query misses must fail the test that claims reuse.
+**G3 — no per-row engine.** `GraphHopTest`'s reflective allowlist, the G2 no-per-row-engine
+call-site check, and the population-independent allocation gates extend to every new surface
+and stay green. `ApiSurfaceTest` unchanged (no FFM type in a public signature).
+**G4 — SIMD provenance.** Every kernel line comes from `ndarray::simd`; zero `core::arch`,
+`_mm*`, `#[cfg(target_arch)]`, `target_feature` in the diff (simd-savant).
+**G5 — G11.** `native/lgj-abi/src` imports no `lance_graph_contract` module outside
+`{canonical_node, class_view, facet, ontology}`; growing the list edits the test AND
+`CLAUDE.md` AND `Cargo.toml` in one commit (`g11_contract_import_fence.rs`).
+**G6 — central gates.** `cargo fmt --check`, `cargo clippy -p lgj-abi --all-targets -D warnings`,
+`cargo test -p lgj-abi`, `javac` + `AllTests`, run ONCE by the orchestrator, never by a worker.
+**G7 — two numbers.** Any reported speedup states the AoS→SoA factor and the SoA→memo factor
+separately (§4). A single fused number is a failed gate.
+**G8 — board hygiene same-commit.** STATUS_BOARD row flip + AGENT_LOG entry naming the council
+run + EPIPHANIES only if a finding emerged.
+
+## §10 — PER-SAVANT QUESTION SETS (Phase 1; YES / NO / VIOLATES-with-evidence)
+
+**S1 — prior art** *(Opus: ~100 board + knowledge docs, genuine multi-source)*
+1. Does a mask memo / trie / cache keyed on a Lance version already exist or was one already
+   ruled on, anywhere in lance-graph, OGAR, ndarray or lgj? Cite it.
+2. Is "verbs lower to mask ops" already named under another id (E-*, D-*), and does this plan
+   duplicate or contradict it?
+3. Were `0x87..0x8B` torn down for reasons this plan fails to address? Quote the teardown.
+4. Does `dismech-causal-replay-v1` or `rubicon-loco-rung-cognitive-fabric-v1` already own any
+   wave here?
+5. Any duplicate-E-id risk if this lands as written?
+
+**S2 — iron rules** *(Sonnet)*
+1. YIELDS or VIOLATES per iron rule: I-SUBSTRATE-MARKOV, I-NOISE-FLOOR-JIRAK,
+   I-VSA-IDENTITIES, I-LEGACY-API-FEATURE-GATED.
+2. Does any wave add a second reading of already-stored bytes without a version gate?
+3. Does the trie constitute a shared-mutable sink (the one-writer / mailbox-owner rule)?
+4. Does re-minting `0x87..0x8B` violate the classid canon-high or the domain-floor rule?
+5. Any AP1–AP9 anti-pattern present?
+
+**S3 — code truth** *(Sonnet)*
+1. For EVERY `file:line` in §1: CODED, CLAIMED, or ABSENT? One line each.
+2. Is `ternlog` genuinely present on all five backends with a parity test, or only some?
+3. Does `lgj_plan_eval` actually AND-chain and actually sweep the full population per op?
+4. Is the `DOWN[x]` falsifier genuinely never-run (no committed test covers it)?
+5. Is the #1129 Belnap join identity (OR of both planes) actually pinned by a test?
+
+**S4 — cascade impact** *(Sonnet)*
+1. Every file / test / doc / board row that MUST change per wave; mandatory vs follow-up.
+2. Does any wave force an ABI minor bump, and does §6 say so? (Q2 is the live case.)
+3. Which existing tests break if `plan_eval` gains a survivor-word skip?
+4. Which consumers outside lgj are affected by re-minting `0x87..0x8B`?
+5. Is the wave order buildable, or does any wave depend on a later one?
+
+**S5 — different views** *(Opus: alternative-reading synthesis)*
+1. Strongest alternative reading of the two-axis model that this plan misses — WITHOUT
+   redesigning it.
+2. Is 2×3 rail grouping the right factoring, or is the real reuse axis something else
+   (tier depth, classid, time)?
+3. Second-order consequence of a per-class cache policy nobody has named.
+4. What is the strongest argument that the memo will NOT pay, and does D-MRL-0b actually
+   test that argument?
+5. Is "photolithography" load-bearing or decorative — does any decision depend on it?
+
 ## §8 — Model allocation (operator-ruled 2026-09-03, declared here, not per spawn)
 
 - **Planning is Opus.** The 5 council savants, the 3 reviewers, the consolidation passes,
@@ -183,7 +260,7 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
   its own cargo run, never a claim that it compiles.
 - **Never Haiku** for anything in this plan.
 
-## §9 — Open questions for the council
+## §11 — Open questions for the council
 
 - **Q1.** Trie ownership: `lgj-abi` registry (consumer-local) or `lance-graph` (shared by every consumer)? The version is lance-graph's; the handles are lgj's. Substrate-first says lance-graph, but no consumer other than lgj exists yet.
 - **Q2.** Does `TERNARY_MATCH` belong in `LgjOpDesc` (24 B, fixed) or does a 24-byte pattern+care force a wider descriptor and an ABI minor bump?
