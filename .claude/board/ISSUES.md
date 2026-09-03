@@ -43,6 +43,27 @@ the doctrine verified that the allowlist was *stated*; nobody verified it
 was *enforced*, and the stated list had drifted from the code beside it.
 Ledger row added below.
 
+**And a fourteenth, inside the fix, found by Codex on #63 before merge.** The
+first fence disable-tested ONE path (a direct `kanban` import in a top-level
+file) and reported the fence real. Three bypasses stood beside it: (1) the
+scan used `read_dir` and skipped directories, so a forbidden import in a
+nested module dir passed; (2) `use lance_graph_contract as c; use c::kanban::…`
+never has `::` after the crate name, so the literal search saw nothing; (3)
+`use lance_graph_contract::*;` — not named by Codex, found while fixing (2) —
+continues with no identifier, so the scanner yielded nothing and the anti-
+vacuity arms stayed satisfied by the other files. Plus the P2: the test
+carried its own copy of the allowlist and never read the two documented ones,
+so the "same commit" promise was a promise, not a check. **The #62 rule
+verbatim: a disable proves the path it walks and no other.** Fixed in the same
+PR: recursive walk; any `lance_graph_contract` not followed by `::` is itself a
+violation (an alias IS the bypass); a non-identifier continuation (`*`, `self`)
+is a violation; and `g11_documented_allowlists_equal_the_enforced_one` parses
+the `CLAUDE.md` and `Cargo.toml` lists and requires both to equal `ALLOWED`.
+**Six disables, each on its own path, each red-then-green:** direct import,
+nested-dir import, alias, glob, `CLAUDE.md` list edited, `Cargo.toml` list
+edited — the last two failing the doc test and NOT the scan test, so the two
+arms are independent. Ledger row 14 below.
+
 ## ISS-LGJ-ORPHAN-MASK-CLOSE-LEAKED (2026-08-28) — RESOLVED same day (#57)
 
 **A real leak, found behind a disagreement between two reviewers about a doc
@@ -349,6 +370,7 @@ path while **leaving a second, independent verdict standing beside it**:
 | #60 (11th) | fence 1b, built to catch a missing W1 block | a whole-file scan the block's own deletion could not turn red |
 | #60→#62 (12th) | fence 1c, disable-tested against DELETION | a REWRITE keeping both phrases while gutting what they describe |
 | G11 (13th) | the allowlist, *stated* in `CLAUDE.md` + `Cargo.toml` and cited by source | the allowlist *enforced* — no test existed, and the stated list was already missing `facet` |
+| #63 (14th) | the fence, disable-tested on a direct top-level `kanban` import | nested dirs, crate aliases, `::*` globs, and the documented lists the test never read — three bypasses and a drift channel beside the one path walked |
 
 **The tenth arrived inside the fix for the eighth's cousin, one hop sideways.**
 Two reviewers made Q4's conclusion conditional; the qualification landed, and

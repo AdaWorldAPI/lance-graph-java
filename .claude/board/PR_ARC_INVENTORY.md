@@ -31,8 +31,15 @@
 - **Deferred:** the vocabulary-provider growth of the allowlist (`ogar_loco`) —
   gated on W4 of `r2il-machine-semantic-contract-v1.md` and the OGAR custom-space
   ruling, not on anything here.
-- **Confidence:** high on the fence (red-then-green, narrowest disable); the
-  three closures are supersession/expiry, not new evidence.
+- **Correction (2026-09-03, same PR, pre-merge — Codex P1×2 + P2):** the
+  first fence had three bypasses beside the one disabled path (nested module
+  dirs skipped; crate aliases invisible; `::*` globs yielded nothing) and never
+  read the documented lists it promised to track. All closed; six disables now,
+  each on its own path; the fourteenth ledger instance. The "narrowest disable"
+  claim above was true and insufficient — narrow on ONE path says nothing about
+  the others.
+- **Confidence:** high on the fence (six paths red-then-green; doc lists parsed,
+  not copied); the three closures are supersession/expiry, not new evidence.
 
 ## PR #60 — W1+W2 built, and the fence that had to be fixed twice (merged 2026-08-28, `97f25c5` — 4 commits, head `c6d8a4c`)
 
