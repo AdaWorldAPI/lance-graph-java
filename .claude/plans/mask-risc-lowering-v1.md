@@ -1,5 +1,10 @@
 # mask-risc-lowering-v1 — the API speaks database, the backend does photolithography
 
+> **Status:** v4.2 COUNCIL-CORRECTED (2026-09-03) — a 5+3 verification council ran because
+> #68/#70 merged with zero external review. 8 claims struck-and-regraded (§17), two reviewer
+> BLOCKs, one blocking row D-MRL-G2, and a firewall violation the v3 council left shipped.
+> ⊘ The v4 status below is superseded on one point in particular: **there WAS a council re-run.**
+>
 > **Status:** v4 AMENDED — §14 (voxelmasking: the vertical axis is enumerated, not cached),
 > §3c (reuse map: OSM native, weather splits wind/humidity), §15 (D-MRL-0f OSM probe,
 > D-MRL-0g frame-sequence probe). v4 does not retract v3; it narrows the axis v3's cache
@@ -208,7 +213,7 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
 
 | D-id | deliverable | falsifier |
 |---|---|---|
-| **D-MRL-2a** (AMENDED per F8) | mint **`BELNAP_JOIN` ONLY**, at the next free core slot **`0x8C`** — NOT the retracted `0x87..0x8B` — with a lowering table to Wave-1 op sequences. `BELNAP_JOIN` = OR of support planes ∥ OR of refute planes (#1129, `.claude/board/EPIPHANIES.md:438`, pinned by test per S3-5). **Mandatory co-changes (S4-7/8):** grep every repo for dangling references to the retracted mint FIRST; update `ogar-loco`'s vocabulary table and `docs/DISCOVERY-MAP.md` in the same arc | byte-exact: verb result == hand-composed `plan_eval` result on the same version. **Plus** the F-RLR-2 insufficiency argument recorded (S1-Q4), or this is an automatic STOP |
+| **D-MRL-2a** ⊘ **BLOCKED 2026-09-03 — DO NOT ACT ON THIS ROW** (v4.1 §16.1; ⊘ added by the verification council, v4.2 §17). The carrier is DELETED: `EpistemicBassin24`/`support_mask`/`refute_mask` return zero CODE hits, and the `0x87..0x8B` band was retracted with the model it encoded. The row below is retained per append-only, as the retired directive — **not** as an instruction. Original text follows: **D-MRL-2a** (AMENDED per F8) | mint **`BELNAP_JOIN` ONLY**, at the next free core slot **`0x8C`** — NOT the retracted `0x87..0x8B` — with a lowering table to Wave-1 op sequences. `BELNAP_JOIN` = OR of support planes ∥ OR of refute planes (#1129, `.claude/board/EPIPHANIES.md:438`, pinned by test per S3-5). **Mandatory co-changes (S4-7/8):** grep every repo for dangling references to the retracted mint FIRST; update `ogar-loco`'s vocabulary table and `docs/DISCOVERY-MAP.md` in the same arc | byte-exact: verb result == hand-composed `plan_eval` result on the same version. **Plus** the F-RLR-2 insufficiency argument recorded (S1-Q4), or this is an automatic STOP |
 | **D-MRL-2b** | `where` / `scan` as verbs lowering to `TERNARY_MATCH` + vertical-prefix AND | same |
 
 ### Wave 3 — the Java glove (last, by E5)
@@ -331,7 +336,7 @@ run + EPIPHANIES only if a finding emerged.
 
 ## §10 — PER-SAVANT QUESTION SETS (Phase 1; YES / NO / VIOLATES-with-evidence)
 
-**S1 — prior art** *(Opus: ~100 board + knowledge docs, genuine multi-source)*
+**S1 — prior art** *(escalated tier: ~100 board + knowledge docs, genuine multi-source accumulation)*
 1. Does a mask memo / trie / cache keyed on a Lance version already exist or was one already
    ruled on, anywhere in lance-graph, OGAR, ndarray or lgj? Cite it.
 2. Is "verbs lower to mask ops" already named under another id (E-*, D-*), and does this plan
@@ -341,7 +346,7 @@ run + EPIPHANIES only if a finding emerged.
    wave here?
 5. Any duplicate-E-id risk if this lands as written?
 
-**S2 — iron rules** *(Sonnet)*
+**S2 — iron rules** *(bounded tier: one spec in, one verdict shape out)*
 1. YIELDS or VIOLATES per iron rule: I-SUBSTRATE-MARKOV, I-NOISE-FLOOR-JIRAK,
    I-VSA-IDENTITIES, I-LEGACY-API-FEATURE-GATED.
 2. Does any wave add a second reading of already-stored bytes without a version gate?
@@ -349,21 +354,21 @@ run + EPIPHANIES only if a finding emerged.
 4. Does re-minting `0x87..0x8B` violate the classid canon-high or the domain-floor rule?
 5. Any AP1–AP9 anti-pattern present?
 
-**S3 — code truth** *(Sonnet)*
+**S3 — code truth** *(bounded tier)*
 1. For EVERY `file:line` in §1: CODED, CLAIMED, or ABSENT? One line each.
 2. Is `ternlog` genuinely present on all five backends with a parity test, or only some?
 3. Does `lgj_plan_eval` actually AND-chain and actually sweep the full population per op?
 4. Is the `DOWN[x]` falsifier genuinely never-run (no committed test covers it)?
 5. Is the #1129 Belnap join identity (OR of both planes) actually pinned by a test?
 
-**S4 — cascade impact** *(Sonnet)*
+**S4 — cascade impact** *(bounded tier)*
 1. Every file / test / doc / board row that MUST change per wave; mandatory vs follow-up.
 2. Does any wave force an ABI minor bump, and does §6 say so? (Q2 is the live case.)
 3. Which existing tests break if `plan_eval` gains a survivor-word skip?
 4. Which consumers outside lgj are affected by re-minting `0x87..0x8B`?
 5. Is the wave order buildable, or does any wave depend on a later one?
 
-**S5 — different views** *(Opus: alternative-reading synthesis)*
+**S5 — different views** *(escalated tier: alternative-reading synthesis)*
 1. Strongest alternative reading of the two-axis model that this plan misses — WITHOUT
    redesigning it.
 2. Is 2×3 rail grouping the right factoring, or is the real reuse axis something else
@@ -500,7 +505,7 @@ Enumeration works **at tier granularity and nowhere else**.
 |---|---|---|
 | 3 tiers | 3³ = 27 | 72 KB — **build it** |
 | 6 rails (`6×(u8:u8)`) | 3⁶ = 729 | 144 KB primitives; cube 5.7 MB — borderline |
-| 12 facet bytes | 3¹² = **531,441** | cube ≈ **4.2 GB** — **never** |
+| 12 facet bytes | 3¹² = **531,441** | cube = **4.05 GiB** (⊘ v4.2 §17: the struck text said *"≈ 4.2 GB"*, which is neither convention — 4.05 GiB / 4.35 GB) — **never** |
 
 So the two axes **split their mechanism**, which is the v4 correction to v3's single-cache
 framing:
@@ -525,8 +530,8 @@ touched. So:
   per-row test. The cull is not computed; it is the shape of the answer.
 - **Zone-map skipping** — already the plan's own framing of the vertical axis (§2). A tier
   whose primitive AND yields a zero accumulator word means that entire 64-row block is
-  skipped, which is exactly **D-MRL-1b's survivor-word skip**. Voxelmasking does not add a
-  culling mechanism; it makes the mask that drives the existing one free to obtain.
+  skipped, which is exactly **D-MRL-1b's survivor-word skip** — ⊘ v4.2 §17: **that skip is PROPOSED, not shipped** (`plan_eval_impl` has no zero-accumulator skip today; D-MRL-1b is a deliverable with its own KILL). The struck text called it "the existing one", so this bullet's conclusion has NO mechanism under it until D-MRL-1b lands. Voxelmasking does not add a
+  culling mechanism; it makes the mask for the **proposed** D-MRL-1b skip free to obtain (⊘ v4.2 §17: the struck tail read "the existing one" — the v4.2 correction fixed the sentence's first half and left its tail asserting the same false existence, found by BOTH reviewers).
 - **Occlusion / LOD** — the tiers ARE the level-of-detail ladder (`GEO_V3_FACET` rails 0–3,
   heel→leaf). Culling at a coarse tier costs one index and one AND regardless of how many
   rows it removes, which is the property that makes hierarchical culling worth doing at all.
@@ -607,7 +612,7 @@ tiers (heel / hip / twig / leaf), each a `256×256` tile with x and y bound lite
 
 Note the honest discrepancy, recorded rather than smoothed: the canonical key carries **three**
 named tiers (HEEL/HIP/TWIG); the geo facet carries **four** rails as tiers (adding leaf). The
-cube is therefore `3³ = 27` on the key and `3⁴ = 81` on the geo facet (27 primitives-worth of
+cube is therefore `3³ = 27` on the key and `3⁴ = 81` on the geo facet (⊘ v4.2 §17: the struck text read "27 primitives-worth", a stale 3³ carry-over — it is 81 cells /
 addressing, still 12 primitives = 96 KB at N = 65,536). D-MRL-0f measures on the geo facet and
 reports which arity the real stream uses.
 
@@ -619,7 +624,7 @@ perturbation at Minecraft cheapness. then humidity and 13 values become blasgrap
 | quantity | mechanism | why |
 |---|---|---|
 | **wind perturbation** | **voxel masking** | neighbour-local, integer, no PDE. A cell's next state is a function of its own cell and its neighbours' — exactly the AND-of-primitives shape. "Minecraft cheapness" is the specification, not a metaphor: no floating-point solver, no global step |
-| **humidity across 13 pressure levels** | **blasgraph** | 13 levels coupled across a real-cardinality field is sparse adjacency with a semiring, not a few-valued hierarchy. That is `crates/lance-graph/src/graph/blasgraph/` — CSR/CSC/COO/HyperCSR + six semirings, **already in-house**, and the same approach RedisGraph/FalkorDB take |
+| **humidity across 13 pressure levels** | **blasgraph** | 13 levels coupled across a real-cardinality field is sparse adjacency with a semiring, not a few-valued hierarchy. That is `crates/lance-graph/src/graph/blasgraph/` — CSR/CSC/COO/HyperCSR + **seven** semirings (⊘ v4.2 §17: the struck text said six; `semiring.rs` `enum HdrSemiring` has seven variants), **already in-house**, and the same approach RedisGraph/FalkorDB take |
 
 The semiring honesty fence of §2 applies unchanged on the blasgraph side: Boolean and Xor are
 exact mask algebra; HammingMin / SimilarityMax / Resonance / NarsTruth are **select-then-score,
@@ -735,7 +740,7 @@ It is explicitly **preserved** by the same cleanup that retracted the band aroun
 `ternlog`)"*), and it names the same backend this plan names.
 
 **And it has ZERO consumers.** `grep -rn "TERNLOG" --include=*.rs` across both trees returns
-only the mint site itself — no caller in lance-graph, none in OGAR outside `ogar-loco/src`.
+no caller in lance-graph and none in OGAR outside `ogar-loco/src` (⊘ v4.2 §17: the struck text said "only the mint site itself" — false; four further definitional entries exist in `vocabulary.rs`, so the no-external-consumer claim holds while the wording did not).
 By the rule PR #1154 landed the same day
 (`E-A-RULED-HOME-NEEDS-A-FIRST-CONSUMER-OR-IT-IS-A-VACANCY-1`: *"a ruled home with no caller
 is not a home; it is a vacancy the next session re-implements beside"*), `TERNLOG` 0x86 is
@@ -750,7 +755,7 @@ already written upstream.
 
 ### §16.3 — F3: `witness_fabric` is a DIFFERENT semantic family, and that is the point
 
-`crates/lance-graph-contract/src/witness_fabric.rs` (379 lines, landed after the council)
+`crates/lance-graph-contract/src/witness_fabric.rs` ⊘ **CORRECTED (v4.2 §17): the file is 3,439 lines and landed 2026-08-20 (PR #969, at 3,060 lines) — it did NOT land after the council.** The struck original read *"379 lines, landed after the council"*; 379 was the size of a same-day DELTA, and the same sentence cites `:1227`/`:1367`, impossible in a 379-line file. **The excuse is retracted, not just the number:** a pre-existing contract module was presented as a new arrival the council could not have seen. The real finding is the coverage gap the excuse concealed
 computes quorum and contradiction over a window of peer rows: `elect_peers` (`:254`),
 `absolute_agreement` (`:210`), `quorum_mantissa` (`:1227`), `opinion_strength` (`:1367`),
 each with a `_lens` zero-copy twin.
@@ -767,7 +772,7 @@ So the two contradiction surfaces are **not** redundant — and a future session
 them commits precisely the impersonation the ruling forbids. What IS a real finding:
 
 - **`witness_fabric` carries no mask vocabulary at all.** Zero `u64`, zero `mask`, zero
-  `ndarray::simd` in the file; 119 scalar loop/iterator sites. If this plan's premise holds
+  `ndarray::simd` in the file (each a plain `grep -c`). ⊘ v4.2 §17: the struck text added "119 scalar loop/iterator sites" — **unreproducible**, no command given, independent counts spanned 102–153; 119 is inside that range, so not refuted, merely not a measurement. The no-mask-vocabulary finding does not depend on it. If this plan's premise holds
   anywhere, family (1)'s agreement topology is a candidate for the same lowering — but that is
   a **new, separate D-id**, not a re-use of `D-MRL-2a`'s slot, and it needs its own
   insufficiency argument.
@@ -800,3 +805,118 @@ citation to a *removal* ruling reads identically to a citation to the thing remo
 cheap mechanical check is the one used here: grep the sibling tree for the **symbol**, not the
 epiphany id. `EpistemicBassin24` returning zero hits took one command and would have blocked
 the mint three commits earlier.
+
+---
+
+## §17 — v4.2: the VERIFICATION COUNCIL (2026-09-03) — the review that did not happen
+
+> **Why.** #68 and #70 merged with **zero external review**: CodeRabbit spend-capped
+> 85 attempts over 7 days **and** an org spending cap, together setting an allowance of
+> 1 review/hour. ⊘ v4.2: the struck text wrote this as *"(84 attempts/7 days ⇒ 1/hour)"*, a
+> **false derivation** — 84 over 7 days is 0.5/hour, and 1/hour is the allowance the provider
+> SET, not a rate computed from usage. A reviewer flagged the arrow correctly and proposed
+> substituting 0.5/hour, which would swap one wrong reading for another: neither number is
+> derived from the other. Bugbot usage-capped. A 5+3 council was convened as
+> the substitute. Every correction below is a **strike-and-regrade** — the original
+> text is retained and marked ⊘, never replaced (append-only).
+
+**Verdicts.** Five savants, 42 findings; three reviewers, two independent BLOCKs
+(both on the disposition, not the facts). Two external Codex P2s landed on the
+sibling PR mid-run and are folded in.
+
+### §17.1 — Corrections applied in this commit (each ⊘-marked at its site)
+
+| id | was | is |
+|---|---|---|
+| B1 | `witness_fabric` "379 lines, landed after the council" | **3,439 lines, landed 2026-08-20** (PR #969). **The excuse is retracted, not just the number** — a pre-existing module was presented as unseeable |
+| B2 | `3¹² ≈ 4.2 GB` | **4.05 GiB / 4.35 GB** — 4.2 is neither convention |
+| B4 | §3c.1 "27 primitives-worth" | stale 3³ token; the geo facet is 3⁴ = **81 cells / 12 primitives** |
+| B5 | blasgraph "six semirings" | **seven** (`HdrSemiring`) |
+| B6 | §14.6 "the existing one" | the survivor-skip is **PROPOSED** (D-MRL-1b); the bullet has no mechanism under it until it lands |
+| B7 | §7's D-MRL-2a row, no ⊘ | **⊘ DO NOT ACT ON THIS ROW** — it read as a live mint directive |
+| B8 | "only the mint site itself" | false wording, sound claim — four definitional entries exist |
+| G1 | "119 scalar loop sites" | **unreproducible** (counts 102–153, no command); not refuted, not a measurement |
+
+### §17.2 — NOT corrected here, and why (the council's own BLOCKs)
+
+- **B3 (mixed units)** — §14.2 prices 65,536 in binary KiB and 10M in decimal MB.
+  Fixing needs a **decision** (KiB or MB throughout), not a correction; deferred as
+  such rather than silently picked.
+- **B9 / D5 (decaying pointers)** — `:13401` should be `:13615`, and `:438` is a line
+  into a 1,046-heading append-only file. **Correcting the numbers re-arms the bomb.**
+  The fix is to replace line cites with heading-text or D-id anchors, workspace-wide;
+  that is its own arc, and doing it here would be the comfortable half.
+
+### §17.3 — The blocking question §14's arithmetic now owes (G2+G3+G4+D3, merged)
+
+The council's sharpest finding, and it is **not** a novelty objection:
+
+> **§14.2 prices ONE cube; §14.3's L8 strike asserts "a per-class array".** If a cube
+> is per-class over the global row space the cost is `C × 9 × N/8` — at 10M rows and
+> 100 classes ≈ **1.1 GB, not 11.25 MB**. Either the headline numbers are understated
+> by the class count, or the L8 strike is unfounded. **Both cannot hold.**
+
+Three unstated premises underneath, in dependency order — **G2 is the root**:
+**G2** what row space does a mask span (the class's rows, or all rows)?
+**G3** times how many classes? **G4** rebuilt how often — "built once at version seal"
+is used as the REASON F7 dies, converting a write path into a claimed non-cost; an
+append-only version that adds rows changes `N` and invalidates every primitive.
+**D3** a resident, never-evicted per-class cube is not absent from memory pressure —
+it is an unbounded permanent floor *beneath* the pinning budget §11 Q3 says nobody owns.
+
+**This is a pricing defect, not a novelty defect.** The addressing scheme survives it
+intact; the cost table does not. Stated explicitly so a later reader does not collapse
+a sound idea because its arithmetic was wrong.
+
+### §17.4 — Reasoning defects recorded (not text errors)
+
+- **D1** §14.3 justifies **five** strikes with one warrant ("hit rate 100% by
+  construction"). Only S5-Q4 is a hit-rate item; L8/F7/F12/F10 die because the trie
+  *mechanism* is gone on that axis. The per-item cells say this correctly; the
+  preamble does not.
+- **D2** the F10 strike is a **redefinition**: the question migrates to "which resident
+  cube after a new seal" rather than vanishing. *Not expressible ≠ not reachable.*
+  (Its identification with `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` is
+  CONJECTURE — no mapping was shown.)
+- **G5** §3c.2's wind claim ("**is** voxelmasking at Minecraft cheapness — the
+  specification, not a metaphor") carries no CLAIMED/UNMEASURED label, no D-id and no
+  falsifier, in the same section that rules weather 11/11 NOT SOUND.
+
+### §17.5 — Council conduct (kept separate from the reviewed record)
+
+- **M0 — the evidence base was contaminated.** The spec told all five savants "all
+  repos at current main"; lance-graph's tree was on an **unmerged branch**, so
+  file-based findings saw #1158 as merged. Scope, named rather than waved at: it
+  touches **only** lance-graph file reads (the census count, the D-id sweep, the
+  board-integrity rows). It cannot touch anything read from lance-graph-java or OGAR,
+  nor any commit sha. Tree returned to `main` mid-council. **Rule: a review whose
+  evidence base is an uncommitted branch measures the reviewer's desk.**
+- **The orchestrator cited a non-existent commit sha** in a public review reply,
+  written from memory rather than read back — in a comment whose subject was two
+  claims that failed for want of checking. Corrected publicly, not edited away.
+- **"Zero occurrences in all three trees" was itself over-stated**: true for
+  `--include=*.rs`, false across all files. Found independently by two council
+  members. The corrected form is in §17.6.
+
+### §17.6 — Owed to `lance-graph`, unpaid (D-MRL-2a's own mandatory co-change)
+
+D-MRL-2a required *"grep every repo for dangling references to the retracted mint
+FIRST"*. That grep was never run beyond `*.rs`. On `main` today:
+`LATEST_STATE.md` still advertises `epistemic_bassin::{sweep_ternlog, eval_ternlog}`
+with its truth-table constants **as current state**, for a module that is git-removed
+and grep-zero in `crates/`; and `.claude/knowledge/literature-harvest-2026-09-01-post-1132.md`
+still treats *"the six loco-core calls … are universal"* as **constitutional**, stale
+since five of the six were retracted. Tracked as its own lance-graph arc — a board
+correction there is not this repo's to append.
+
+### §17.7 — A firewall violation the PREVIOUS council missed
+
+The v3 council BLOCKed model identifiers by product name in **§8** and rewrote that
+section by role. **§10 kept them** — five per-savant annotations, live on `main`
+since v3 shipped. Struck here and replaced with role descriptions.
+
+The lesson is about the fix, not the miss: **a BLOCK applied to the section where a
+violation was noticed, rather than to every instance of it, leaves the violation
+shipped.** A verdict is discharged by a grep across the artifact, never by editing
+the passage that prompted it. Neither council's reviewers caught this, because both
+were pointed at a *draft* while the violation lived in the *plan*.
