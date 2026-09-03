@@ -1,6 +1,9 @@
 # mask-risc-lowering-v1 — the API speaks database, the backend does photolithography
 
-> **Status:** DRAFT v2 — Phase-2 consolidation of the 5+3 council (5 savants reported;
+> **Status:** RATIFIED v3 — Phase-5 of the 5+3 council. Two BLOCKs resolved, 11 FIX applied,
+> 2 external Codex P1s verified and folded in. Change ledger v2→v3 is §13.
+>
+> **Status (v2):** DRAFT v2 — Phase-2 consolidation of the 5+3 council (5 savants reported;
 > reviewers NOT yet cast). The change ledger is §12. Spec v1 is the git history of this file.
 > Original header follows.
 >
@@ -33,7 +36,8 @@
    mask trie           (Lance version, prefix) → cached mask         "focus of awareness"
         │ two axes
    vertical            HHTL tiers: HEEL → HIP → TWIG, prefix containment = ancestry (the zone map)
-   horizontal          rail-group ternary sets: 2 × 3 rails, support/refute planes per 64 rows
+   horizontal-data     rail-group BELNAP sets: support/refute planes per 64 rows (#1129)
+   horizontal-predicate TERNARY_MATCH(pattern, care) applied AGAINST them — a SEPARATE op (F3)
         │ over
    the version's SoA   512 × 32 × (4+12), never invalidated             V3: shape transport
 ```
@@ -44,10 +48,10 @@ already developed.** A second query sharing a prefix pays only for its undevelop
 
 **The `mammal` sentence, made mechanical.** Walking the vertical axis down the taxonomy
 (`is_a` rails, HHTL prefix) to the node `mammal` yields one mask: every row whose key carries
-that prefix. That mask is a trie node. Every query about anything below `mammal` — every
-species, every phenotype restricted to mammals, every join whose left side is a mammal —
-**starts from that one cached set** and only exposes its residue. The subtree never has to be
-re-selected, because the version never changes and the prefix never moves. That is why the
+that prefix. That mask **would be** a trie node under §6's proposal `[S]`. Every query about anything below
+`mammal` **would start** from that one cached set and expose only its residue, and the subtree
+**would not have to be** re-selected — **if the memo hits, which is unmeasured** (D-MRL-0d).
+⊘ v2 wrote this in the present indicative about a thing that does not exist (R1). That is why the
 vertical masks are the most reusable objects in the system and go into the memo first.
 
 ---
@@ -59,12 +63,12 @@ vertical masks are the most reusable objects in the system and go into the memo 
 | Mask algebra over the population | `native/lgj-abi/src/exports.rs:518,524,680` (`lgj_mask_and/or/andnot`), `:332` (`lgj_mask_create`) | horizontal AND / OR / ANDNOT, `Box<[u64]>` per mask, generation-checked handles |
 | The narrowing chain | `exports.rs:1522` `lgj_plan_eval`; `abi.rs:337` `LgjOpDesc` (24 B, `combine` at `:345`) | n predicates, ONE crossing, accumulator starts all-set, monotone `V(k+1) ⊆ V(k)`. Today's op kinds: `eq_u32` (`:755`), `gt_i32` (`:787`), `eq_classid` (`:829`) — all scalar-valued, none bitwise over the payload |
 | The graph op | `exports.rs:1712` `lgj_hop` | Boolean-semiring `mxm` as mask × ClassView/WideFieldMask → mask (root `CLAUDE.md` mask-native invariant) |
-| The 3-input bit op | `ndarray/src/simd.rs:570` `pub mod ternlog` (`MAJ3 = 0xE8` at `:582`); `simd_avx512.rs:4934,4972` (`U64x8`/`U32x16::ternlog::<IMM>`, native `vpternlogq`); AVX2 `simd_avx2.rs:3559`; NEON/WASM/scalar ports **CLAIMED, not verified** (S3-2) | any 3-input boolean per bit, one instruction per 8 words. AVX-512 + AVX2 + facade CONFIRMED; the other three backends are a Wave-0 verification item, not an assumption |
+| The 3-input bit op | `ndarray/src/simd.rs:570` `pub mod ternlog` (`MAJ3 = 0xE8` at `:582`); `simd_avx512.rs:4934,4972` (`U64x8`/`U32x16::ternlog::<IMM>`, native `vpternlogq`); AVX2 `simd_avx2.rs:3559`; ALL five backends **CODED** — NEON `simd_neon.rs:1882`, WASM `simd_wasm.rs:998`, scalar `simd_scalar.rs:2088,:2147` | ⊘ v2 graded three backends "CLAIMED"; R1 corrected it in the UNDERSTATING direction — they are coded. What is unverified is **cross-backend PARITY `[H]`**. And the flattening hid the asymmetry that matters: **scalar/AVX-512/AVX2 expose TWO widths, NEON and WASM expose ONE** (verified by count). D-MRL-0e establishes which widths exist per backend, not merely "agreement" |
 | The minted opcode | `OGAR/crates/ogar-loco/src/lib.rs:607` `TERNLOG = 0x86`; `:596` and `vocabulary.rs:94`: **`0x87..0x8B` reserved**, previously `BELNAP_JOIN`, `INFO_GAIN`, `SIGMA_TENSION`, `ACCUMULATE`, `STANCE_ENTROPY`, torn down post-#1132 as "no producer, no basin" | the RISC op has a loco slot; the verbs have reserved slots waiting for a producer |
 | The Belnap encoding | lance-graph `.claude/board/EPIPHANIES.md:438` `E-THE-STATE-LAYER-IS-A-BELNAP-BILATTICE-AND-THE-JOIN-IS-THE-ACCUMULATOR-1` (#1129) | two planes `support_mask` / `refute_mask`; `(0,0)` Neither, `(1,0)` True, `(0,1)` False, `(1,1)` Both; **knowledge-order join = bitwise OR of both planes**, proven and pinned |
 | The vertical axis | `lance-graph-contract/src/hhtl.rs:56` `NiblePath`; `rail_geometry.rs:178` `is_ancestor_of` | prefix containment IS ancestry; the tier of a nibble is `n >> 2` (OGAR `CLAUDE.md`, 3×4 canon) |
 | The reject-early cascade | `ndarray/src/hpc/splat3d/depth_cascade.rs:54` `HhtlAction`, `:137` `cascade_block`, `:194` `cascade_blocks` | a working precedent for cheap-reject-before-expensive-compute over tiered blocks |
-| The rail carving | `lance-graph-contract/src/facet.rs:367-369` `CascadeShape::{G6D2, G4D3, G3D4}` | 6 × 2 rails is a ClassView-selected reading of the 12-byte register; a 2 × 3 rail grouping is a policy over `G6D2`, not a new carving |
+| The rail carving | `lance-graph-contract/src/facet.rs:398` (the variants; `:450` `groups()`, `:462` `levels()`) — ⊘ v2 cited `:367-369`, a doc-comment table, not the item (R1) | 6 × 2 rails is a ClassView-selected reading of the 12-byte register; a 2 × 3 rail grouping is a policy over `G6D2`, not a new carving |
 | Field-mask algebra | `class_view.rs:385,395,413,426` `intersect / union / difference / is_subset_of` (D-MAR-1, #1099) | the WideFieldMask half of "which fields participate" is complete |
 | The falsifier already designed | lance-graph `.claude/harvest/spatial-mask-r2il-audit-2026-08-24/REPORT.md` §6 item 5 | `DOWN[x]` bitmask over a synthetic 64-node DAG vs `is_ancestor_of`, one multi-parent exception routed to `FieldMask`, timed at N=64 and N=4096. **Never run.** |
 
@@ -73,14 +77,14 @@ vertical masks are the most reusable objects in the system and go into the memo 
 | already shipped / ruled | where | what it means for this plan |
 |---|---|---|
 | The two-axis model, **verbatim** | `.claude/board/EPIPHANIES.md:13403` — *"Vertical navigation is FREE (prefix arithmetic); horizontal costs a hop; the mask is the budget deciding which hops are paid"* | §2 and §5 are a RESTATEMENT, not a new claim. Now cited; the plan claims no novelty there |
-| **The `mammal` sentence is PROVEN, not proposed** | `.claude/board/entries/2026-08-23-e-hhtl-compiles-hierarchy-into-mask-geometry-1.md:10,26` — *"HHTL does not execute a tree. It compiles hierarchy into mask geometry"*, `M0 ⊇ M1 ⊇ … ⊇ M5`, measured **7/7** by `PROBE-MASK-ALGEBRA-INVARIANCE-1` | D-MRL-1d as written duplicates shipped, probed work. **Retired** — see §12 L4 |
+| The `mammal` **ALGEBRA** is proven; the **REUSE half is not** | `.claude/board/entries/2026-08-23-e-hhtl-compiles-hierarchy-into-mask-geometry-1.md:10,26` — *"HHTL does not execute a tree. It compiles hierarchy into mask geometry"*, `M0 ⊇ M1 ⊇ … ⊇ M5`, measured **7/7** by `PROBE-MASK-ALGEBRA-INVARIANCE-1` ⊘ v2 read this as proving the whole `mammal` sentence. The entry is `[MEASURED]` 7/7 for **nested restriction and indifference to meaning**, says **"Novelty explicitly NOT claimed"**, and measures an ALGEBRA, not a cache — it proves nothing about memoisation or reuse (R1, verified). D-MRL-1d's *mechanism* is duplicated; its *reuse policy* is unmeasured and survives |
 | Prefix pushdown was **dropped by operator correction** | `.claude/board/EPIPHANIES.md:13401` — three shapes rejected, because prefix containment/narrowing already IS `FacetCascade::shared_prefix_tiles` / `prefix_distance` | any prefix mechanism must LOWER ONTO those symbols or it re-opens a closed item |
 | `standing_mask` (`SubscriptionTable<K>`, fires iff `dirty ∩ interest ≠ ∅`) | `.claude/board/EPIPHANIES.md:13397` | the shipped persistent-mask-keyed-by-interest surface: nearest structural precedent to the trie. Its Vec+linear-scan / shard-per-tenant conclusions must be read before 1c, not re-derived |
 | `E-MASK-SELECTION-ALGEBRA-1` | `.claude/board/EPIPHANIES.md:13393` | confirms no version-keyed memo exists anywhere: §1's "verified absent" HOLDS |
 | "No second set algebra: Mengenlehre = `EvidenceMask` ops" | `.claude/plans/dismech-causal-replay-v1.md:70` | owns set-algebra repo-wide. The mask RISC must be shown to BE that algebra, not a second one |
 | `F-RLR-2`: *"a new carrier is proposed before `ogar_loco` is proven insufficient — automatic STOP"* | `.claude/plans/rubicon-loco-rung-cognitive-fabric-v1.md:422` | Wave 2's lowering table and Wave 3's `TernaryPattern` TRIP this gate unless the insufficiency argument is recorded. See §12 L9 |
 
-**What does NOT exist (verified absent, S1-Q1 + S3-1 + S3-3):** any mask memo in `lance-graph-planner`,
+**No occurrence found by the S1/S3 sweep `[H]` — an absence claim, not a proof** (⊘ v2 said "verified absent"; a negative existence claim over three repos rests on greps this document cannot re-run. A Wave-0 worker re-runs it before 1c mints anything): any mask memo in `lance-graph-planner`,
 `lance-graph-contract`, or `lgj-abi` (`NativePattern`'s three internal masks are scratch, not
 a memo); any bitwise op over the 12-byte payload in `plan_eval`; any survivor-word skip in
 `plan_eval`'s per-op sweep; any lowering from a loco verb to `LgjOpDesc`.
@@ -131,9 +135,9 @@ Zone-map skipping is not stolen from DuckDB: the HHTL tiers ARE the zone map (§
 
 | rung | what | 64K rows | provenance |
 |---|---|---|---|
-| cold, AoS | row-at-a-time / full 512-B-row sweep per query | ~25 ms per group | 32 MB touched. This is what `classidAt`-per-row costs today, i.e. the path root `CLAUDE.md` forbids as an engine |
-| cold, SoA | build one 3-rail group set from the rail lane | ~5 µs per group | 384 KB, one AVX-512 pass. **Estimate — the probe measures it** |
-| warm | trie hit, two cached sets, one AND | ~25 ns per group | crossing floor 21.9 ns measured (`bench/RESULTS.md` A); a 1024-word AND is ~100 ns unless the AND result is itself a trie node |
+| cold, AoS | row-at-a-time / full 512-B-row sweep per query | **~25 ms per group `[E — asserted, never measured]`** | 32 MB touched. Nobody has timed the `classidAt`-per-row path. **Added to D-MRL-0c's scope**, which v2 pointed only at the SoA rung |
+| cold, SoA | build one 3-rail group set from the rail lane | **~5 µs per group `[E — estimate]`** | 384 KB, one AVX-512 pass. D-MRL-0c measures it |
+| warm | trie hit, two cached sets, one AND | **~100 ns per group `[E — arithmetic, unmeasured]`** | ⊘ v2 headlined `~25 ns`, the very number that yields 200×, while its own provenance cell said 100 ns — a reader quoting the table re-derived the retracted claim (R1 BLOCK). The **measured** 21.911 ns crossing floor (`bench/RESULTS.md`) bounds this from BELOW; ~25 ns is floor + dispatch, **never the measured warm cost**. ~25 ns applies only if the AND result is itself a trie node — the composed-AND hypothesis |
 
 ⊘ **CORRECTED (S5-Q4, the council's sharpest finding).** v1 claimed
 `5000× (AoS→SoA) × 200× (SoA→memo)`. The 200× does not survive the plan's own numbers: a warm
@@ -142,22 +146,30 @@ hit is *"~100 ns unless the AND result is itself a trie node"* against a cold So
 results, which multiplies the key space by the number of pattern *pairs* — precisely where
 reuse collapses. So:
 
-- **The claim is now `5000× × ~50×`**, and the 50× is itself conditional on a hit rate nobody
-  has measured.
+- **The claim is now `[E]5000× × [E]~50×` — BOTH factors are ratios of UNMEASURED quantities**
+  (R1 BLOCK: v2 demoted the 200× and left its 5000× sibling ungraded). Neither is reportable
+  before D-MRL-0c pins both cold rungs, and the ~50× is additionally conditional on a hit rate
+  nobody has measured.
 - **200× is a HYPOTHESIS about composed-AND memoisation**, testable only by D-MRL-0b′
   (§12 L6), never an assumption.
-- Two numbers, measured separately, and neither reported before D-MRL-0c pins the cold rung.
+- Two numbers, **to be measured** separately, and neither reported before D-MRL-0c pins the
+  cold rungs. Only the 21.911 ns crossing floor is measured today, and it is not one of the two.
 
 ---
 
-## §5 — Rail-group factoring (why the memo hits)
+## §5 — Rail-group factoring (why the memo MAY hit — rail axis, pending 0b′/0d)
 
-Group the 6 rails 2 × 3: two groups of three rails, each with a ternary cached set (support
-plane + refute plane per 64 rows). Query = `group_A(pattern_A) AND group_B(pattern_B)` plus a
+Group the 6 rails 2 × 3: two groups of three rails, each with a **rail-group Belnap cached set**
+(support plane + refute plane per 64 rows). ⊘ v2 called this a "ternary cached set", welding the
+predicate-side TCAM to the data-side Belnap planes that F3 keeps separate (R2). Query = `group_A(pattern_A) AND group_B(pattern_B)` plus a
 `TERNLOG` inside a group for a partial pattern.
 
-Why 2 × 3 beats 1 × 6: a 6-rail pattern lives in 256⁶ and never recurs; a 3-rail pattern lives
-in 256³ and recurs constantly, and the halves recur **independently**. The grouping is a
+**Hypothesis `[H]`, not fact** (⊘ v2 stated three empirical claims about a real pattern
+distribution as fact, in a section whose own last line concedes the number is unmeasured — R1):
+a 6-rail pattern's 256⁶ space makes recurrence unlikely while a 3-rail 256³ space may recur,
+**and the halves MAY recur independently. Independence is the load-bearing assumption and is
+untested** — if it is false it kills the composed-AND memo the 200× depends on, so 0b′ carries
+it as a distinct kill condition. The grouping is a
 per-class cache policy resolved by the same classid lookup as the carving (§1 `CascadeShape`).
 **The number that picks 2×3 vs 3×2 vs 6×1 is memo hit rate on a real pattern stream** — wave 0.
 
@@ -171,7 +183,7 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
 
 | D-id | probe | pass / kill |
 |---|---|---|
-| **D-MRL-0a** | Run the audit's `DOWN[x]` falsifier: synthetic 64-node DAG, one multi-parent exception, `DOWN[x]` as a real bitmask vs `is_ancestor_of` on every single-inheritance node; time N=64 and N=4096 | exact agreement on single-inheritance nodes; multi-parent routes to `FieldMask`, corrupts neither. **Kill:** any disagreement — the vertical axis is not a bitmask and §2 is wrong |
+| **D-MRL-0a** | Run the audit's `DOWN[x]` falsifier **against `rail_geometry.rs:178`'s `is_ancestor_of`, NOT `hhtl.rs:176`'s** (two exist, different carriers — R1): synthetic 64-node DAG, one multi-parent exception, `DOWN[x]` as a real bitmask vs `is_ancestor_of` on every single-inheritance node; time N=64 and N=4096 | exact agreement on single-inheritance nodes; multi-parent routes to `FieldMask`, corrupts neither. **Kill:** any disagreement — the vertical axis is not a bitmask and §2 is wrong |
 | **D-MRL-0b′** (rewritten) | Rail-group hit-rate replay **per class** (S5-Q2-RISK: a pooled stream averages a bimodal per-class distribution into a number describing no class), under 1×6 / 2×3 / 3×2, **under a real capacity bound**, reporting BOTH single-group and **composed-AND** hit rates (S5-Q4) | **G9's absolute gate**: `hit_rate × (cold − warm) > 0` per class. The relative ranking is reported, never a verdict. **Kill:** product ≤ 0 ⇒ Wave 1c dies |
 | **D-MRL-0d** (new, S5-Q2-GAP) | Measure reuse on the axis the plan itself calls dominant: **tier-depth** hit rate, not only the rail axis. v1 asserted vertical masks are the most reusable objects and then measured only rails | a per-tier hit-rate curve. If tier depth dominates, the memo is populated top-down and the rail grouping is secondary |
 | **D-MRL-0e** (new, S3-2) | Verify `ternlog` parity on NEON / WASM / scalar, the three backends S3 could not confirm | all five backends agree with the scalar oracle, or the "every backend" claim is struck from §1 |
@@ -184,7 +196,7 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
 | **D-MRL-1a** | `LgjOpDesc` kinds `TERNLOG(imm, a, b, c)` and `TERNARY_MATCH(pattern[12], care[12])` over the facet register; composed inside `plan_eval` so a whole cascade is one crossing. Backend = `ndarray::simd::ternlog`; no raw intrinsic (simd-savant) | scalar oracle parity through `lgj_plan_eval_scalar` on a slab with planted hits; a disable of the care mask must flip a planted miss to a hit |
 | **D-MRL-1b** | survivor-word skip in `plan_eval`: skip any 64-row block whose accumulator word is zero | 1..7-level cascade at 64K rows: cost per level after the first must be ∝ survivors. **Kill:** superlinear anywhere. **Plus (S4-6):** `exports.rs:2539` `a_bad_plan_leaves_dst_mask_untouched` and the `out_count` assertion at `:2636` assert full-population semantics and must be RE-VERIFIED deliberately, not left green by accident |
 | **D-MRL-1c** | the mask trie in the registry, keyed **`(version, classid, prefix hash)`** (F2), **one writer: the `plan_eval` call that misses** (F7), entries are ordinary generation-checked mask handles; eviction is a miss, never a stale read (the version is immutable — the liveness question of `epoch-recheck-v3` does not arise here, by construction) | warm cascade ≤ 1.2× one cold level; a second identical query returns the same handle |
-| **D-MRL-1d** ⊘ **RETIRED as a mechanism (S1-Q2, S5-Q1)** — the `mammal` claim is already PROVEN 7/7 (`E-HHTL-COMPILES-HIERARCHY-INTO-MASK-GEOMETRY-1`), and a prefix IS a ternary pattern (F6). What survives is a **policy**: which prefixes get memoised, populated top-down per D-MRL-0d, lowering onto `shared_prefix_tiles` | the surviving falsifier is G9's: prefix memoisation must show a positive `hit_rate × (cold − warm)`, measured by hit COUNT (G2), never by timing alone |
+| **D-MRL-1d** ⊘ **RETIRED as a mechanism (S1-Q2, S5-Q1)** — the **nesting/indifference half** is PROVEN 7/7 (`E-HHTL-COMPILES-HIERARCHY-INTO-MASK-GEOMETRY-1`); the **reuse half is measured nowhere**, which is exactly why a policy survives rather than the question being closed, and a prefix IS a ternary pattern (F6). What survives is a **policy**: which prefixes get memoised, populated top-down per D-MRL-0d, lowering onto `shared_prefix_tiles` | **D-MRL-1d′ (the surviving policy, now with an owner and a STATUS_BOARD row — R2)**: the falsifier is G9's: prefix memoisation must show a positive `hit_rate × (cold − warm)`, measured by hit COUNT (G2), never by timing alone |
 
 ### Wave 2 — loco (the verbs get a producer)
 
@@ -208,7 +220,14 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
   **`(Lance version, classid, prefix)`**. v1 said `(version, prefix)`; under the canon-high
   classid layout a prefix is NOT unique across classes, so two classes sharing a prefix would
   have ALIASED to one trie node. With F4 making the grouping a per-class policy, the class is
-  part of the key by construction. There is no invalidation path; there is eviction. Any design that adds an epoch check to a trie read is rejected — that question was measured and closed on 2026-09-03 (`epoch-recheck-v3.md` Amendment A1, gate FAIL) and does not apply to immutable versions.
+  part of the key by construction.
+- **F2 wording (R1).** ⊘ "There is no invalidation path; there is eviction" was present
+  indicative about a design that does not exist. It is a STIPULATION: **the memo MUST have no
+  invalidation path, only eviction** — licensed by wafer-immutability (§0), a design constraint,
+  not an observed property. And ⊘ "that question was measured and closed" conflated two objects:
+  the `epoch-recheck-v3` A1 FAIL is about `RowStore`'s **cached lane descriptors**, whose residue
+  (`ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW`) is still OPEN. **The trie's case is argued
+  from immutability, never inherited from that measurement.** There is no invalidation path; there is eviction. Any design that adds an epoch check to a trie read is rejected — that question was measured and closed on 2026-09-03 (`epoch-recheck-v3.md` Amendment A1, gate FAIL) and does not apply to immutable versions.
 - **F3.** Belnap is data-side, two planes, per #1129. The pattern-side TCAM (`pattern`, `care`) is a separate op. They compose; they are not the same op.
 - **F4.** Rail grouping is a per-class policy selected by classid, never a global constant.
 - **F5 (AMENDED, S4-10).** Ship order is 0 → 1 → 2 → 3 and **Wave 0 gates the whole of Wave 1**,
@@ -230,6 +249,24 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
   The next free CORE slots are **`0x8C..0x8F` — four slots**, and `0x86..0x8F` is the whole
   remaining core range (`lib.rs:334,341`). Five verbs do not fit four slots: Wave 2 mints
   **`BELNAP_JOIN` only**, and the rest are a separate, deliberate decision.
+- **F10 (NEW, R1 + R2, and it is a REQUIREMENT not a record).** A trie handle whose recorded
+  version does not match the requested `(version, classid, prefix)` key is **refused at resolve**.
+  ⊘ v2's ledger recorded this as "absorbed into F2 + G10"; it was in neither, and `registry.rs`
+  contains **zero occurrences of `version`** (verified) — handles carry owner + generation + kind
+  only. So this is a **new Wave-1c requirement with its own falsifier**, not an existing gate.
+  It is a KEY-IDENTITY check, explicitly NOT an epoch re-check. This is the exact shape of
+  `ISS-LGJ-G11-FENCE-WAS-PROSE`, caught before it shipped.
+- **F11 (NEW, R3).** `TERNARY_MATCH`'s `pattern[12]` / `care[12]` cross the ABI as **raw
+  fixed-width struct fields only** (the existing `LgjOpDesc` 24-byte fixed-layout precedent),
+  never through a serialize/deserialize or JSON/text encoding. Same rigour as F1's row-at-a-time
+  prohibition; closes the ambiguity §11 Q2 invited before any Wave-1a code lands.
+- **F12 (NEW, external Codex P1 on #67, verified).** **A trie hit never hands a caller a handle
+  the caller may close.** Java's `Mask` is its handle's sole closer and `Mask.close()` closes
+  unconditionally (`Mask.java:155-161`); `registry::close` takes the entry and bumps the
+  generation (`registry.rs:322-336`). So returning the cached handle means **closing the first
+  result destroys the trie entry** — while G2-MEMO's hit counter still reports successful reuse.
+  The cache owns its handles independently; a hit yields a fresh client handle. **G11-GATE:** a
+  test must CLOSE a result and then repeat the query, asserting the second query still hits.
 - **F9 (NEW, S1-Q4).** The mask RISC must be shown to BE `EvidenceMask`'s set algebra
   (`dismech-causal-replay-v1.md:70`, "no second set algebra"), not a second one. If it cannot
   be, that is a STOP, not a footnote.
@@ -250,7 +287,8 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
 **G1 — parity.** Every new `plan_eval` op kind agrees byte-for-byte with `lgj_plan_eval_scalar`
 on the same fixture. A disable of the `care` mask must flip a planted miss into a hit
 (two-sided, or the op is unfalsified).
-**G2 — anti-vacuity on the memo.** A trie hit must be *observable as a hit* (hit counter), not
+**G2-MEMO — anti-vacuity on the memo** (⊘ renamed in v3: v2 called this `G2` while G3 cited the
+repo-level `G2` no-per-row-engine gate — one symbol, two gates, one page (R2)). A trie hit must be *observable as a hit* (hit counter), not
 inferred from timing. A run where every query misses must fail the test that claims reuse.
 **G3 — no per-row engine.** `GraphHopTest`'s reflective allowlist, the G2 no-per-row-engine
 call-site check, and the population-independent allocation gates extend to every new surface
@@ -260,11 +298,15 @@ and stay green. `ApiSurfaceTest` unchanged (no FFM type in a public signature).
 **G5 — G11.** `native/lgj-abi/src` imports no `lance_graph_contract` module outside
 `{canonical_node, class_view, facet, ontology}`; growing the list edits the test AND
 `CLAUDE.md` AND `Cargo.toml` in one commit (`g11_contract_import_fence.rs`).
-**G6 — central gates.** `cargo fmt --check`, `cargo clippy -p lgj-abi --all-targets -D warnings`,
+**G6 — central gates.** `cargo fmt --check`, `cargo clippy -p lgj-abi --all-targets -- -D warnings`
+(⊘ v2 omitted the `--`; **verified empirically**: the v2 form exits `unexpected argument '-D'
+found` BEFORE linting anything, so the mandatory central gate could not run — external Codex P1),
 `cargo test -p lgj-abi`, `javac` + `AllTests`, run ONCE by the orchestrator, never by a worker.
-**G7 — two numbers, and the honest one.** Any reported speedup states the AoS→SoA factor and
-the SoA→memo factor separately (§4), and the memo factor is **~50× unless composed-AND
-memoisation is measured**, never 200× by assertion. A single fused number is a failed gate.
+**G7 — no number is reported before it is measured.** ⊘ v2 forbade asserting 200× while
+MANDATING asserting ~50×, which is `5 µs ÷ 100 ns`, an estimate ÷ an arithmetic guess (R1).
+Ruled: the memo factor is **unreported until D-MRL-0c measures the cold rungs**; the ~50×
+arithmetic is a **bound on the hypothesis, never a result**. Reporting a single fused number,
+OR reporting ~50× as measured, is a failed gate.
 **G9 — the memo pays, absolutely (S5-Q4-RISK).** v1's kill for D-MRL-0b was *relative*
 ("no grouping beats 1×6 by ≥3×") and is satisfiable at a near-100% miss rate for every
 grouping — a memo that never pays could have passed it. The gate is now ABSOLUTE and joins 0b
@@ -272,6 +314,9 @@ to 0c: replay under a REAL capacity bound and report `hit_rate × (cold − warm
 measured crossing floor (21.911 ns, `bench/RESULTS.md`). If that product is not positive, the
 memo does not pay and Wave 1c dies. No new probe is needed — G2's hit counter and 0c's cold
 number are the apparatus (S5 PRIOR-ART-AT).
+**G11-GATE — the memo survives a close (F12).** A test closes a hit's result and repeats the
+query; the second query must still hit. Without it, G2-MEMO's counter certifies a cache whose
+entries a caller can destroy.
 **G10 — ABI minor (S4-4/5).** Any new `LgjOpDesc` kind is additive ⇒ **bump `LGJ_ABI_MINOR`
 8→9, rebuild the `.so` FIRST**, add the `OldAbiCompatTest` leg, update `docs/abi.md`. This is
 a precondition of Wave 1a, not a follow-up, per the repo's own iron rule.
@@ -322,54 +367,62 @@ run + EPIPHANIES only if a finding emerged.
    test that argument?
 5. Is "photolithography" load-bearing or decorative — does any decision depend on it?
 
-## §8 — Model allocation (operator-ruled 2026-09-03, declared here, not per spawn)
+## §8 — Worker allocation, BY ROLE (⊘ v3: tiers struck)
 
-- **Planning is Opus.** The 5 council savants, the 3 reviewers, the consolidation passes,
-  every wave's spec, every "does this measurement mean what it appears to mean" call, and
-  the orchestrator (central gates: `cargo`/`javac`/`AllTests`, every commit and push).
-- **Grindwork is Sonnet.** Bounded transcription against a written spec: port THIS kernel
-  composition, write THIS probe from THIS table, thread THIS op kind through THESE call
-  sites, replay THIS pattern stream. One source in, one shape out. Never a worktree, never
-  its own cargo run, never a claim that it compiles.
-- **Never Haiku** for anything in this plan.
+⊘ **BLOCK(P0), R2.** v2 named model tiers by product name. Root `CLAUDE.md`: *"**No model
+identifier in any committed artifact** (chat only). This file deliberately carries NO
+model-policy section; worker-tier allocation is stated by role in session briefs."* Also a
+dilution — ROLE is durable, TIER is perishable, and v2 put the perishable half in the durable
+artifact. The allocation is unchanged; only the identifiers are struck.
 
-## §12 — CHANGE LEDGER v1 → v2 (Phase-2 consolidation; reviewers not yet cast)
+- **Accumulation roles** — the council's savants and reviewers, every consolidation pass, each
+  wave's spec, every "does this measurement mean what it appears to mean" judgement, and the
+  orchestrator (central gates, every commit and push).
+- **Bounded-transcription roles** — port THIS kernel composition, write THIS probe from THIS
+  table, thread THIS op kind through THESE call sites, replay THIS pattern stream. One source
+  in, one shape out. Never a worktree, never its own cargo run, **never a claim that it
+  compiles**.
+- **The workspace floor applies**; the lowest tier is excluded for every role here.
 
-Five savants, 40 findings. Every VIOLATES amended, every GAP filled with a committed decision,
-every PRIOR-ART-AT wired in. Losing findings are recorded, not deleted.
+Tier binding lives in the session brief, never in this file.
 
-| # | finding | lens | resolution in v2 |
-|---|---|---|---|
-| L1 | Belnap epiphany path wrong (repo root vs `.claude/board/`) | S3-1 | §1 corrected |
-| L2 | `ternlog` on NEON/WASM/scalar is CLAIMED, not verified | S3-2 | §1 regraded; **D-MRL-0e** added to verify before the claim is made |
-| L3 | Two-axis model already exists verbatim | S1-Q2 | §2 now cites `EPIPHANIES.md:13403`; the plan claims no novelty |
-| L4 | **The `mammal` claim is already PROVEN 7/7** | S1-Q2 | **D-MRL-1d retired as a mechanism**; what survives is a memoisation policy |
-| L5 | Prefix pushdown was dropped by operator correction | S1-Q2-GAP | **F6**: no new prefix mechanism; lower onto `shared_prefix_tiles` / `prefix_distance` |
-| L6 | **200× is not supported by the plan's own numbers (~50×)** | S5-Q4 | §4 corrected; 200× demoted to a hypothesis about composed-AND memoisation, testable only by 0b′ |
-| L7 | 0b's kill was RELATIVE — a never-paying memo could pass | S5-Q4-RISK | **G9**: absolute `hit_rate × (cold − warm) > 0`, joining 0b to 0c. No new probe (S5 PRIOR-ART-AT) |
-| L8 | **Key aliases across classes sharing a prefix** | S5-Q3 | **F2 amended**: key is `(version, classid, prefix)`. A correctness hole, not tuning |
-| L9 | F-RLR-2 automatic STOP on a new carrier | S1-Q4-RISK | D-MRL-2a must record the `ogar_loco`-insufficiency argument or STOP |
-| L10 | **Slot reclaim VIOLATES "reserve, don't reclaim"** (two lenses, independently) | S1-Q3, S2-5 | **F8**: `0x87..0x8B` stay retired; next free core slots are `0x8C..0x8F` — and only **four** remain, so Wave 2 mints `BELNAP_JOIN` alone |
-| L11 | Trie has no named writer | S2-3 | **F7**: exactly one writer, the missing `plan_eval` call |
-| L12 | No version gate shown at the ABI boundary | S2-2 | Absorbed into F2 + G10: the key carries the version, and a handle whose version does not match its key is refused at resolve. **Recorded as a gate, not waved away** |
-| L13 | ABI minor bump never stated as a precondition | S4-4/5 | **G10**: bump 8→9, rebuild the `.so` first, `OldAbiCompatTest` leg, `docs/abi.md` — a precondition of 1a |
-| L14 | `docs/abi.md` not a named deliverable | S4-3 | folded into G10 |
-| L15 | Survivor skip breaks two full-population tests | S4-6 | named in 1b's falsifier column |
-| L16 | Wave 2 named no OGAR-side co-change | S4-8 | 2a now names the vocabulary table, `DISCOVERY-MAP.md`, and a dangling-reference sweep |
-| L17 | Wave 0 gated only 1c | S4-10 | **F5 amended**: Wave 0 gates all of Wave 1 |
-| L18 | Per-class policy makes hit rate per-class; 0b pooled it | S5-Q2-RISK | 0b′ is per-class |
-| L19 | The dominant reuse axis (tier depth) was never measured | S5-Q2-GAP | **D-MRL-0d** added |
-| L20 | `standing_mask` is the nearest precedent, uncited | S1-Q1 | added to §1; 1c must read its conclusions before re-deriving them |
-| L21 | "No second set algebra" (`EvidenceMask`) unreconciled | S1-Q4-RISK | **F9**: the RISC must be shown to BE that algebra, or STOP |
-| L22 | Cross-class eviction contention unnamed | S5-Q3 | open question, moved to §11 Q3 with the pinning-budget owner named as the missing decision |
-| L23 | Photolithography reads as evidence for reuse | S5-Q5-RISK | §0 note: the analogy is load-bearing ONLY for wafer-immutability (which licenses F2's no-invalidation rule); it predicts NOTHING about hit rate |
-| L24 | AP9 does not exist (catalogue is AP1–AP8) | S2-6 | question set corrected for the next council |
+## §13 — CHANGE LEDGER v2 → v3 (Phase-4/5; three reviewers + one external review)
 
-**Findings recorded but NOT acted on (anti-collapse):** S2-1's four YIELDS verdicts (no
-amendment needed); S4-9's acyclicity CONFIRMS; S3-3/4/5's three CONFIRMS. These are the
-evidence that the un-amended parts of the spec survived review, and are kept as such.
+Two BLOCKs, eleven FIX, two external Codex P1s. Where R1 and R3 conflicted with R2 on §8, the
+**stricter verdict won** per the harness, without an operator escalation line.
 
-## §11 — Open questions for the council
+| # | verdict | resolution |
+|---|---|---|
+| B1 | **BLOCK(P0)** R2 §8 — model identifiers in a committed artifact | §8 rewritten BY ROLE; tier binding moved to the session brief. R1 and R3 both PASSED this section; the stricter verdict won |
+| B2 | **BLOCK(P0)** R1 §4 — the warm cell contradicted its own provenance | every rung regraded `[E]`; warm headline is now ~100 ns; ~25 ns demoted to floor+dispatch; `5000×` graded `[E]` alongside its already-demoted sibling |
+| F1 | FIX(P1) R1 §1 — `ternlog` mis-graded, in the UNDERSTATING direction | all five backends are CODED (verified); what is unverified is PARITY. **NEON and WASM expose one width, the others two** — 0e must establish widths, not "agreement" |
+| F2 | FIX(P1) R1 §1 — `facet.rs:367-369` cites a doc table, not the item | re-cited to `:398` (+ `:450`, `:462`) |
+| F3 | FIX(P1) R1 §1 — "verified absent" graded as fact | regraded `[H]`, an absence claim; a Wave-0 worker re-runs the sweep |
+| F4 | FIX(P1) **R1 §12 L12 + R2 §7, two lenses** — a gate recorded that does not exist | **F10 (NEW)**. `registry.rs` has **zero** `version` occurrences (verified). This is the `ISS-LGJ-G11-FENCE-WAS-PROSE` shape caught pre-ship |
+| F5 | FIX(P1) R1 §6/§1/L4 — "PROVEN" used too wide | the nesting/indifference half is proven 7/7; the **reuse half is measured nowhere**. The entry itself says "Novelty explicitly NOT claimed" |
+| F6 | FIX(P1) **R2 §0 + §5** — ternary × Belnap conflated | diagram split into `horizontal-data` (Belnap planes) and `horizontal-predicate` (TERNARY_MATCH); "ternary" reserved for the predicate leg; the object renamed "rail-group Belnap cached set" |
+| F7 | FIX(P1) R3 §6 — serialization ambiguity at the new op | **F11 (NEW)**: pattern/care cross as raw fixed-width struct fields only |
+| F8 | FIX(P1) R1 §7c — G7 forbade one unmeasured number while mandating another | G7 now forbids reporting ANY memo factor before 0c |
+| F9 | FIX(P2) R1 §0 — `mammal` in the present indicative about a non-existent trie | conditionalised and graded `[S]` |
+| F10 | FIX(P2) R1 §5 — three empirical claims stated as fact | regraded `[H]`; **independence named as a distinct kill condition** in 0b′ |
+| F11 | FIX(P2) R1 §7 — F2's "there is no invalidation path" | restated as a STIPULATION; the `RowStore` A1 measurement explicitly NOT inherited |
+| F12 | FIX(P2) R2 §6 — the surviving policy had no owner | **D-MRL-1d′** with G9 as its gate and a STATUS_BOARD row |
+| F13 | FIX(P2) R2 §7c — `G2` named two different gates on one page | renamed **G2-MEMO** |
+| F14 | FIX(P2) R1 §6 — `is_ancestor_of` is ambiguous (two exist) | 0a names `rail_geometry.rs:178` |
+| X1 | **external Codex P1, verified** — the mandatory central gate could not run | `cargo clippy … -- -D warnings`. The v2 form exits before linting; both forms run by me |
+| X2 | **external Codex P1, verified** — close-and-requery destroys the memo | **F12 (NEW)** + **G11-GATE**: the cache owns its handles; a test closes a result and re-queries |
+
+**Accounting (R2 + R1).** v2's header said "40 findings"; L1–L24 plus the recorded-not-acted
+paragraph did not account for all of them. Corrected: the five savants returned **40 findings**
+across 5 lenses; **24 produced amendments (L1–L24)**, **8 were CONFIRMS requiring no amendment**
+(recorded below, not deleted), and **8 were sub-findings folded into the 24 rows they support**.
+No finding was discarded.
+
+**§9 (R2).** There is no §9 and there never was — v2's section numbering jumped from §8 to §10
+when §7b/§7c were inserted. Recorded here rather than left as a silent gap, since an absent
+numbered section is indistinguishable from a deleted leg.
+
+## §11 — Open questions
 
 - **Q1.** Trie ownership: `lgj-abi` registry (consumer-local) or `lance-graph` (shared by every consumer)? The version is lance-graph's; the handles are lgj's. Substrate-first says lance-graph, but no consumer other than lgj exists yet.
 - **Q2.** Does `TERNARY_MATCH` belong in `LgjOpDesc` (24 B, fixed) or does a 24-byte pattern+care force a wider descriptor and an ABI minor bump?
@@ -377,4 +430,8 @@ evidence that the un-amended parts of the spec survived review, and are kept as 
   part v1 never asked — **who owns the pinning budget** when policies are per-class? Per-class
   policies compete for one fixed-capacity trie, so a hot class can evict another class's pinned
   vertical masks.
-- **Q4.** Which real pattern stream for D-MRL-0b, and who owns it (MedCare-rs is private).
+- **Q4.** Which real pattern stream for D-MRL-0b′, and who owns it (MedCare-rs is private).
+- **Q5 (NEW, R2).** Which of the four deferred verbs (`INFO_GAIN`, `SIGMA_TENSION`,
+  `ACCUMULATE`, `STANCE_ENTROPY`), if any, takes a slot from the **four** remaining core slots
+  `0x8C..0x8F`, and on what producer evidence? Deferral without a question is how a reserved leg
+  becomes a forgotten one.

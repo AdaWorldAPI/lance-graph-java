@@ -17,7 +17,7 @@ the membrane / Valhalla cheap addresses / everything else underneath).
 | D-LGJ-MMV-2b | Register-sweep family (§14-16) answers facet-major; −18 refusal re-pinned two-sided, kept reachable | Queued |
 | D-LGJ-MMV-3 | Valhalla value-class promotions where the three-truths lab shows a measured facade-path win; each reversible | Queued (evidence-gated) |
 | D-LGJ-MMV-4 | Temporal read binding via `LanceVersion`/`VersionRange`/`TemporalPov` (contract vocabulary, never the Kanban-entangled types) | Queued (substrate-first per F6) |
-| D-MRL-0..3 | `mask-risc-lowering-v1.md` — verbs → mask RISC → trie memo over immutable versions (photolithography). Waves: 0 probes (`DOWN[x]` falsifier, rail-group hit rate, cold build cost), 1 `lgj-abi` (TERNLOG/TERNARY_MATCH ops, survivor skip, trie, tier masks), 2 loco verbs with a lowering table, 3 Java glove | Queued (DRAFT awaiting 5+3 council) |
+| D-MRL-0..3 | `mask-risc-lowering-v1.md` — verbs → mask RISC → trie memo over immutable versions (photolithography). Waves: 0 probes (`DOWN[x]` falsifier, rail-group hit rate, cold build cost), 1 `lgj-abi` (TERNLOG/TERNARY_MATCH ops, survivor skip, trie, tier masks), 2 loco verbs with a lowering table, 3 Java glove | **RATIFIED v3 (2026-09-03)** — 5+3 council complete: 5 savants/40 findings → draft v2 (24 amendments) → 3 reviewers (2 BLOCK, 14 FIX) + 2 external Codex P1s → v3. Both BLOCKs resolved (model identifiers struck from the artifact; the cost ladder regraded `[E]` throughout). Waves QUEUED behind Wave 0, which now gates all of Wave 1 |
 
 W4.2 (the write seam) deliberately has NO row — blocked with GridLake
 (plan F5) and substrate-side by the F7 measurement; a row here would be
