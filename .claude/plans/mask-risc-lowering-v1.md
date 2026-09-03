@@ -1,6 +1,12 @@
 # mask-risc-lowering-v1 — the API speaks database, the backend does photolithography
 
-> **Status:** RATIFIED v3 — Phase-5 of the 5+3 council. Two BLOCKs resolved, 11 FIX applied,
+> **Status:** v4 AMENDED — §14 (voxelmasking: the vertical axis is enumerated, not cached),
+> §3c (reuse map: OSM native, weather splits wind/humidity), §15 (D-MRL-0f OSM probe,
+> D-MRL-0g frame-sequence probe). v4 does not retract v3; it narrows the axis v3's cache
+> machinery applies to. No council re-run — the amendment adds probes and strikes open
+> questions, it decides nothing v3 froze.
+>
+> **Status (v3):** RATIFIED v3 — Phase-5 of the 5+3 council. Two BLOCKs resolved, 11 FIX applied,
 > 2 external Codex P1s verified and folded in. Change ledger v2→v3 is §13.
 >
 > **Status (v2):** DRAFT v2 — Phase-2 consolidation of the 5+3 council (5 savants reported;
@@ -435,3 +441,245 @@ numbered section is indistinguishable from a deleted leg.
   `ACCUMULATE`, `STANCE_ENTROPY`), if any, takes a slot from the **four** remaining core slots
   `0x8C..0x8F`, and on what producer evidence? Deferral without a question is how a reserved leg
   becomes a forgotten one.
+
+---
+
+## §14 — v4 AMENDMENT: voxelmasking (operator, 2026-09-03)
+
+> **Status of this section:** AMENDMENT to the ratified v3. It does not retract v3; it
+> **narrows the axis v3's cache machinery applies to**, and it deletes five open questions on
+> the vertical axis by construction rather than by measurement. Everything below is PLAN
+> register except where a `file:line` is cited.
+
+### §14.1 — The idea
+
+The vertical axis is not a cache problem. It is small enough to **enumerate**.
+
+Each HHTL tier admits three states in a ternary match: **must-match**, **must-not-match**,
+**don't-care**. Over the canonical three-tier key (`CLAUDE.md` CANON: HEEL / HIP / TWIG at
+`4..6 / 6..8 / 8..10`) that is `3³ = 27` cells — a 3×3×3 voxel cube, every cell a mask, all
+of them precomputed at version seal.
+
+### §14.2 — The arithmetic (the whole argument)
+
+A mask over `N` rows costs `N/8` bytes. At the fixture size `N = 65_536` that is **8 KB**.
+
+| quantity | at N = 65,536 | at N = 10,000,000 |
+|---|---|---|
+| one mask | 8 KB | 1.25 MB |
+| **9 primitives** (3 tiers × 3 states) | **72 KB** | **11.25 MB** |
+| full 27-cell cube, if materialised | 216 KB | 33.75 MB |
+
+**Only the 9 primitives are built.** The other 18 cells are an AND of three primitives —
+the exact op `plan_eval` already composes (`exports.rs`, the existing chain: n ops, one
+crossing, monotone `V(k+1) ⊆ V(k)`). So the cube is a **9-entry array indexed by a base-3
+digit triple**, not a 27-entry store.
+
+### §14.3 — What this DELETES, and why that is the point
+
+Five open items in v3 exist only because hit rate on the vertical axis was unmeasured. Under
+enumeration the hit rate is **100% by construction**, so they do not need answering — they
+need striking, on the vertical axis only:
+
+| v3 item | why it dies (vertical axis only) |
+|---|---|
+| **S5-Q4** (composed-AND hit rate unmeasured) | every composition is an AND of resident primitives; there is no miss path |
+| **L8** (key aliasing across classes) | a per-class array indexed by a base-3 digit triple has no key to alias |
+| **F7** (one writer = the `plan_eval` that misses) | built once at version seal, read-only thereafter; no writer at all |
+| **F12 / Codex P1** (a trie hit must not hand back a closable handle) | there are no handles to close; the cells are array slots, not registry entries |
+| **F10** (a trie handle whose recorded version ≠ the requested key is refused) | the cube **is** per-version — indexed, never looked up, so a wrong-version read is not expressible |
+
+**F2's no-invalidation-only-eviction rule survives unchanged** and is in fact strengthened:
+the wafer is immutable, and now so is the whole exposure set.
+
+### §14.4 — The boundary, stated before anyone hits it
+
+Enumeration works **at tier granularity and nowhere else**.
+
+| granularity | cells | primitive cost at N = 65,536 |
+|---|---|---|
+| 3 tiers | 3³ = 27 | 72 KB — **build it** |
+| 6 rails (`6×(u8:u8)`) | 3⁶ = 729 | 144 KB primitives; cube 5.7 MB — borderline |
+| 12 facet bytes | 3¹² = **531,441** | cube ≈ **4.2 GB** — **never** |
+
+So the two axes **split their mechanism**, which is the v4 correction to v3's single-cache
+framing:
+
+- **vertical / HHTL** → the voxel cube. Enumerated. No cache, no eviction, no hit rate.
+- **horizontal / rail patterns** (256⁶ per rail pair) → still a real cache. **D-MRL-0b′ and
+  G9 survive verbatim there**, and Q3's eviction/pinning question is now a horizontal-only
+  question — which also answers half of it: vertical masks are not competing for the budget,
+  because they are not in it.
+
+### §14.6 — Culling is the same operation (operator, 2026-09-03)
+
+*"I presume voxel masking also helps culling."* Yes — and it is worth being precise about
+why, because it is not an extra feature bolted on: **culling and selection are the same
+mask, read from opposite ends.**
+
+A cell address names the rows that survive; its complement names the rows that are never
+touched. So:
+
+- **Frustum / viewport culling** (OSM, and any spatial consumer) — a viewport is a tier +
+  tile range, i.e. a cell address. Everything outside is excluded by the AND itself, with no
+  per-row test. The cull is not computed; it is the shape of the answer.
+- **Zone-map skipping** — already the plan's own framing of the vertical axis (§2). A tier
+  whose primitive AND yields a zero accumulator word means that entire 64-row block is
+  skipped, which is exactly **D-MRL-1b's survivor-word skip**. Voxelmasking does not add a
+  culling mechanism; it makes the mask that drives the existing one free to obtain.
+- **Occlusion / LOD** — the tiers ARE the level-of-detail ladder (`GEO_V3_FACET` rails 0–3,
+  heel→leaf). Culling at a coarse tier costs one index and one AND regardless of how many
+  rows it removes, which is the property that makes hierarchical culling worth doing at all.
+
+**The honest limit, stated with the claim.** What is proven today is the *nesting algebra* —
+`E-HHTL-COMPILES-HIERARCHY-INTO-MASK-GEOMETRY-1`, which **explicitly does not claim novelty**
+and proves containment, not reuse and not a cull rate. So:
+
+> **CLAIMED, UNMEASURED:** that voxel culling removes a large fraction of rows on a real
+> population. Nobody has measured a cull rate on any real stream.
+
+D-MRL-0f therefore reports one more number: the **cull fraction** per viewport query
+(`rows excluded / rows total`), with the anti-vacuity twin already required in §15 — a cube
+whose cells all admit everything culls nothing while looking identical in a timing chart.
+
+### §14.7 — Prefetch: the mask IS the fetch list (operator, 2026-09-03)
+
+*"and the caching masking prefetch helps rendering a lot."* This is the strongest argument
+in the whole amendment for the **horizontal** cache, and it is a different argument from the
+one v3 could not close — so it is recorded separately rather than folded in.
+
+Two mechanisms, both structural:
+
+1. **A mask resolved before the data is touched is a prefetch list.** The AND completes over
+   `N/8` bytes and yields exactly which rows a frame needs — *before* a single 512-byte row
+   is read. That is a fetch schedule, not a prediction: the loads can be issued ahead, in row
+   order, with no speculation and no misprediction path. This is the same property that makes
+   §14.6's culling free, read forward instead of backward.
+
+2. **Frame-to-frame locality is structural, not statistical.** A viewport moves continuously,
+   so the cells a frame needs are *neighbours* of the cells the previous frame needed. On the
+   vertical axis this costs nothing (the cube is resident). On the **horizontal** axis it is
+   the first reuse argument in this plan that does not depend on an unmeasured hit rate:
+   consecutive frames request overlapping rail patterns **by construction of motion**, not by
+   luck of the query stream.
+
+**Why this matters for G9.** v3's gate is `hit_rate × (cold − warm) > 0` per class, with the
+hit rate unmeasured and D-MRL-0b′ warned (S5-Q2) that a pooled stream averages a bimodal
+per-class distribution into a number describing no class. A **frame sequence is exactly the
+stream where that objection does not bite** — it is single-class, ordered, and its locality
+comes from the domain rather than from the sample. It is therefore the most favourable honest
+test of the trie, and a failure there is close to decisive against it.
+
+> **CLAIMED, UNMEASURED:** that frame-to-frame rail overlap is high enough to clear G9. The
+> argument above says *why* overlap should exist; it says nothing about magnitude, and nothing
+> about whether the warm path beats the cold one once capacity binds. D-MRL-0g measures it.
+
+### §14.5 — The open cardinality question the probe must answer
+
+Do real queries use **must-not-match** per tier, or only match / don't-care?
+
+- with must-not-match: 3 states, 27 cells, **9 primitives (72 KB)**
+- without: 2 states, 8 cells, **6 primitives (48 KB)**
+
+This is not a design choice to make in a document — it is a **measurement on a real query
+stream**, and it is the primary output of D-MRL-0f below.
+
+---
+
+## §3c — REUSE MAP: where voxelmasking applies, and where it must not
+
+The operator's framing: *"we could reuse voxel masking eg for the weather arc or the OSM
+arc."* The rule that falls out of §14.4:
+
+> **Voxelmasking works on hierarchical, few-valued axes. Real-cardinality coupling goes to
+> blasgraph.**
+
+### §3c.1 — OSM is the NATIVE case (evidence, not analogy)
+
+`ogar-osm`'s geo facet table already binds the axes the cube needs, in shipped code:
+`crates/ogar-osm/src/lib.rs:212` (`GEO_V3_FACET`) — **rails 0–3 are the four HHTL cascade
+tiers (heel / hip / twig / leaf), each a `256×256` tile with x and y bound literally**
+(`:204-208`), rails 4–5 the identity tail. So on OSM:
+
+- **rail = zoom level.** A viewport query names a tier and a tile — that is a cell address,
+  not a scan.
+- a viewport lookup is **three (or four) array indexes and an AND**, with no cache in the path.
+
+Note the honest discrepancy, recorded rather than smoothed: the canonical key carries **three**
+named tiers (HEEL/HIP/TWIG); the geo facet carries **four** rails as tiers (adding leaf). The
+cube is therefore `3³ = 27` on the key and `3⁴ = 81` on the geo facet (27 primitives-worth of
+addressing, still 12 primitives = 96 KB at N = 65,536). D-MRL-0f measures on the geo facet and
+reports which arity the real stream uses.
+
+### §3c.2 — Weather SPLITS, and the split is the finding
+
+Operator, verbatim: *"the first and foremost task of voxel masking is calculating wind
+perturbation at Minecraft cheapness. then humidity and 13 values become blasgraph."*
+
+| quantity | mechanism | why |
+|---|---|---|
+| **wind perturbation** | **voxel masking** | neighbour-local, integer, no PDE. A cell's next state is a function of its own cell and its neighbours' — exactly the AND-of-primitives shape. "Minecraft cheapness" is the specification, not a metaphor: no floating-point solver, no global step |
+| **humidity across 13 pressure levels** | **blasgraph** | 13 levels coupled across a real-cardinality field is sparse adjacency with a semiring, not a few-valued hierarchy. That is `crates/lance-graph/src/graph/blasgraph/` — CSR/CSC/COO/HyperCSR + six semirings, **already in-house**, and the same approach RedisGraph/FalkorDB take |
+
+The semiring honesty fence of §2 applies unchanged on the blasgraph side: Boolean and Xor are
+exact mask algebra; HammingMin / SimilarityMax / Resonance / NarsTruth are **select-then-score,
+two ops** — the mask selects, the score ranks, and conflating them is how a "semiring over
+masks" claim overclaims.
+
+> **⚠ CAUTION, carried deliberately.** The weather evaluation plan's own status records a
+> 13-agent pass finding **11 of 11 specs NOT SOUND**. Weather is therefore a **candidate to
+> RECEIVE voxelmasking**, never evidence FOR it. No voxel claim may cite the weather arc as
+> support until that arc has a sound spec of its own.
+
+### §3c.3 — The rule, for the next axis someone proposes
+
+Before proposing voxelmasking for a domain, answer three questions:
+
+1. **Is the axis hierarchical?** (does a prefix contain its descendants — the `is_ancestor_of`
+   property D-MRL-0a falsifies at `rail_geometry.rs:178`) — if no, it is not a tier axis.
+2. **How many values per level?** ≤ 3 states over ≤ 6 levels, or the §14.4 table kills it.
+3. **Is the coupling local?** Neighbour-local → voxel. All-pairs or real-cardinality → blasgraph.
+
+Any "no" routes to blasgraph, and that is a correct outcome, not a fallback.
+
+---
+
+## §15 — D-MRL-0f: the OSM probe (v4's falsifier)
+
+Added to **Wave 0** (§6), measure-before-minting, no production code.
+
+| field | content |
+|---|---|
+| **D-id** | **D-MRL-0f** |
+| **What** | Build the voxel cube over a real OSM tile population addressed by `ogar_osm::GEO_V3_FACET` (`crates/ogar-osm/src/lib.rs:212`): allocate the 3-state primitives per tier, then answer a viewport query as *k* array indexes and an AND |
+| **Measures** | (1) the **cardinality answer** of §14.5 — do real viewport queries use must-not-match per tier, or only match/don't-care? Report the observed state histogram per tier, never a chosen constant. (2) primitive memory actually allocated vs the §14.2 prediction. (3) query cost: index+AND vs the existing `plan_eval` scalar path over the same population |
+| **PASS** | a viewport query resolves to *k* indexes and an AND with **zero cache lookups and zero misses**, and measured primitive memory is within 2× of `tiers × states × N/8` |
+| **KILL** | the state histogram shows the real stream needs per-tier patterns finer than the tier byte-pair (i.e. it wants the horizontal rail axis) ⇒ **§14 does not apply to OSM**, the cube is not the mechanism, and §3c.1's "native case" claim is struck |
+| **Anti-vacuity** | the population must contain rows that a **don't-care** cell admits and a **must-match** cell excludes, asserted by count before any timing is read — otherwise every cell returns the same mask and the AND is unfalsifiable (the `closed_class_guess` 150/150 shape, `CLAUDE.md` falsifiability rule) |
+| **Owner** | unassigned; STATUS_BOARD row `D-MRL-0f` = Queued |
+| **Register** | PLAN. Nothing here is built. The only shipped facts cited are `GEO_V3_FACET` and the blasgraph inventory |
+
+### §15.1 — Why an OSM probe and not a weather probe
+
+OSM is the only one of the two domains whose axis binding **already exists in shipped code**
+with a test pinning it (`the_field_table_covers_every_position_once`, `lib.rs:657`). Weather's
+specs are 11/11 NOT SOUND (§3c.2). Probing the domain with the sound binding first is what
+keeps the measurement about the cube rather than about the domain.
+
+### §15.1b — D-MRL-0g: the frame-sequence probe (the prefetch/locality claim)
+
+| field | content |
+|---|---|
+| **D-id** | **D-MRL-0g** |
+| **What** | Replay an **ordered viewport path** (a pan/zoom trajectory, not a shuffled query set) against the horizontal rail cache under a real capacity bound, single-class |
+| **Measures** | frame-to-frame rail-pattern overlap; hit COUNT (G2 — never timing alone); `cold − warm` per frame; and the fraction of a frame's rows resolvable **before** any row read (the prefetch-list claim of §14.7-1) |
+| **PASS** | G9 unchanged: `hit_rate × (cold − warm) > 0` for the sequence, with the hit count reported per frame, not pooled |
+| **KILL** | if an ordered frame sequence — the most favourable honest stream that exists for this cache — fails G9, **Wave 1c dies here** and does not get retried on a friendlier stream |
+| **Anti-vacuity** | a **shuffled** control run of the same frames must show materially lower overlap; if shuffling changes nothing, the measurement is reading capacity, not locality |
+| **Register** | PLAN. Depends on nothing in §14 — the cube is vertical, this probe is horizontal |
+
+### §15.2 — What D-MRL-0f does NOT settle
+
+It measures the **vertical** axis only. `D-MRL-0b′` (per-class rail hit rate under a real
+capacity bound) and `G9` (`hit_rate × (cold − warm) > 0`) remain the gate for the horizontal
+axis, unchanged and still unmeasured. A green D-MRL-0f is **not** evidence for the trie.
