@@ -85,7 +85,7 @@ canonical gate list.
 > contract-import fence" as if one existed, and the list was already false —
 > `facet::CascadeShape` (the lane-carving enum) had been imported in three
 > files without the list growing. Struck: the three-module list. Now:
-> `native/lgj-abi/tests/g11_contract_import_fence.rs` scans `src/*.rs` and
+> `native/lgj-abi/tests/g11_contract_import_fence.rs` walks `src/` recursively and
 > rejects any `lance_graph_contract::` module outside the four named,
 > disable-verified red-then-green (`ISS-LGJ-G11-FENCE-WAS-PROSE`). The
 > allowlist has ONE spelling in two places — the test's `ALLOWED` and this

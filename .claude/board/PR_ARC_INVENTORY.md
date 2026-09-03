@@ -15,8 +15,8 @@
   fence" as structural enforcement. No test existed. Found while surveying the
   R2IL / `ogar-loco` seam — the allowlist is about to grow by a vocabulary
   provider, and a list enforced by nothing would have taken that silently too.
-- **Added:** `native/lgj-abi/tests/g11_contract_import_fence.rs` — scans `src/*.rs`
-  for every `lance_graph_contract::<module>` reference (plain / brace group /
+- **Added:** `native/lgj-abi/tests/g11_contract_import_fence.rs` — walks `src/` recursively
+  for every `lance_graph_contract` reference (plain / brace group / alias / glob /
   doc-link), rejects any outside `{canonical_node, class_view, facet, ontology}`
   by file:line. Anti-vacuity asserted in-test; scanner pinned separately.
 - **Locked:** the allowlist has ONE spelling in two places (`ALLOWED` + the
