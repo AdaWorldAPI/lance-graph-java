@@ -172,7 +172,18 @@ Cost per exposure, warm: 4 `u64` words per 64 rows, one AND, one TERNLOG.
 - **F4.** Rail grouping is a per-class policy selected by classid, never a global constant.
 - **F5.** Ship order is 0 → 1 → 2 → 3, and Wave 0 is not skippable: D-MRL-0b can kill 1c.
 
-## §8 — Open questions for the council
+## §8 — Model allocation (operator-ruled 2026-09-03, declared here, not per spawn)
+
+- **Planning is Opus.** The 5 council savants, the 3 reviewers, the consolidation passes,
+  every wave's spec, every "does this measurement mean what it appears to mean" call, and
+  the orchestrator (central gates: `cargo`/`javac`/`AllTests`, every commit and push).
+- **Grindwork is Sonnet.** Bounded transcription against a written spec: port THIS kernel
+  composition, write THIS probe from THIS table, thread THIS op kind through THESE call
+  sites, replay THIS pattern stream. One source in, one shape out. Never a worktree, never
+  its own cargo run, never a claim that it compiles.
+- **Never Haiku** for anything in this plan.
+
+## §9 — Open questions for the council
 
 - **Q1.** Trie ownership: `lgj-abi` registry (consumer-local) or `lance-graph` (shared by every consumer)? The version is lance-graph's; the handles are lgj's. Substrate-first says lance-graph, but no consumer other than lgj exists yet.
 - **Q2.** Does `TERNARY_MATCH` belong in `LgjOpDesc` (24 B, fixed) or does a 24-byte pattern+care force a wider descriptor and an ABI minor bump?
