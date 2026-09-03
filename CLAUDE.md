@@ -75,10 +75,23 @@ ranges, or descriptors.
 committed G2 no-per-row-engine check (call sites, not javadoc
 `{@link}`s), the allocation gates (`getThreadAllocatedBytes`,
 population-size independent), and the G11 contract-import fence
-(`native/lgj-abi` imports `lance_graph_contract::{class_view,
-canonical_node, ontology}` ONLY — the cognitive modules compile
+(`native/lgj-abi` imports `lance_graph_contract::{canonical_node,
+class_view, facet, ontology}` ONLY — the cognitive modules compile
 unconditionally; the fence is the only barrier). Spec §5 is the
 canonical gate list.
+
+> ⊘ **G11 was prose until 2026-09-03.** The sentence above WAS the fence:
+> no test enforced the allowlist, `class_view_provider.rs` cited "the G11
+> contract-import fence" as if one existed, and the list was already false —
+> `facet::CascadeShape` (the lane-carving enum) had been imported in three
+> files without the list growing. Struck: the three-module list. Now:
+> `native/lgj-abi/tests/g11_contract_import_fence.rs` walks `src/` recursively and
+> rejects any `lance_graph_contract::` module outside the four named,
+> disable-verified red-then-green (`ISS-LGJ-G11-FENCE-WAS-PROSE`). The
+> allowlist has ONE spelling in two places — the test's `ALLOWED` and this
+> paragraph — and the test is what keeps them from drifting again. When the
+> vocabulary provider lands (`ogar_loco::Vocabulary` beside `ClassView`,
+> both resolved per classid), it grows here and there in the same commit.
 
 ## The compute model (inherited architecture — spec Part II)
 
