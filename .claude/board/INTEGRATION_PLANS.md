@@ -1,3 +1,14 @@
+## mask-risc-lowering-v1 (2026-09-03) — DRAFT for the 5+3 council
+
+`.claude/plans/mask-risc-lowering-v1.md`. The API speaks database (loco verbs `where` /
+`scan` / `BELNAP_JOIN`); the backend does photolithography: verbs lower to `plan_eval` RISC
+ops (AND/OR/ANDNOT/TERNLOG/TERNARY_MATCH) over a mask trie keyed `(Lance version, prefix)`,
+two axes (HHTL tiers vertical, 2×3 rail-group ternary sets horizontal). D-MRL-0a..c (probes,
+incl. the never-run `DOWN[x]` falsifier), 1a..d (`lgj-abi` RISC + memo), 2a..b (loco verbs
+re-minted with a producer), 3 (Java glove last). Frozen: no epoch on trie reads (Amendment
+A1 closed that), Belnap data-side two planes per #1129, semiring honesty fence (Boolean/Xor
+exact; value semirings are select-then-score). Status: DRAFT, nothing built.
+
 ## 2026-08-28 — epoch-recheck v1→v2→v3 (RATIFIED; the W1.1 5+3 council)
 
 Plans: `.claude/plans/epoch-recheck-phase0-v1.md` (spec),
