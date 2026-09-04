@@ -467,7 +467,7 @@ of them precomputed at version seal.
 
 ### §14.2 — The arithmetic (the whole argument)
 
-A mask over `N` rows costs `N/8` bytes. At the fixture size `N = 65_536` that is **8 KB**.
+A mask over `N` rows costs `N/8` bytes. At the fixture size `N = 65_536` that is **8 KiB**.
 
 | quantity | at N = 65,536 | at N = 10,000,000 |
 |---|---|---|
@@ -512,7 +512,7 @@ Enumeration works **at tier granularity and nowhere else**.
 
 | granularity | cells | primitive cost at N = 65,536 |
 |---|---|---|
-| 3 tiers | 3³ = 27 | 72 KB — **build it** |
+| 3 tiers | 3³ = 27 | 72 KiB — **build it** |
 | 6 rails (`6×(u8:u8)`) | 3⁶ = 729 | 144 KiB primitives; cube 5.70 MiB — borderline |
 | 12 facet bytes | 3¹² = **531,441** | cube = **4.05 GiB** (⊘ v4.2 §17: the struck text said *"≈ 4.2 GB"*, which is neither convention — 4.05 GiB / 4.35 GB) — **never** |
 
@@ -592,8 +592,8 @@ test of the trie, and a failure there is close to decisive against it.
 
 Do real queries use **must-not-match** per tier, or only match / don't-care?
 
-- with must-not-match: 3 states, 27 cells, **9 primitives (72 KB)**
-- without: 2 states, 8 cells, **6 primitives (48 KB)**
+- with must-not-match: 3 states, 27 cells, **9 primitives (72 KiB)**
+- without: 2 states, 8 cells, **6 primitives (48 KiB)**
 
 This is not a design choice to make in a document — it is a **measurement on a real query
 stream**, and it is the primary output of D-MRL-0f below.
@@ -622,7 +622,7 @@ tiers (heel / hip / twig / leaf), each a `256×256` tile with x and y bound lite
 Note the honest discrepancy, recorded rather than smoothed: the canonical key carries **three**
 named tiers (HEEL/HIP/TWIG); the geo facet carries **four** rails as tiers (adding leaf). The
 cube is therefore `3³ = 27` on the key and `3⁴ = 81` on the geo facet (⊘ v4.2 §17: the struck text read "27 primitives-worth", a stale 3³ carry-over — it is 81 cells /
-addressing, still 12 primitives = 96 KB at N = 65,536). D-MRL-0f measures on the geo facet and
+addressing, still 12 primitives = 96 KiB at N = 65,536). D-MRL-0f measures on the geo facet and
 reports which arity the real stream uses.
 
 ### §3c.2 — Weather SPLITS, and the split is the finding
