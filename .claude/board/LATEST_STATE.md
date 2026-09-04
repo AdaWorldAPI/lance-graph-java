@@ -1,3 +1,50 @@
+## 2026-09-04 — lgj_hop: the conjunction is one truth-table pass, and the lane is read as a lane (5×)
+
+**Branch `claude/pr-294-ragged-path-validation-170zcy`**, lgj-abi only — no
+ABI symbol, no minor bump, no Java change. Depends on the ndarray PR of the
+same branch name (`mask_ternlog` / `mask_ternlog_assign` + the contiguous
+fast path in `eq_u32_strided_to_mask`).
+
+**What changed.** `lgj_hop`'s selection `selected = class_f ∧ src ∧ struct_f`
+was spelled as two `mask_and_assign` passes through a scratch write. AND is
+the rank-1 spelling of a 3-input mask op; the conjunction is now ONE
+`mask_ternlog_assign::<AND3>` pass (one `VPTERNLOGQ` per 512 bits) via a new
+`kernels::simd_mask_ternlog_assign` wrapper + `kernels::ternlog` re-export
+(abi.md §8: exports names `kernels::ternlog::AND3`, never `ndarray::simd`
+directly). The `lgj_hop` doc block, which still described the PR #39
+gather that R1 (`0385269`) reversed, is rewritten to the shipped mask-
+algebra shape with the arc named.
+
+**The number, and where it actually came from.** `columnar_hop_bench`,
+65 536 rows, 32 facets, equivalence asserted before timing:
+
+| arm | before | after |
+|---|---|---|
+| classid (3 933 src) | 6 342 µs | **1 203 µs** |
+| hop2 (6 943 src) | 6 408 µs | **1 101 µs** |
+| all (65 536 src) | 7 547 µs | **1 851 µs** |
+
+The ternlog wire is one of three mask passes and cannot account for 5×.
+The bulk is the ndarray-side finding it exposed: `eq_u32_strided_to_mask`
+at `stride_bytes == 4` — every lane of the minor-10 facet-major store —
+gathered 16 bounds-checked scalar reads into a temporary before the
+`U32x16` compare. The store was contiguous; the kernel still read it as
+strided. 16 MB of lane per hop at 2.1 GB/s, now ~13 GB/s. Fixed in the
+primitive, so `lgj_op_eq_classid` and every other stride-4 caller gets it
+with no change here.
+
+**Gates.** lgj-abi `cargo fmt --check` clean, `cargo test` 138/138 + 3/3
+(incl. the pinned 10 → 19 → 29 hop regression on both layouts, the
+aliasing and reserved-mode falsifiers), `cargo clippy --all-targets -D
+warnings` clean. Java suite not re-run: no Java source or ABI surface
+changed; the `.so` must be rebuilt before the next Java run.
+
+**Not in this PR (named, own PR):** the BBB fence — no byte offset,
+stride, slot index, or carving width in any public Java signature
+(`WideFieldMask.ofFacets(int…)`, the 97 `LgjLaneDesc` lanes, the `*At`
+accessors are the leaks). The wall passes handles, classids, names,
+counts, statuses.
+
 ## 2026-09-03 — mask-risc-lowering ratified and then AMENDED: the vertical axis is enumerated, not cached
 
 **PR #68** (`dfb4ab1`), plan-only. Four commits: SPEC v1 completed to the

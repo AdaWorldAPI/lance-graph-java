@@ -1673,39 +1673,30 @@ fn resolve_rowstore_and_hop_masks(
 /// `n_rows` as a `u64` BEFORE any `as usize` cast, so an out-of-range
 /// `u64` target can never reach an indexing operation.
 ///
-/// **Shape: gather, not sweep.** The hop reads ONLY the rows `src`
-/// names. For each such row it walks its participating facets in place
-/// out of that row's own 512 bytes — classid compare, payload decode and
-/// scatter together, one row's cache lines at a time.
+/// **Shape: selection is mask algebra.** For each participating facet the
+/// hop computes two whole-population predicates through the layout's own
+/// lane geometry — `class_f` (classid == `edge_classid`, facet base +0) and
+/// `struct_f` (`payload_hi32 == 0`, facet base +12), both the same strided
+/// equality primitive — and conjoins them with `src` in ONE truth-table
+/// pass (`mask_ternlog_assign::<AND3>`). No row is examined to decide
+/// whether it participates. The only walk left is the scatter, which
+/// EMITS from the selected set: the destination index is decoded from the
+/// selected row's payload, the operand of a permutation rather than a
+/// membership decision.
 ///
-/// It did not always. Two earlier shapes swept the WHOLE population and
-/// then intersected with `src`: first one full-width
-/// `simd_rowstore_classid_mask` pass PER FACET (32 passes), then one
-/// `simd_rowstore_facet_match` pass answering all 32 at once. Both were
-/// replaced on measurement, not taste
-/// (`ISS-LGJ-HOP-SWEEPS-FULL-POPULATION`).
+/// It did not always. A gather (walk `src`'s set bits, read each row's
+/// facets in place) measured faster on the AoS store and shipped briefly;
+/// the operator ruled it out — walking a population's set bits is a
+/// serialization of a population that is already there, whether or not it
+/// allocates — and R1 restored the mask shape at a measured 19× cost on
+/// AoS. The facet-major columnar store (ABI minor 10) is what makes the
+/// lawful shape fast: every predicate becomes a contiguous pass, and the
+/// hop runs 3.3–4.8× over AoS at every frontier arm. The two-AND spelling
+/// of the conjunction was the last rank-1 residue of that arc.
 ///
-/// The crossover a sweep would need in order to win does not exist.
-/// `examples/hop_gather_vs_sweep.rs` measured both shapes over four
-/// populations (1 024 … 262 144) × twelve frontier densities, asserting
-/// byte-identical output at every point: gather wins EVERY configuration,
-/// by 2 612× at the sparsest and still **1.7×** at 100 % density. The
-/// mechanism is why it holds even when every row is in the frontier — a
-/// sweep MATERIALISES an `n`-element per-row intermediate that each row
-/// reads exactly once, so the cost is never amortised, while the gather
-/// computes the same answer inline. A sweep is strictly more work at
-/// every density, not merely more work at sparse ones.
-///
-/// Consequence worth stating plainly: this scalar gather beats a
-/// vectorised `ndarray::simd` sweep. The win is in NOT DOING THE WORK,
-/// not in the vector width — so no SIMD primitive is called here, and
-/// none is missing. (`simd_rowstore_facet_match` remains the kernel
-/// behind [`lgj_row_facet_match`]; it is not orphaned.)
-///
-/// The one shape that could still favour a precomputed mask is REUSE —
-/// memoising the per-row answer across many hops on the same
-/// `(store, classid)`. That is a caching design with its own
-/// invalidation questions, and is deliberately not this function's.
+/// The next rung is a semiring product (`dst = src ⊗ A`) over an adjacency
+/// operand this ABI does not yet carry — the V3 `EdgeBlock` in the row KEY
+/// (decode modes 1..=3, RESERVED).
 ///
 /// `docs/abi.md` §13 is the full normative statement.
 #[no_mangle]
@@ -1762,15 +1753,17 @@ pub extern "C" fn lgj_hop(
 
         // SELECTION IS MASK ALGEBRA.
         //
-        //   selected_f = src ∧ class_f ∧ struct_f
+        //   selected_f = ternlog<AND3>(class_f, src, struct_f)
         //   dst        = ⋁_{f ∈ participation} scatter(selected_f)
         //
         // Both predicates are the SAME strided-equality primitive
         // (`simd_rowstore_u32_eq_mask`) at two offsets into the facet — the
-        // classid at +0, the structured-edge gate at +12 — and the two ANDs
-        // are word-parallel over 64 rows at a time. No row is examined to
-        // decide whether it participates; participation is computed for the
-        // whole population and intersected.
+        // classid at +0, the structured-edge gate at +12 — and their
+        // conjunction with `src` is ONE 3-input truth-table pass
+        // (`mask_ternlog_assign::<AND3>`, one VPTERNLOGQ per 512 bits), not
+        // two ANDs through a scratch write. No row is examined to decide
+        // whether it participates; participation is computed for the whole
+        // population and intersected.
         //
         // Three shapes preceded this one and each traded the algebra for
         // arithmetic:
@@ -1814,12 +1807,17 @@ pub extern "C" fn lgj_hop(
                 edge_classid,
                 &mut selected,
             );
-            // ∧ src — narrow to the frontier.
-            kernels::simd_mask_and_assign(&mut selected, &src_snapshot);
             // struct_f — payload_hi32 == 0 marks a structured edge.
             kernels::simd_rowstore_u32_eq_mask(bytes, h_off, h_stride, n, 0, &mut structured);
-            // ∧ — the gate that used to be an `if`.
-            kernels::simd_mask_and_assign(&mut selected, &structured);
+            // ∧ src ∧ struct_f — ONE truth-table pass. AND is the rank-1
+            // spelling of a mask op: `selected & src & struct_f` is the
+            // 3-input table AND3 (0x80), and spelling it as two `mask_and`
+            // passes wrote every word twice to say it once.
+            kernels::simd_mask_ternlog_assign::<{ kernels::ternlog::AND3 }>(
+                &mut selected,
+                &src_snapshot,
+                &structured,
+            );
 
             // Emit from the SELECTED set. Every row reached here has already
             // satisfied all three predicates; the walk decides nothing.
