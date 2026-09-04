@@ -83,6 +83,36 @@ public final class ApiSurfaceTest {
             }
         }
 
+        c.section("the T2/T3 membrane: no raw register crosses, and every array is a named breach");
+        // Doctrine: .claude/knowledge/membrane-tiers.md (T2/T3). A public consumer
+        // surface may carry NAMES (handle, classid, field name, version), counts and
+        // statuses — never a raw content register (byte[] = a [u8;12] rail/payload) and
+        // never an un-named array population. `byte[]` is folded into FORBIDDEN above.
+        // Array returns are the row-id/slot-index leak: allowed ONLY from a method whose
+        // name announces the crossing (materialize* out, import* in) — the GraphHopTest
+        // allowlist, enforced here on the COMPILED surface so a bridge/inherited return
+        // cannot slip it past a source grep.
+        List<String> unnamedArrays = new ArrayList<>();
+        for (Class<?> type : types) {
+            for (Method m : type.getMethods()) {
+                if (!isPublicApi(m) || m.getDeclaringClass() == Object.class) {
+                    continue;
+                }
+                if (m.getReturnType().isArray() && !isNamedBreach(m.getName())) {
+                    unnamedArrays.add(type.getSimpleName() + "." + m.getName()
+                            + " returns " + m.getReturnType().getSimpleName()
+                            + " but its name does not start with materialize/import");
+                }
+            }
+        }
+        if (unnamedArrays.isEmpty()) {
+            c.that("every array-returning public method names its crossing (materialize*/import*)", true);
+        } else {
+            for (String u : unnamedArrays) {
+                c.that("UNNAMED-BREACH: " + u, false);
+            }
+        }
+
         c.section("the escape hatch is named, not incidental");
         // Raw native access must require deliberately reaching into an internal package. It must
         // never be something ordinary composition hands you.
@@ -135,6 +165,7 @@ public final class ApiSurfaceTest {
 
     private static void check(List<String> leaks, Class<?> owner, String where, Class<?> t) {
         Class<?> component = t;
+        boolean isArray = t.isArray();
         while (component.isArray()) {
             component = component.getComponentType();
         }
@@ -144,6 +175,19 @@ public final class ApiSurfaceTest {
                 leaks.add(owner.getSimpleName() + "." + where + " is " + name);
             }
         }
+        // T2/T3 membrane: a byte[] in any public signature is a raw content register
+        // (a [u8;12] rail array / payload bytes) crossing the wall — the substrate
+        // wearing a collection. Names cross; registers never do.
+        // (.claude/knowledge/membrane-tiers.md ledger L6.)
+        if (isArray && component == byte.class) {
+            leaks.add(owner.getSimpleName() + "." + where
+                    + " is byte[] (a raw content register may not cross the consumer membrane)");
+        }
+    }
+
+    /** A crossing whose method name announces it — the only sanctioned materialiser/importer. */
+    private static boolean isNamedBreach(String methodName) {
+        return methodName.startsWith("materialize") || methodName.startsWith("import");
     }
 
     /** Enumerate public types by listing the compiled package directory on the classpath. */

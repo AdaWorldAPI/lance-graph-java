@@ -1,3 +1,36 @@
+## 2026-09-04 — the T2/T3 membrane gets its gate: ApiSurfaceTest fences the raw register + names every breach
+
+**Branch `claude/membrane-tiers-bbb-fence`**, test-only. The paired doctrine +
+wardens land in lance-graph (`.claude/knowledge/membrane-tiers.md`,
+`kernel-membrane-warden`, `bbb-warden`) so every consumer inherits them; this
+is the enforcement half in the repo that owns the Java surface.
+
+`ApiSurfaceTest` already forbade FFM / membrane types in any public signature.
+Two additive rules extend it to the T2/T3 membrane (names cross, byte positions
+never do):
+
+1. **Raw-register fence** — a `byte[]` in any public signature (return, param,
+   field) is a raw content register (a `[u8;12]` rail array / payload bytes)
+   crossing the consumer wall. Caught in `check()` on the array component type
+   (the package-prefix match never sees a primitive component). Ledger L6.
+2. **Named-breach rule** — a public method returning ANY array must be named
+   `materialize*` or `import*`; folds the GraphHopTest allowlist into the
+   compiled-surface scan so a bridge/inherited array return can't slip a source
+   grep. Ledger L7.
+
+Green on the current surface by construction: only `Mask.materializeRows()`
+returns an array (named), and no public `byte[]` exists (`RowLayout.sets` is
+private, unscanned). The two predicates' behaviour was proven standalone (a
+byte[] return and param are flagged; an unnamed `int[]` return is flagged;
+`materialize*`/`import*` pass) — 5/5. The full Java suite was NOT run in-session
+(env has JDK 21; the repo targets JDK 27 + preview FFM + Valhalla) — CI runs it.
+
+**What this gate does NOT prove (honest, per membrane-tiers.md):** reflection
+cannot tell `int classid` (a name, clean) from `int facet` (a slot index, a
+leak) — same type. `WideFieldMask.ofFacets(int... positions)` (L1) and the
+served `LgjLaneDesc` strides (L2) are the semantic leaks the `bbb-warden`
+reviews; the gate catches the mechanical subset only.
+
 ## 2026-09-03 — mask-risc-lowering ratified and then AMENDED: the vertical axis is enumerated, not cached
 
 **PR #68** (`dfb4ab1`), plan-only. Four commits: SPEC v1 completed to the
