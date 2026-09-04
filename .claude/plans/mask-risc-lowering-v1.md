@@ -471,14 +471,23 @@ A mask over `N` rows costs `N/8` bytes. At the fixture size `N = 65_536` that is
 
 | quantity | at N = 65,536 | at N = 10,000,000 |
 |---|---|---|
-| one mask | 8 KB | 1.25 MB |
-| **9 primitives** (3 tiers × 3 states) | **72 KB** | **11.25 MB** |
-| full 27-cell cube, if materialised | 216 KB | 33.75 MB |
+| one mask | 8 KiB | **1.19 MiB** |
+| **9 primitives** (3 tiers × 3 states) | **72 KiB** | **10.73 MiB** |
+| full 27-cell cube, if materialised | 216 KiB | **32.19 MiB** |
 
 **Only the 9 primitives are built.** The other 18 cells are an AND of three primitives —
 the exact op `plan_eval` already composes (`exports.rs`, the existing chain: n ops, one
 crossing, monotone `V(k+1) ⊆ V(k)`). So the cube is a **9-entry array indexed by a base-3
 digit triple**, not a 27-entry store.
+
+> **⊘ v4.3 — UNITS ARE BINARY (KiB / MiB / GiB) THROUGHOUT.** The v4.2 council
+> BLOCKed the mixed convention and deferred it as *"a decision, not a correction"*.
+> Decided here: **binary**, because every quantity in this section is `N/8` bytes over
+> a power-of-two row count and a power-of-three cell count — the decimal reading was
+> only ever an artifact of writing `1.25 MB` for `1,250,000` bytes while writing
+> `72 KB` for `73,728`. The struck decimal figures were **10M: 1.25 / 11.25 / 33.75 MB**;
+> the same bytes in binary are **1.19 / 10.73 / 32.19 MiB**. No byte count changed —
+> only its name. The 65,536 column was already binary and is unchanged.
 
 ### §14.3 — What this DELETES, and why that is the point
 
@@ -504,7 +513,7 @@ Enumeration works **at tier granularity and nowhere else**.
 | granularity | cells | primitive cost at N = 65,536 |
 |---|---|---|
 | 3 tiers | 3³ = 27 | 72 KB — **build it** |
-| 6 rails (`6×(u8:u8)`) | 3⁶ = 729 | 144 KB primitives; cube 5.7 MB — borderline |
+| 6 rails (`6×(u8:u8)`) | 3⁶ = 729 | 144 KiB primitives; cube 5.70 MiB — borderline |
 | 12 facet bytes | 3¹² = **531,441** | cube = **4.05 GiB** (⊘ v4.2 §17: the struck text said *"≈ 4.2 GB"*, which is neither convention — 4.05 GiB / 4.35 GB) — **never** |
 
 So the two axes **split their mechanism**, which is the v4 correction to v3's single-cache
@@ -853,7 +862,7 @@ The council's sharpest finding, and it is **not** a novelty objection:
 
 > **§14.2 prices ONE cube; §14.3's L8 strike asserts "a per-class array".** If a cube
 > is per-class over the global row space the cost is `C × 9 × N/8` — at 10M rows and
-> 100 classes ≈ **1.1 GB, not 11.25 MB**. Either the headline numbers are understated
+> 100 classes ≈ **1.05 GiB, not 10.73 MiB** (v4.3 binary units). Either the headline numbers are understated
 > by the class count, or the L8 strike is unfounded. **Both cannot hold.**
 
 Three unstated premises underneath, in dependency order — **G2 is the root**:
