@@ -8,6 +8,40 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #77 — first CI lint gate: fmt + clippy + rust-test, Rust pinned to 1.98.1 (opened 2026-09-05, head `6d4b1a2`)
+
+**Added.** `.github/workflows/lint.yml` (three jobs: `format`, `clippy`,
+`rust-test`, all scoped to `native/lgj-abi` via `--manifest-path`);
+`rust-toolchain.toml` pinning `channel = "1.98.1"` + `rustfmt`/`clippy`
+components (this repo had neither a workflow directory nor a toolchain pin
+before this PR).
+
+**Locked.** The G11 contract-import fence (`tests/g11_contract_import_fence.rs`)
+now runs on every push/PR via `rust-test`, closing the exact gap
+`CLAUDE.md` names for G11 itself ("prose until 2026-09-03" — a rule
+enforced by a test nothing ever ran). `clippy`/`rust-test` check out all
+three path-dep siblings (`ndarray`, `lance-graph`, `OGAR`) because Cargo
+resolves the full dependency graph including the inactive optional
+`ogar-classview` feature's path dep — mirroring `lance-graph`'s own
+`style.yml` checkout shape exactly.
+
+**Deferred.** A Java CI job — `java/` has no build system at all (no
+Maven, no Gradle, no source), per its own README; wiring a job against a
+build system that doesn't exist would guess at a command with nothing to
+verify it against. Whether `-D warnings` is clean on `lgj-abi` today is
+also unmeasured locally (disk constraints); this PR's own CI run is the
+first real measurement, with the tiered `continue-on-error` +
+`TECH_DEBT.md` fallback named in the PR body if it comes back red on
+pre-existing debt.
+
+**Docs.** `LATEST_STATE.md` entry; this entry.
+
+**Confidence.** High that the workflow shape is correct (it is a direct
+transplant of `lance-graph`'s own proven `style.yml` checkout pattern,
+adapted to this repo's single-crate layout). Unmeasured whether the
+`clippy`/`rust-test` jobs pass clean on first run — that is what the CI
+run itself is for.
+
 ## PR #68 — mask-risc-lowering v1 → v4: SPEC completion, the 5+3 council, voxelmasking (merged 2026-09-03 as `dfb4ab1`, head `4ad9377`)
 
 **Added.** Four commits on `.claude/plans/mask-risc-lowering-v1.md`, plan-only — no kernel, no ABI symbol, no mint, no production code. `51dcffc` completed SPEC v1 to the council bar (non-goals, pre-registered gates G1–G8, per-savant question sets); `00570a0` draft v2 (5 savants, 40 findings, 24 amendments); `0212d21` ratified v3 (3 reviewers, 2 BLOCK + 14 FIX, 2 external Codex P1s); `4ad9377` the v4 amendment — §14 voxelmasking, §3c reuse map, §15 two probes. `STATUS_BOARD` rows `D-MRL-0f` and `D-MRL-0g`.
