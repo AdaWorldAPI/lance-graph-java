@@ -56,7 +56,7 @@ public final class FacetMatchView {
      *
      * <p><strong>Low-level inspection / diagnostics.</strong> High-level query or traversal
      * implementations MUST NOT use this as their execution engine — see the root CLAUDE.md
-     * mask-native policy. {@code WideFieldMask.ofMatchBits(int)} (package-private bridge) is the typed bridge for a caller
+     * mask-native policy. {@link WideFieldMask#ofMatchBits(int)} is the typed bridge for a caller
      * that does need this bitset as a {@link WideFieldMask}.
      *
      * @throws IndexOutOfBoundsException if {@code row} is not in {@code [0, rowCount())}
