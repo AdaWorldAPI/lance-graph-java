@@ -34,6 +34,20 @@ hand-carved in the lab (membrane-tiers.md Tier 3) — a future wave, not a fence
 `WideFieldMask.java` compiled standalone and the L1 reflection pin proven
 standalone; CI runs the rest.
 
+**Same-PR correction (codex + coderabbit P2, both valid).** (1) Demoting one
+factory was not a fence: `WideFieldMask` was a public *record*, so its canonical
+ctor `new WideFieldMask(1L << slot)` was a public bits-in path, and
+`ofMatchBits(int)` another. Now a `final class` with a private ctor; `ofFacets`
+AND `ofMatchBits` package-private; value-based `equals`/`hashCode`; no public
+`value()`. Still JEP 401 value-class-eligible. The pin is on the SHAPE, not a
+name: no public ctor, not a record, every public factory zero-arg. (2) The L2
+pin was erasure-blind: `leaksIn` used `getReturnType()`, so `List<Engine.
+LaneWindow>` would erase to `List`. `checkType()` now walks generic signatures
+(ParameterizedType / GenericArrayType / WildcardType / TypeVariable), with
+can-it-fire (`List<MethodHandle>` flagged; erased-only misses it — the walk is
+load-bearing; nested + array generics flagged) and can-it-stay-silent
+(`List<String>` not flagged). Standalone: shape proof 5/5, walker proof 4/4.
+
 ## 2026-09-04 — lgj_hop: the conjunction is one truth-table pass, and the lane is read as a lane (5×)
 
 **Branch `claude/pr-294-ragged-path-validation-170zcy`**, lgj-abi only — no
