@@ -16,6 +16,15 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # `native/lgj-abi/.cargo/config.toml` pins `-Ctarget-cpu=x86-64-v4`
+  # (AVX-512) because the production artifact is built for one known host.
+  # GitHub-hosted runners do not guarantee AVX-512, so a v4 build would emit
+  # instructions the runner cannot execute and die with SIGILL — the exact
+  # fault that config's own comment describes. It names the remedy for a
+  # machine without AVX-512: override the baseline at build time with v3.
+  # AVX2 is what `the_x86_64_build_has_a_vector_baseline` requires, so the
+  # test still proves a vector baseline exists rather than being weakened.
+  CARGO_BUILD_RUSTFLAGS: -Ctarget-cpu=x86-64-v3
 
 jobs:
   # lgj-abi path-deps ndarray and lance-graph-contract (crates/lance-graph-contract
@@ -31,7 +40,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: lance-graph-java
+        working-directory: lance-graph-java/native/lgj-abi
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,14 +51,14 @@ jobs:
           # pinned version lives in exactly ONE place.
           components: rustfmt, clippy
       - name: Check formatting (lgj-abi)
-        run: cargo fmt --manifest-path native/lgj-abi/Cargo.toml -- --check
+        run: cargo fmt -- --check
 
   clippy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: lance-graph-java
+        working-directory: lance-graph-java/native/lgj-abi
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,14 +85,14 @@ jobs:
         with:
           workspaces: lance-graph-java/native/lgj-abi
       - name: Clippy lgj-abi
-        run: cargo clippy --manifest-path native/lgj-abi/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
   rust-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: lance-graph-java
+        working-directory: lance-graph-java/native/lgj-abi
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,4 +124,4 @@ jobs:
       # allowlist. Per this repo's own history, "G11 was prose until 2026-09-03"
       # because nothing ran the test that enforces it; this job is what runs it.
       - name: Test lgj-abi
-        run: cargo test --manifest-path native/lgj-abi/Cargo.toml --all-targets
+        run: cargo test --all-targets

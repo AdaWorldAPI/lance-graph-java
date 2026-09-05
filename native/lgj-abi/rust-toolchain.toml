@@ -2,5 +2,19 @@
 # Stable only. Matches ndarray / lance-graph / the rest of the AdaWorldAPI
 # stack. No nightly features anywhere in this crate — in particular no
 # `core::simd` / portable-simd (abi.md §8).
-channel = "1.97.1"
+channel = "1.98.1"
 components = ["clippy", "rustfmt"]
+
+# Bump log (append one line per bump; the version itself is the `channel`
+# line above and is deliberately not restated here):
+#   1.97.1 → 1.98.1   2026-09-05: joins the workspace-wide sweep already
+#                     carried by ndarray / lance-graph / OGAR. Forced, not
+#                     optional: ndarray 0.17.2 now declares rustc 1.98, so
+#                     a 1.97.1 build of this crate fails to resolve at all.
+#
+# This is THE toolchain file for this repo. A second one briefly existed at
+# the repository root; it was removed rather than kept in sync, because two
+# files pinning one toolchain is the defect this sweep exists to remove, and
+# cargo reads whichever is nearest the working directory — so the two would
+# disagree silently depending on where a command was run from. This file sits
+# beside `.cargo/config.toml`, which cargo resolves the same way.

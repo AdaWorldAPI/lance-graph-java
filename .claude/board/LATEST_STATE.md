@@ -1,3 +1,23 @@
+## 2026-09-05 — storno: the gate's own first run corrected two claims above
+
+Corrects the entry immediately below, which is left in place per the
+storno rule. Two of its statements were wrong when written:
+
+- *"adds `rust-toolchain.toml` (this repo had none)"* — one already
+  existed at `native/lgj-abi/rust-toolchain.toml`, pinning `1.97.1`.
+- *"the pin has exactly one spelling"* — adding the root file made two,
+  and cargo reads whichever is nearest the working directory.
+
+The root file is removed and the crate-level file is bumped to `1.98.1`
+(forced: `ndarray` 0.17.2 declares `rust-version = "1.98"`). The three
+jobs now run with `working-directory` set to the crate rather than
+`--manifest-path` from the root, because `.cargo/config.toml` is read
+from the working directory's ancestry and the v4 target-cpu baseline was
+being dropped — which is what `the_x86_64_build_has_a_vector_baseline`
+caught on the gate's first run. CI exports the v3 baseline explicitly,
+since GitHub-hosted runners do not guarantee AVX-512. Full account:
+`EPIPHANIES.md` `E-THE-PIN-THAT-CLAIMED-ONE-PLACE-CREATED-A-SECOND-1`.
+
 ## 2026-09-05 — first CI lint gate: fmt + clippy + rust-test, Rust pinned to 1.98.1
 
 **Branch `claude/ci-lint-gate`, PR #77.** This repo has never had a
