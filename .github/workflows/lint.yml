@@ -47,6 +47,13 @@ jobs:
           path: lance-graph-java
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          # `defaults.run.working-directory` applies to `run:` steps only, NOT
+          # to action steps: this action executes from GITHUB_WORKSPACE, where
+          # the checkout is a subdirectory and no toolchain file is visible. It
+          # would silently fall back to `stable` instead of the pin. `rust-src-dir`
+          # is the input that points it at the crate — which is also where
+          # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
+          rust-src-dir: lance-graph-java/native/lgj-abi
           # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
           # pinned version lives in exactly ONE place.
           components: rustfmt, clippy
@@ -80,6 +87,13 @@ jobs:
           path: OGAR
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          # `defaults.run.working-directory` applies to `run:` steps only, NOT
+          # to action steps: this action executes from GITHUB_WORKSPACE, where
+          # the checkout is a subdirectory and no toolchain file is visible. It
+          # would silently fall back to `stable` instead of the pin. `rust-src-dir`
+          # is the input that points it at the crate — which is also where
+          # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
+          rust-src-dir: lance-graph-java/native/lgj-abi
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -114,6 +128,13 @@ jobs:
           path: OGAR
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          # `defaults.run.working-directory` applies to `run:` steps only, NOT
+          # to action steps: this action executes from GITHUB_WORKSPACE, where
+          # the checkout is a subdirectory and no toolchain file is visible. It
+          # would silently fall back to `stable` instead of the pin. `rust-src-dir`
+          # is the input that points it at the crate — which is also where
+          # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
+          rust-src-dir: lance-graph-java/native/lgj-abi
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:

@@ -34,6 +34,32 @@ first real measurement, with the tiered `continue-on-error` +
 `TECH_DEBT.md` fallback named in the PR body if it comes back red on
 pre-existing debt.
 
+**Correction (2026-09-05, head `1ea5c85`).** Appended per the append-only
+rule rather than edited above; the original lines stay as written.
+
+- *"this repo had neither a workflow directory nor a toolchain pin before
+  this PR"* — the workflow half is right, the toolchain half is not.
+  `native/lgj-abi/rust-toolchain.toml` already pinned `1.97.1`. Adding a
+  second file at the repository root made two pins for one toolchain, and
+  cargo reads whichever is nearest the working directory. The root file is
+  removed; the crate-level file is the authority, now `1.98.1` — forced,
+  since `ndarray` 0.17.2 declares `rust-version = "1.98"`.
+- *"runs on every push/PR"* — the `push` trigger is limited to `main`, so
+  the accurate statement is every pull request and every push to `main`.
+- *"all scoped to `native/lgj-abi` via `--manifest-path`"* — that scoping
+  is what broke the first run. Cargo reads `.cargo/config.toml` from the
+  working directory's ancestry, never from the manifest's directory, so
+  the crate's `-Ctarget-cpu` baseline was dropped and
+  `the_x86_64_build_has_a_vector_baseline` failed exactly as designed. The
+  jobs now set `working-directory` to the crate, and CI exports the v3
+  baseline explicitly because GitHub-hosted runners do not guarantee
+  AVX-512. Each `setup-rust-toolchain` step also gained `rust-src-dir`:
+  `defaults.run.working-directory` governs `run:` steps only, so without it
+  the action reads no toolchain file and falls back to `stable`.
+- *"whether `-D warnings` is clean on `lgj-abi` today is unmeasured"* — now
+  measured locally: clippy and fmt clean, 138 unit tests plus the G11 fence
+  passing, under the same commands CI runs.
+
 **Docs.** `LATEST_STATE.md` entry; this entry.
 
 **Confidence.** High that the workflow shape is correct (it is a direct
