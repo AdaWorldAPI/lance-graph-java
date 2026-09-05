@@ -11,7 +11,7 @@ package com.adaworldapi.lancegraph;
  * positions, at which point it promotes once to {@code Wide(Box<[u64]>)}.
  * <strong>This Java type carries the Small tier only</strong> — one {@code long}, no promotion
  * path. A {@link RowStore} has exactly 32 facets today, so the low 32 bits are the only ones this
- * library ever populates or reads through {@link #allFacets()}/{@link #ofFacets}: positions
+ * library ever populates or reads through {@link #allFacets()} (or, in-package, {@code ofFacets}): positions
  * 32..63 are addressable (a {@code long} has room for them, matching the Rust {@code Small}
  * representation bit-for-bit) but no {@link RowStore} shape in this codebase uses them. A future
  * surface past 64 fields needs the Wide-tier promotion on the Rust side, mirrored here as a
@@ -44,7 +44,18 @@ public record WideFieldMask(long value) {
     }
 
     /**
-     * Build a mask from the populated facet positions.
+     * Build a mask from raw facet SLOT positions — <strong>package-private by the T2/T3
+     * membrane</strong> (lance-graph {@code .claude/knowledge/membrane-tiers.md}, ledger L1).
+     *
+     * <p>A slot index is a byte position, and byte positions never cross the consumer wall: a
+     * consumer names <em>which edge class</em> it is hopping ({@link RowStore#hop(int, Mask)}
+     * takes a classid) and the native side narrows participation to that class's
+     * {@code ClassView}-resolved facets ({@code edge_participation}). {@link #allFacets()} is
+     * therefore the consumer's whole vocabulary — "let the class decide" — never a hand-picked
+     * set of slots. This factory remains for the in-package bridge from the inspection surface
+     * ({@link #ofMatchBits(int)}) and for tests that pin the bit layout; it was public through
+     * ABI minor 10 and is demoted here, not removed (I-LEGACY-API-FEATURE-GATED: the shape is
+     * preserved, only its reach changes).
      *
      * @param positions each must be in {@code 0..31} — the 32-facet domain of a {@link RowStore}
      *                  row. Validated eagerly rather than silently folded to a no-op: the
@@ -53,7 +64,7 @@ public record WideFieldMask(long value) {
      *                  the call site, matching {@link FacetId}'s own convention in this codebase.
      * @throws IllegalArgumentException if any position is outside {@code 0..31}
      */
-    public static WideFieldMask ofFacets(int... positions) {
+    static WideFieldMask ofFacets(int... positions) {
         java.util.Objects.requireNonNull(positions, "positions");
         long bits = 0L;
         for (int p : positions) {

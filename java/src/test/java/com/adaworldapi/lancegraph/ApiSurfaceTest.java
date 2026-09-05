@@ -113,6 +113,49 @@ public final class ApiSurfaceTest {
             }
         }
 
+        c.section("ledger L1: no public construction of a field mask from slot positions");
+        // WideFieldMask.ofFacets(int...) built a mask from raw facet SLOT indices — a byte
+        // position crossing the wall. It is package-private now; a consumer names the edge
+        // CLASS (RowStore.hop takes a classid) and native narrows to that class's
+        // ClassView-resolved participation. Reflection cannot tell `int classid` from
+        // `int facet`, so this pin is by NAME: re-publicising ofFacets fails here.
+        boolean slotFactoryPublic = false;
+        for (Method m : WideFieldMask.class.getMethods()) {
+            if (m.getName().equals("ofFacets") && Modifier.isPublic(m.getModifiers())) {
+                slotFactoryPublic = true;
+            }
+        }
+        c.that("WideFieldMask.ofFacets(int...) is not public (slot indices never cross; name the class)",
+                !slotFactoryPublic);
+        c.that("WideFieldMask.allFacets() remains the consumer's participation vocabulary",
+                java.util.Arrays.stream(WideFieldMask.class.getMethods())
+                        .anyMatch(m -> m.getName().equals("allFacets") && Modifier.isPublic(m.getModifiers())));
+
+        c.section("ledger L2: lane geometry (offset/stride) is fenced by the membrane prefix");
+        // The type that carries a served lane's offset+stride is Engine.LaneWindow, in
+        // internal.ffm. It is used INSIDE RowStore/Mask (which read the stride from the served
+        // descriptor, never compute it) and by the sanctioned internal.ffm consumers (bench,
+        // valhalla-lab). Prove the prefix fence structurally covers it, so L2 is closed by the
+        // gate above rather than by a promise: the class must exist and must live under a
+        // FORBIDDEN prefix — then any public signature carrying it is already a LEAK above.
+        Class<?> laneWindow = null;
+        try {
+            laneWindow = Class.forName("com.adaworldapi.lancegraph.internal.ffm.Engine$LaneWindow");
+        } catch (ClassNotFoundException e) {
+            // handled below
+        }
+        c.that("Engine.LaneWindow (the offset+stride carrier) exists", laneWindow != null);
+        boolean underFence = false;
+        if (laneWindow != null) {
+            for (String forbidden : FORBIDDEN) {
+                if (laneWindow.getName().startsWith(forbidden)) {
+                    underFence = true;
+                }
+            }
+        }
+        c.that("Engine.LaneWindow lives under a FORBIDDEN prefix, so the prefix fence covers it",
+                underFence);
+
         c.section("the escape hatch is named, not incidental");
         // Raw native access must require deliberately reaching into an internal package. It must
         // never be something ordinary composition hands you.

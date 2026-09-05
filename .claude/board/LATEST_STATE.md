@@ -1,3 +1,39 @@
+## 2026-09-05 — ledger L1/L2: the semantic leaks the T2/T3 gate could not see
+
+**Branch `claude/membrane-l1-l2-semantic-leaks`.** Follows #74 (the mechanical
+fence). These are the two rows `membrane-tiers.md` marked `[OPEN]` because
+reflection cannot tell `int classid` from `int facet`.
+
+**L1 — `WideFieldMask.ofFacets(int...)` → package-private.** It built a mask
+from raw facet SLOT positions: a byte position crossing the consumer wall. Zero
+production callers (only `MaskNativeOpsTest`, same package, unaffected). The
+name-side replacement already existed and needed no ABI: `RowStore.hop(int
+edgeClassid, Mask)` passes `allFacets()` and `lgj_hop` narrows natively by
+`edge_participation(classid)` — the javadoc already says "a caller cannot widen
+past what the class actually permits." `allFacets()` = "let the class decide"
+is now the consumer's whole participation vocabulary. Demoted, not removed
+(I-LEGACY-API-FEATURE-GATED: same shape, narrower reach) — it stays as the
+in-package bridge behind `ofMatchBits` and the bit-layout tests. Pinned BY NAME
+in `ApiSurfaceTest` (re-publicising it fails the build).
+
+**L2 — closes by the EXISTING gate; the ledger overstated it.** Read again:
+`abi.md:312` — "Java's *public* API never sees an address." The offset+stride
+carrier is `Engine.LaneWindow` in `internal.ffm`, used only inside
+`RowStore`/`Mask`/`LaneProbe` (package-private) and the sanctioned lab
+consumers (bench, valhalla-lab). `ApiSurfaceTest`'s `internal.*` prefix already
+fences it from every public signature. And `RowStore`'s `row * strideBytes()`
+reads the stride FROM the served descriptor (`abi.md:367-368`), never computes
+it — that is NAMED under `kernel-membrane-warden`, not GEOMETRY-LEAK. Added a
+structural pin: the class exists AND lives under a FORBIDDEN prefix, so any
+public signature carrying it is already a LEAK — L2 is closed by proof, not
+promise. The genuine residual is not a leak but a design ceiling: Valhalla
+views that KNOW the layout should be OGAR-emitted per ClassView, not
+hand-carved in the lab (membrane-tiers.md Tier 3) — a future wave, not a fence.
+
+**Not run in-session:** the Java suite (JDK 21 here vs JDK 27 + preview FFM).
+`WideFieldMask.java` compiled standalone and the L1 reflection pin proven
+standalone; CI runs the rest.
+
 ## 2026-09-04 — lgj_hop: the conjunction is one truth-table pass, and the lane is read as a lane (5×)
 
 **Branch `claude/pr-294-ragged-path-validation-170zcy`**, lgj-abi only — no
