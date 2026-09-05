@@ -1,0 +1,17 @@
+[toolchain]
+channel = "1.98.1"
+# The pinned version is the `channel` line ABOVE — not restated in this
+# comment, so a future bump edits one line and leaves the log below intact
+# (the ndarray/lance-graph/OGAR sibling repos already learned this the hard
+# way: restating the version in prose is what makes the prose wrong).
+#
+# Bump log (append one line per bump):
+#   (none)  → 1.98.1   2026-09-05: this repo's first pin, joining the
+#                       workspace-wide 1.98.1 sweep already carried by
+#                       ndarray / lance-graph / OGAR.
+#
+# rustfmt + clippy are mandatory CI components and must ship with the
+# pinned channel — `actions-rust-lang/setup-rust-toolchain@v1` reads this
+# file for the toolchain (no `toolchain:` input in the workflow), so the
+# pin lives in exactly ONE place.
+components = ["rustfmt", "clippy"]

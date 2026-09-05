@@ -1,0 +1,118 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: these jobs only read the repo (checkout + build + lint).
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # lgj-abi path-deps ndarray and lance-graph-contract (crates/lance-graph-contract
+  # in the AdaWorldAPI/lance-graph sibling), and optionally (feature `ogar-classview`,
+  # off by default) ogar-class-view in the AdaWorldAPI/OGAR sibling. Cargo resolves
+  # the full dependency graph — including inactive optional path deps — so all three
+  # siblings must exist on disk even though only two are compiled into the default
+  # build. Checked out under the runner's top-level workspace, sibling to this repo's
+  # own checkout, exactly as `../../../<repo>` from native/lgj-abi/Cargo.toml expects
+  # (matches AdaWorldAPI/lance-graph's own .github/workflows/style.yml pattern).
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: lance-graph-java
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
+          # pinned version lives in exactly ONE place.
+          components: rustfmt, clippy
+      - name: Check formatting (lgj-abi)
+        run: cargo fmt --manifest-path native/lgj-abi/Cargo.toml -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: lance-graph-java
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
+      - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/lance-graph
+          path: lance-graph
+      - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/OGAR
+          path: OGAR
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lance-graph-java/native/lgj-abi
+      - name: Clippy lgj-abi
+        run: cargo clippy --manifest-path native/lgj-abi/Cargo.toml --all-targets -- -D warnings
+
+  rust-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: lance-graph-java
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
+      - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/lance-graph
+          path: lance-graph
+      - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/OGAR
+          path: OGAR
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lance-graph-java/native/lgj-abi
+      # Runs every #[test] in lgj-abi, including tests/g11_contract_import_fence.rs
+      # — the fence CLAUDE.md's "Enforcement" section names as structural: it walks
+      # src/ and rejects any `lance_graph_contract::` module outside the four-name
+      # allowlist. Per this repo's own history, "G11 was prose until 2026-09-03"
+      # because nothing ran the test that enforces it; this job is what runs it.
+      - name: Test lgj-abi
+        run: cargo test --manifest-path native/lgj-abi/Cargo.toml --all-targets
