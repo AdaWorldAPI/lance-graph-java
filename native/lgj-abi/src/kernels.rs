@@ -94,6 +94,24 @@ pub fn simd_mask_andnot_assign(dst: &mut [u64], src: &[u64]) {
     ndarray::simd::mask_andnot_assign(dst, src);
 }
 
+/// The truth-table immediates for [`simd_mask_ternlog_assign`] — re-exported
+/// so a call site in `exports` names `kernels::ternlog::AND3`, never reaching
+/// past this module for its SIMD vocabulary (abi.md §8).
+pub use ndarray::simd::ternlog;
+
+/// `a = ternlog::<IMM>(a, b, c)` — one 3-input Boolean pass over three masks.
+///
+/// The general member of the mask-op family: `AND3` here is what two
+/// consecutive [`simd_mask_and_assign`] calls spell as two passes and one
+/// scratch write. On AVX-512 it is one `VPTERNLOGQ` per 512 bits; the
+/// polyfill elsewhere. Tail contract per `ndarray::simd::mask_ternlog`: for
+/// the even (all-zero → 0) tables, which every named immediate is, a
+/// conforming input tail stays zero.
+#[inline]
+pub fn simd_mask_ternlog_assign<const IMM: i32>(a: &mut [u64], b: &[u64], c: &[u64]) {
+    ndarray::simd::mask_ternlog_assign::<IMM>(a, b, c);
+}
+
 /// Sum of `values[i]` over set mask bits, widened to `i64`.
 #[inline]
 pub fn simd_masked_sum_i32(values: &[i32], mask_words: &[u64]) -> i64 {
