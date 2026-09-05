@@ -16,15 +16,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # `native/lgj-abi/.cargo/config.toml` pins `-Ctarget-cpu=x86-64-v4`
-  # (AVX-512) because the production artifact is built for one known host.
-  # GitHub-hosted runners do not guarantee AVX-512, so a v4 build would emit
-  # instructions the runner cannot execute and die with SIGILL — the exact
-  # fault that config's own comment describes. It names the remedy for a
-  # machine without AVX-512: override the baseline at build time with v3.
-  # AVX2 is what `the_x86_64_build_has_a_vector_baseline` requires, so the
-  # test still proves a vector baseline exists rather than being weakened.
-  CARGO_BUILD_RUSTFLAGS: -Ctarget-cpu=x86-64-v3
 
 jobs:
   # lgj-abi path-deps ndarray and lance-graph-contract (crates/lance-graph-contract
@@ -54,6 +45,22 @@ jobs:
           # is the input that points it at the crate — which is also where
           # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
           rust-src-dir: lance-graph-java/native/lgj-abi
+          # The baseline goes HERE, not in a `CARGO_BUILD_RUSTFLAGS` env var.
+          # This action exports `RUSTFLAGS` from its own `rustflags` input
+          # (default `-D warnings`), and `RUSTFLAGS` overrides
+          # `build.rustflags` — which is what `CARGO_BUILD_RUSTFLAGS` sets, so a
+          # baseline put there is silently discarded. The first run proved it:
+          # the crate's own SIGILL-guard test was reached with no target-cpu at
+          # all. The action's default is kept alongside the baseline, not
+          # replaced.
+          #
+          # v3 rather than the crate's own v4: `.cargo/config.toml` pins AVX-512
+          # because the production artifact is built for one known host, and
+          # GitHub-hosted runners do not guarantee it. That file names v3 as the
+          # remedy for a machine without AVX-512, and AVX2 is what
+          # `the_x86_64_build_has_a_vector_baseline` requires — so this
+          # retargets the gate rather than weakening it.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
           # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
           # pinned version lives in exactly ONE place.
           components: rustfmt, clippy
@@ -94,6 +101,22 @@ jobs:
           # is the input that points it at the crate — which is also where
           # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
           rust-src-dir: lance-graph-java/native/lgj-abi
+          # The baseline goes HERE, not in a `CARGO_BUILD_RUSTFLAGS` env var.
+          # This action exports `RUSTFLAGS` from its own `rustflags` input
+          # (default `-D warnings`), and `RUSTFLAGS` overrides
+          # `build.rustflags` — which is what `CARGO_BUILD_RUSTFLAGS` sets, so a
+          # baseline put there is silently discarded. The first run proved it:
+          # the crate's own SIGILL-guard test was reached with no target-cpu at
+          # all. The action's default is kept alongside the baseline, not
+          # replaced.
+          #
+          # v3 rather than the crate's own v4: `.cargo/config.toml` pins AVX-512
+          # because the production artifact is built for one known host, and
+          # GitHub-hosted runners do not guarantee it. That file names v3 as the
+          # remedy for a machine without AVX-512, and AVX2 is what
+          # `the_x86_64_build_has_a_vector_baseline` requires — so this
+          # retargets the gate rather than weakening it.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -135,6 +158,22 @@ jobs:
           # is the input that points it at the crate — which is also where
           # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
           rust-src-dir: lance-graph-java/native/lgj-abi
+          # The baseline goes HERE, not in a `CARGO_BUILD_RUSTFLAGS` env var.
+          # This action exports `RUSTFLAGS` from its own `rustflags` input
+          # (default `-D warnings`), and `RUSTFLAGS` overrides
+          # `build.rustflags` — which is what `CARGO_BUILD_RUSTFLAGS` sets, so a
+          # baseline put there is silently discarded. The first run proved it:
+          # the crate's own SIGILL-guard test was reached with no target-cpu at
+          # all. The action's default is kept alongside the baseline, not
+          # replaced.
+          #
+          # v3 rather than the crate's own v4: `.cargo/config.toml` pins AVX-512
+          # because the production artifact is built for one known host, and
+          # GitHub-hosted runners do not guarantee it. That file names v3 as the
+          # remedy for a machine without AVX-512, and AVX2 is what
+          # `the_x86_64_build_has_a_vector_baseline` requires — so this
+          # retargets the gate rather than weakening it.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
