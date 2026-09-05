@@ -1,3 +1,45 @@
+## E-THE-PIN-THAT-CLAIMED-ONE-PLACE-CREATED-A-SECOND-1 (2026-09-05)
+
+**Finding.** The first CI gate this repo ever had went red on its first
+run, and the two causes were both "the same thing is declared twice, and
+cargo silently picks the nearer one."
+
+`rust-toolchain.toml` was added at the repository root carrying the
+sentence *"the pin lives in exactly ONE place"* — while
+`native/lgj-abi/rust-toolchain.toml` already existed, pinning `1.97.1`.
+Cargo reads whichever file is nearest the working directory, so the root
+file governed a command run from the root and the crate file governed a
+command run from the crate. Two files, one toolchain, disagreeing by where
+you happened to stand. The root file is removed; the crate file is the
+authority, bumped to `1.98.1`, and it sits beside `.cargo/config.toml`,
+which cargo resolves the same way.
+
+That bump is forced, not cosmetic: `ndarray` 0.17.2 now declares
+`rust-version = "1.98"`, so a 1.97.1 resolve of this crate fails outright.
+The same upstream move turned every MSRV job in `AdaWorldAPI/tract` red on
+the same afternoon.
+
+**The second cause is the more interesting one, because a test caught it.**
+`native/lgj-abi/.cargo/config.toml` pins `-Ctarget-cpu=x86-64-v4`, and
+`abi::tests::the_x86_64_build_has_a_vector_baseline` exists to turn a lost
+baseline into a test failure instead of a SIGILL inside a JVM downcall.
+The workflow ran cargo from the repository root with `--manifest-path`
+pointing into the crate — and **cargo reads `.cargo/config.toml` from the
+working directory's ancestry, never from the manifest's directory.** The
+baseline was therefore never applied, the manifest reported the scalar
+backend, and the test fired exactly as designed. `--manifest-path` is not
+equivalent to running in the crate directory, and this is the failure that
+proves it.
+
+**Consequence.** The jobs now run with `working-directory` set to the
+crate, and CI additionally exports `CARGO_BUILD_RUSTFLAGS=-Ctarget-cpu=
+x86-64-v3`, because GitHub-hosted runners do not guarantee AVX-512 and a
+v4 build would die on them with the very SIGILL that config comment
+describes. v3 still satisfies the test's `AVX2 | AVX512` assertion, so the
+gate is retargeted rather than weakened. Verified locally on both sides:
+the old invocation reproduces the failure, the new one passes 138 tests
+plus the G11 fence, with fmt and clippy clean.
+
 ## E-THE-GUARD-YOU-WIRE-IS-NOT-THE-GUARD-YOU-NAMED-1 (2026-08-28)
 
 **Finding.** A wave chartered as "wire the epoch re-check" cannot deliver

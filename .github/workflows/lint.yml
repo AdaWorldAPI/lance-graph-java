@@ -1,0 +1,187 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: these jobs only read the repo (checkout + build + lint).
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # lgj-abi path-deps ndarray and lance-graph-contract (crates/lance-graph-contract
+  # in the AdaWorldAPI/lance-graph sibling), and optionally (feature `ogar-classview`,
+  # off by default) ogar-class-view in the AdaWorldAPI/OGAR sibling. Cargo resolves
+  # the full dependency graph — including inactive optional path deps — so all three
+  # siblings must exist on disk even though only two are compiled into the default
+  # build. Checked out under the runner's top-level workspace, sibling to this repo's
+  # own checkout, exactly as `../../../<repo>` from native/lgj-abi/Cargo.toml expects
+  # (matches AdaWorldAPI/lance-graph's own .github/workflows/style.yml pattern).
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: lance-graph-java/native/lgj-abi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # `defaults.run.working-directory` applies to `run:` steps only, NOT
+          # to action steps: this action executes from GITHUB_WORKSPACE, where
+          # the checkout is a subdirectory and no toolchain file is visible. It
+          # would silently fall back to `stable` instead of the pin. `rust-src-dir`
+          # is the input that points it at the crate — which is also where
+          # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
+          rust-src-dir: lance-graph-java/native/lgj-abi
+          # The baseline goes HERE, not in a `CARGO_BUILD_RUSTFLAGS` env var.
+          # This action exports `RUSTFLAGS` from its own `rustflags` input
+          # (default `-D warnings`), and `RUSTFLAGS` overrides
+          # `build.rustflags` — which is what `CARGO_BUILD_RUSTFLAGS` sets, so a
+          # baseline put there is silently discarded. The first run proved it:
+          # the crate's own SIGILL-guard test was reached with no target-cpu at
+          # all. The action's default is kept alongside the baseline, not
+          # replaced.
+          #
+          # v3 rather than the crate's own v4: `.cargo/config.toml` pins AVX-512
+          # because the production artifact is built for one known host, and
+          # GitHub-hosted runners do not guarantee it. That file names v3 as the
+          # remedy for a machine without AVX-512, and AVX2 is what
+          # `the_x86_64_build_has_a_vector_baseline` requires — so this
+          # retargets the gate rather than weakening it.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
+          # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
+          # pinned version lives in exactly ONE place.
+          components: rustfmt, clippy
+      - name: Check formatting (lgj-abi)
+        run: cargo fmt -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: lance-graph-java/native/lgj-abi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
+      - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/lance-graph
+          path: lance-graph
+      - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/OGAR
+          path: OGAR
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # `defaults.run.working-directory` applies to `run:` steps only, NOT
+          # to action steps: this action executes from GITHUB_WORKSPACE, where
+          # the checkout is a subdirectory and no toolchain file is visible. It
+          # would silently fall back to `stable` instead of the pin. `rust-src-dir`
+          # is the input that points it at the crate — which is also where
+          # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
+          rust-src-dir: lance-graph-java/native/lgj-abi
+          # The baseline goes HERE, not in a `CARGO_BUILD_RUSTFLAGS` env var.
+          # This action exports `RUSTFLAGS` from its own `rustflags` input
+          # (default `-D warnings`), and `RUSTFLAGS` overrides
+          # `build.rustflags` — which is what `CARGO_BUILD_RUSTFLAGS` sets, so a
+          # baseline put there is silently discarded. The first run proved it:
+          # the crate's own SIGILL-guard test was reached with no target-cpu at
+          # all. The action's default is kept alongside the baseline, not
+          # replaced.
+          #
+          # v3 rather than the crate's own v4: `.cargo/config.toml` pins AVX-512
+          # because the production artifact is built for one known host, and
+          # GitHub-hosted runners do not guarantee it. That file names v3 as the
+          # remedy for a machine without AVX-512, and AVX2 is what
+          # `the_x86_64_build_has_a_vector_baseline` requires — so this
+          # retargets the gate rather than weakening it.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lance-graph-java/native/lgj-abi
+      - name: Clippy lgj-abi
+        run: cargo clippy --all-targets -- -D warnings
+
+  rust-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: lance-graph-java/native/lgj-abi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
+      - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/lance-graph
+          path: lance-graph
+      - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/OGAR
+          path: OGAR
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # `defaults.run.working-directory` applies to `run:` steps only, NOT
+          # to action steps: this action executes from GITHUB_WORKSPACE, where
+          # the checkout is a subdirectory and no toolchain file is visible. It
+          # would silently fall back to `stable` instead of the pin. `rust-src-dir`
+          # is the input that points it at the crate — which is also where
+          # `rust-toolchain.toml` lives, beside `.cargo/config.toml`.
+          rust-src-dir: lance-graph-java/native/lgj-abi
+          # The baseline goes HERE, not in a `CARGO_BUILD_RUSTFLAGS` env var.
+          # This action exports `RUSTFLAGS` from its own `rustflags` input
+          # (default `-D warnings`), and `RUSTFLAGS` overrides
+          # `build.rustflags` — which is what `CARGO_BUILD_RUSTFLAGS` sets, so a
+          # baseline put there is silently discarded. The first run proved it:
+          # the crate's own SIGILL-guard test was reached with no target-cpu at
+          # all. The action's default is kept alongside the baseline, not
+          # replaced.
+          #
+          # v3 rather than the crate's own v4: `.cargo/config.toml` pins AVX-512
+          # because the production artifact is built for one known host, and
+          # GitHub-hosted runners do not guarantee it. That file names v3 as the
+          # remedy for a machine without AVX-512, and AVX2 is what
+          # `the_x86_64_build_has_a_vector_baseline` requires — so this
+          # retargets the gate rather than weakening it.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lance-graph-java/native/lgj-abi
+      # Runs every #[test] in lgj-abi, including tests/g11_contract_import_fence.rs
+      # — the fence CLAUDE.md's "Enforcement" section names as structural: it walks
+      # src/ and rejects any `lance_graph_contract::` module outside the four-name
+      # allowlist. Per this repo's own history, "G11 was prose until 2026-09-03"
+      # because nothing ran the test that enforces it; this job is what runs it.
+      - name: Test lgj-abi
+        run: cargo test --all-targets

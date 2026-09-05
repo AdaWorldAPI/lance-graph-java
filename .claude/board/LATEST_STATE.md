@@ -1,3 +1,63 @@
+## 2026-09-05 — storno: the gate's own first run corrected two claims above
+
+Corrects the entry immediately below, which is left in place per the
+storno rule. Two of its statements were wrong when written:
+
+- *"adds `rust-toolchain.toml` (this repo had none)"* — one already
+  existed at `native/lgj-abi/rust-toolchain.toml`, pinning `1.97.1`.
+- *"the pin has exactly one spelling"* — adding the root file made two,
+  and cargo reads whichever is nearest the working directory.
+
+The root file is removed and the crate-level file is bumped to `1.98.1`
+(forced: `ndarray` 0.17.2 declares `rust-version = "1.98"`). The three
+jobs now run with `working-directory` set to the crate rather than
+`--manifest-path` from the root, because `.cargo/config.toml` is read
+from the working directory's ancestry and the v4 target-cpu baseline was
+being dropped — which is what `the_x86_64_build_has_a_vector_baseline`
+caught on the gate's first run. CI exports the v3 baseline explicitly,
+since GitHub-hosted runners do not guarantee AVX-512. Full account:
+`EPIPHANIES.md` `E-THE-PIN-THAT-CLAIMED-ONE-PLACE-CREATED-A-SECOND-1`.
+
+## 2026-09-05 — first CI lint gate: fmt + clippy + rust-test, Rust pinned to 1.98.1
+
+**Branch `claude/ci-lint-gate`, PR #77.** This repo has never had a
+`.github/workflows/` directory — every gate documented in `CLAUDE.md` (the
+G11 contract-import fence, the epoch-recheck falsifiers, `ApiSurfaceTest`,
+the L1/L2 semantic-leak pins) has only ever run when a session happened to
+invoke `cargo test` by hand. Adds `.github/workflows/lint.yml`, three jobs
+scoped to `native/lgj-abi` (the repo's only Cargo crate): `format`
+(`cargo fmt --check`), `clippy` (`--all-targets -- -D warnings`), and
+`rust-test` (`--all-targets`, which is what finally makes
+`tests/g11_contract_import_fence.rs` run anywhere but a session's own shell —
+the same gap `CLAUDE.md` names for G11 itself: "prose until 2026-09-03"
+because nothing ran the test that enforces it).
+
+`lgj-abi` path-deps `ndarray`, `lance-graph`'s `lance-graph-contract`, and
+(optional, off by default) `OGAR`'s `ogar-class-view`. Cargo resolves the
+full graph including inactive optional path deps, so `clippy`/`rust-test`
+check out all three siblings — the identical shape `lance-graph`'s own
+`style.yml` already uses (self + each sibling into its own named
+subdirectory under one runner workspace root).
+
+Also adds `rust-toolchain.toml` (this repo had none) pinning
+`channel = "1.98.1"`, joining the sweep `ndarray`/`lance-graph`/`OGAR`
+already carry. `setup-rust-toolchain@v1` is invoked with no `toolchain:`
+input, so the pin has exactly one spelling.
+
+**Java is deliberately out of scope.** `java/` holds only `README.md` +
+`.gitignore` — no Maven, no Gradle, no source. The README says so directly
+("no Maven, no Gradle... `javac` and `java` are the entire Java toolchain").
+Nothing to wire a CI job against yet; filed as a named follow-up rather than
+guessed at.
+
+**Not measured in this PR:** whether `clippy --all-targets -- -D warnings`
+is actually clean on `lgj-abi` today. Disk constraints (a large dependency
+tree through the contract crate) ruled out a local `cargo build`/`clippy`
+run, so this PR's own CI run is the first real measurement — if it comes
+back red on pre-existing debt, the follow-up is this workspace's own tiered
+posture (`continue-on-error: true` + a named `TECH_DEBT.md` line), not a
+bundled auto-fix.
+
 ## 2026-09-04 — lgj_hop: the conjunction is one truth-table pass, and the lane is read as a lane (5×)
 
 **Branch `claude/pr-294-ragged-path-validation-170zcy`**, lgj-abi only — no
