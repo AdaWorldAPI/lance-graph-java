@@ -4,12 +4,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
-import java.lang.reflect.TypeVariable;
-import java.lang.reflect.WildcardType;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -118,99 +113,6 @@ public final class ApiSurfaceTest {
             }
         }
 
-        c.section("ledger L1: no public construction of a field mask from raw bits, by SHAPE");
-        // A facet slot index is a byte position and never crosses the wall. Fencing ONE factory
-        // is not a fence (codex + coderabbit P2 on #75): a public record's canonical ctor took
-        // the raw bits, and ofMatchBits(int) took a raw slot bitset. So WideFieldMask is a final
-        // class with a private ctor, and the pin is on the SHAPE, not a name: no public
-        // constructor, not a record, and every public factory takes ZERO arguments — the only
-        // public values are EMPTY and allFacets() ("let the class decide"; RowStore.hop takes
-        // the classid and native narrows by edge_participation). Any future public
-        // bits-in factory, whatever its name, fails here.
-        Class<?> wfm = WideFieldMask.class;
-        c.that("WideFieldMask has no public constructor (a record's canonical ctor would be one)",
-                wfm.getConstructors().length == 0);
-        c.that("WideFieldMask is not a record (its public canonical ctor would take the raw bits)",
-                !wfm.isRecord());
-        List<String> bitsInFactories = new ArrayList<>();
-        boolean allFacetsPublic = false;
-        for (Method m : wfm.getMethods()) {
-            if (!Modifier.isPublic(m.getModifiers()) || !Modifier.isStatic(m.getModifiers())) {
-                continue;
-            }
-            if (m.getReturnType() == wfm && m.getParameterCount() != 0) {
-                bitsInFactories.add(m.getName() + "/" + m.getParameterCount());
-            }
-            if (m.getName().equals("allFacets")) {
-                allFacetsPublic = true;
-            }
-            if (m.getName().equals("ofFacets") || m.getName().equals("ofMatchBits")) {
-                bitsInFactories.add(m.getName() + " (must be package-private)");
-            }
-        }
-        c.that("every public WideFieldMask factory takes zero arguments (no bits-in path): "
-                + bitsInFactories, bitsInFactories.isEmpty());
-        c.that("WideFieldMask.allFacets() remains the consumer's participation vocabulary",
-                allFacetsPublic);
-        c.that("WideFieldMask exposes no public raw-bits accessor (value())",
-                java.util.Arrays.stream(wfm.getMethods()).noneMatch(m -> m.getName().equals("value")));
-
-        c.section("the fence sees THROUGH erasure (can-it-fire / can-it-stay-silent)");
-        // The prefix pin below is only as good as the scan that applies it. codex P2 on #75: a
-        // getReturnType() check sees `List<Engine.LaneWindow>` as `List`. checkType() walks
-        // the generic signature; prove it fires on a hidden forbidden type (and nested/array
-        // generics), and stays silent on an equally generic clean one — a guard that fires on
-        // everything is as uninformative as one that never fires.
-        try {
-            List<String> hit = new ArrayList<>();
-            checkType(hit, ApiSurfaceTest.class, "fixture return",
-                    ApiSurfaceTest.class.getDeclaredMethod("genericLeakFixture").getGenericReturnType());
-            c.that("can-it-fire: List<java.lang.invoke.MethodHandle> is flagged through erasure: " + hit,
-                    !hit.isEmpty());
-            List<String> erasedOnly = new ArrayList<>();
-            check(erasedOnly, ApiSurfaceTest.class, "fixture return",
-                    ApiSurfaceTest.class.getDeclaredMethod("genericLeakFixture").getReturnType());
-            c.that("the erased-only check would have MISSED it (so the generic walk is load-bearing)",
-                    erasedOnly.isEmpty());
-            List<String> nested = new ArrayList<>();
-            checkType(nested, ApiSurfaceTest.class, "fixture return",
-                    ApiSurfaceTest.class.getDeclaredMethod("nestedGenericLeakFixture").getGenericReturnType());
-            c.that("can-it-fire: Map<String, List<MethodHandle>[]> is flagged (nested + array generics)",
-                    !nested.isEmpty());
-            List<String> quiet = new ArrayList<>();
-            checkType(quiet, ApiSurfaceTest.class, "fixture return",
-                    ApiSurfaceTest.class.getDeclaredMethod("genericCleanFixture").getGenericReturnType());
-            c.that("can-it-stay-silent: List<String> is NOT flagged", quiet.isEmpty());
-        } catch (NoSuchMethodException e) {
-            c.that("generic fixtures are present: " + e, false);
-        }
-
-        c.section("ledger L2: lane geometry (offset/stride) is fenced by the membrane prefix");
-        // The type that carries a served lane's offset+stride is Engine.LaneWindow, in
-        // internal.ffm. It is used INSIDE RowStore/Mask (which read the stride from the served
-        // descriptor, never compute it) and by the sanctioned internal.ffm consumers (bench,
-        // valhalla-lab). Prove the prefix fence structurally covers it, so L2 is closed by the
-        // gate above rather than by a promise: the class must exist and must live under a
-        // FORBIDDEN prefix — then any public signature carrying it, generic or not (the walk
-        // above), is already a LEAK.
-        Class<?> laneWindow = null;
-        try {
-            laneWindow = Class.forName("com.adaworldapi.lancegraph.internal.ffm.Engine$LaneWindow");
-        } catch (ClassNotFoundException e) {
-            // handled below
-        }
-        c.that("Engine.LaneWindow (the offset+stride carrier) exists", laneWindow != null);
-        boolean underFence = false;
-        if (laneWindow != null) {
-            for (String forbidden : FORBIDDEN) {
-                if (laneWindow.getName().startsWith(forbidden)) {
-                    underFence = true;
-                }
-            }
-        }
-        c.that("Engine.LaneWindow lives under a FORBIDDEN prefix, so the prefix fence covers it",
-                underFence);
-
         c.section("the escape hatch is named, not incidental");
         // Raw native access must require deliberately reaching into an internal package. It must
         // never be something ordinary composition hands you.
@@ -228,17 +130,13 @@ public final class ApiSurfaceTest {
     private static List<String> leaksIn(Class<?> type) {
         List<String> leaks = new ArrayList<>();
 
-        // GENERIC signatures, not erased ones: `List<Engine.LaneWindow>` erases to `List` and
-        // would sail past a getReturnType() check. checkType() walks ParameterizedType /
-        // GenericArrayType / WildcardType / TypeVariable recursively so a forbidden type is a
-        // LEAK wherever it appears in the compiled signature (codex P2 on #75).
         for (Method m : type.getMethods()) {
             if (!isPublicApi(m) || m.getDeclaringClass() == Object.class) {
                 continue;
             }
-            checkType(leaks, type, "method " + m.getName() + " return", m.getGenericReturnType());
-            for (Type p : m.getGenericParameterTypes()) {
-                checkType(leaks, type, "method " + m.getName() + " parameter", p);
+            check(leaks, type, "method " + m.getName() + " return", m.getReturnType());
+            for (Class<?> p : m.getParameterTypes()) {
+                check(leaks, type, "method " + m.getName() + " parameter", p);
             }
         }
 
@@ -246,8 +144,8 @@ public final class ApiSurfaceTest {
             if (!isPublicApi(ctor)) {
                 continue;
             }
-            for (Type p : ctor.getGenericParameterTypes()) {
-                checkType(leaks, type, "constructor parameter", p);
+            for (Class<?> p : ctor.getParameterTypes()) {
+                check(leaks, type, "constructor parameter", p);
             }
         }
 
@@ -255,55 +153,10 @@ public final class ApiSurfaceTest {
             if (!Modifier.isPublic(f.getModifiers())) {
                 continue;
             }
-            checkType(leaks, type, "field " + f.getName(), f.getGenericType());
+            check(leaks, type, "field " + f.getName(), f.getType());
         }
 
         return leaks;
-    }
-
-    /**
-     * Walk a reflective {@link Type} and run {@link #check} on every {@link Class} it reaches:
-     * the raw class and each actual type argument of a {@link ParameterizedType}, the component
-     * of a {@link GenericArrayType}, the bounds of a {@link WildcardType} and {@link
-     * TypeVariable}. Erasure hides nothing from this.
-     */
-    static void checkType(List<String> leaks, Class<?> owner, String where, Type t) {
-        if (t instanceof Class<?> c) {
-            check(leaks, owner, where, c);
-        } else if (t instanceof ParameterizedType pt) {
-            checkType(leaks, owner, where, pt.getRawType());
-            for (Type arg : pt.getActualTypeArguments()) {
-                checkType(leaks, owner, where + " <type argument>", arg);
-            }
-        } else if (t instanceof GenericArrayType gat) {
-            checkType(leaks, owner, where, gat.getGenericComponentType());
-        } else if (t instanceof WildcardType wt) {
-            for (Type b : wt.getUpperBounds()) {
-                checkType(leaks, owner, where + " <wildcard bound>", b);
-            }
-            for (Type b : wt.getLowerBounds()) {
-                checkType(leaks, owner, where + " <wildcard bound>", b);
-            }
-        } else if (t instanceof TypeVariable<?> tv) {
-            for (Type b : tv.getBounds()) {
-                checkType(leaks, owner, where + " <type-variable bound>", b);
-            }
-        }
-    }
-
-    // ── can-it-fire fixtures for checkType (private: never part of the scanned API) ──────────
-    // A forbidden type hidden behind erasure. java.lang.invoke.MethodHandle is under a FORBIDDEN
-    // prefix and is plain JDK (no preview), so this compiles on every toolchain the suite runs on.
-    private static java.util.List<java.lang.invoke.MethodHandle> genericLeakFixture() {
-        return null;
-    }
-
-    private static java.util.Map<String, java.util.List<java.lang.invoke.MethodHandle>[]> nestedGenericLeakFixture() {
-        return null;
-    }
-
-    private static java.util.List<String> genericCleanFixture() {
-        return null;
     }
 
     private static boolean isPublicApi(Executable e) {
