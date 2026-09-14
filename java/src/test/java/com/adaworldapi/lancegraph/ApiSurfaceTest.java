@@ -95,7 +95,16 @@ public final class ApiSurfaceTest {
         List<String> unnamedArrays = new ArrayList<>();
         for (Class<?> type : types) {
             for (Method m : type.getMethods()) {
-                if (!isPublicApi(m) || m.getDeclaringClass() == Object.class) {
+                // Members the JDK declares (Object, Throwable's getStackTrace/getSuppressed,
+                // ...) and the compiler-generated enum values() are not project
+                // materialisers: their array returns are mandated shapes this API cannot
+                // rename. Only methods DECLARED in this project are held to the naming law.
+                // (Measured 2026-09-14: without this the fence reported 11 breaches on
+                // origin/main itself — five exception types x 2 Throwable members, plus
+                // Carving.values() — none of them a project-authored crossing.)
+                boolean jdkDeclared = !m.getDeclaringClass().getName().startsWith("com.adaworldapi.lancegraph");
+                boolean enumValues = type.isEnum() && m.getName().equals("values") && m.getParameterCount() == 0;
+                if (!isPublicApi(m) || m.getDeclaringClass() == Object.class || jdkDeclared || enumValues) {
                     continue;
                 }
                 if (m.getReturnType().isArray() && !isNamedBreach(m.getName())) {

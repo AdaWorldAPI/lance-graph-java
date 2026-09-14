@@ -1,3 +1,27 @@
+## 2026-09-14 (3) — minor 11 Java side VERIFIED under JDK 26: 409/409; the 11 `ApiSurfaceTest` failures were on `main` already, fence narrowed with a disable run
+
+JDK 26 obtained the documented way's equivalent: OpenJDK 26.0.2.1 GA tarball from
+`jdk.java.net/26` (download.java.net) into `/opt/jdks/jdk-26.0.2.1`, symlinked to
+the path `java/README.md` names (`/opt/jdks/jdk-26.0.2`). The `.so` rebuilt into
+the Java-consumption `target/` reports `abi 0.11`. `AllTests` under the
+documented `javac`/`java` commands: **ALL PASSED (409 checks)** — every suite,
+including the new `MaskingOpCompletionTest` (48) and the three `OldAbiCompatTest`
+gates. The "UNVERIFIED" caveat of the previous entry is discharged.
+
+**One pre-existing defect surfaced and fixed on the way.** The first run was 408
+passed / 11 failed, all in `ApiSurfaceTest`'s unnamed-materialiser fence. Baseline
+check (origin/main `8720d1d`'s `java/` tree archived, compiled with JDK 26, same
+`.so`): the identical 11 breaches — five exception types × `Throwable.getStackTrace`
+/`getSuppressed`, plus `Carving.values()`. None is a project-authored crossing; the
+fence excluded only `Object.class` and so held JDK-declared members and the
+compiler-generated enum `values()` to the `materialize*/import*` naming law. Fixed
+by exempting members whose declaring class is outside `com.adaworldapi.lancegraph`
+and enum `values()`. **Disable run:** in a scratch copy, renaming
+`Mask.materializeRows` → `rows` makes the narrowed fence report exactly one breach
+(`Mask.rows returns long[]`) — it still fires on the thing it exists for. So the
+CI lint gate (fmt/clippy/rust-test) never saw this: the Java suite is not in CI,
+and nobody had run it under JDK 26 since the fence's allowlist was tightened.
+
 ## 2026-09-14 (2) — Java side of minor 11 landed UNVERIFIED under the documented JDK 26 — read this before trusting it
 
 `Downcalls.Minor11` (lazy holder mirroring `Minor10`), `Engine.{maskTernlog,
