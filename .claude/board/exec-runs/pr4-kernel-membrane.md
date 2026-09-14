@@ -229,3 +229,32 @@ wrong law. One-line fix; worth doing before PR4 cites a law number.
 `TECH_DEBT.md:15-18`) — no instrument counts facade calls. Note that if step (b)
 lands, L3 gets *easier* to instrument, because the fan-out stops being a
 delegation the counter would have to special-case.
+
+---
+
+## Orchestrator verification (2026-09-14, post-ruling)
+
+The ruling's root-cause claim for finding (b) — that the duplicate 256-arm
+ternlog tables exist only because `ndarray::simd` exports the const-generic
+form ALONE — was checked against the source rather than taken on the agent's
+reading. Confirmed:
+
+    src/simd_masking_ops.rs:595  pub fn mask_ternlog<const IMM: i32>(...)
+    src/simd_masking_ops.rs:630  pub fn mask_ternlog_assign<const IMM: i32>(...)
+    src/simd.rs:805-806          the only two names re-exported
+
+There is no runtime-immediate (`_dyn`) form at any level of the facade. A
+const generic instantiates only from a literal, so a consumer holding a
+runtime `u8` immediate has no option but to fan out 256 ways. Both `lgj-abi`
+(`ternlog_row16!`) and `lance-graph-mask-risc` (`ternlog_dispatch.rs`) did
+exactly that, independently, and neither erred locally.
+
+So the migration order the ruling gives is sound and its first step is
+genuinely additive: `mask_ternlog_dyn` / `mask_ternlog_assign_dyn` land in
+ndarray with the const-generic forms untouched (still correct wherever the
+immediate IS static, e.g. `lgj_hop`'s `AND3`), nothing downstream moves, and
+the falsifier is that all 256 immediates agree with the const-generic form.
+
+NOT started. It is PR4-scope and the arc runs one PR at a time; #1226 was
+mid-landing when this was verified, and opening a third in-flight PR to save
+twenty minutes is not a trade worth making.
