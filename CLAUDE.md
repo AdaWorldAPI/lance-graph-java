@@ -274,6 +274,41 @@ simd_{amx,avx512,avx2,           Rust: lgj-abi kernels → ndarray::simd
              (backends)           ndarray's top)
 ```
 
+> **⊘ THE MIDDLE ROW IS WRONG, AND IT MISLEADS (operator-corrected
+> 2026-09-14).** `Valhalla + Panama` is NOT this side's analog of ndarray's
+> `cfg dispatch`. There is **no analog**, because there is nothing to
+> dispatch: `ndarray` IS the SIMD polyfill, there is exactly one
+> implementation of every word, and it is in Rust. Reading the row as an
+> analogy invites treating Panama as a dispatch or compute layer — which is
+> precisely the confabulation it produced (a "T0 owns backend realization"
+> tier story invented to justify a conclusion that needed no tiers; see
+> lance-graph `TECH_DEBT.md`'s ternlog storno).
+>
+> Valhalla and Panama are **two ORTHOGONAL guarantees**, not a pair and not
+> a layer:
+>
+> - **Panama — computation never lives in Java.** The crossing mechanism.
+>   Java hands the question across and receives the projection; the
+>   decomposition of an answer never crosses. This is what E1 enforces.
+> - **Valhalla — storage never lives in Java.** The orthogonal axis. Value
+>   classes carry SHAPE without identity or heap storage, so the Java side
+>   holds names, handles and addresses — never the bytes. This is what the
+>   one-copy law, the `materialize*` naming rule, and
+>   `java-surface-warden`'s "no Stream-over-hydrated-elements" all enforce
+>   from different directions.
+>
+> **What they are FOR, stated positively** (operator, same day): *Java is
+> the low-code thin surface over zero-copy, with methods that look so
+> natural and still compute in lance-graph — Java just thinks it's on
+> steroids without knowing why.* The fluency of `view.where(..).hop(..)
+> .count()` is real; the work and the data are both elsewhere; and Java is
+> never told. Zero-copy is what makes the naturalness honest rather than a
+> disguise — there is no hidden hydration behind the nice method name.
+>
+> Corollary for any design that reaches for this table: the isomorphism
+> holds at the TOP row (facade ↔ facade) and the BOTTOM row (backends ↔ the
+> Rust floor). It BREAKS in the middle. Do not reason from the middle row.
+
 Measured grounding (2026-08-27, in-tree): `simd.rs` is 37 functions and
 ZERO shipping instructions — every raw intrinsic in it sits inside
 `#[cfg(test)]` as the wrapper's oracle; `simd_avx512.rs` alone carries 488.
