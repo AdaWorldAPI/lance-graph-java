@@ -531,3 +531,128 @@ errors that remain (`EMPTY_PLAN`, `NULL_ARGUMENT`, the resolve failures,
 `validate_plan`'s own rejections, `MASK_LENGTH_MISMATCH`) all fire before
 the first write, and that ordering is now load-bearing rather than
 incidental. It should be pinned as such, not assumed.
+
+---
+
+## OQ-2 — RESOLVED: Fork A. The mask-risc oracle is MORE independent, not less (2026-09-14, main thread)
+
+The question read as a trade — keep `kernels::scalar_*` (Fork B, two
+evaluators, C-ONE narrowed to "one SIMD evaluator") or route
+`lgj_plan_eval_scalar` at `reference_execute` (Fork A, C-ONE stays strong but
+the allocation gate must be scoped). It is not a trade, because both sides
+were being judged against the wrong property.
+
+`kernels.rs` states the property in its own words: *"`scalar_*` below is
+written in plain Rust loops with **no ndarray at all**. That independence is
+the entire value of `lgj_plan_eval_scalar`: if the reference shared code with
+the SIMD path, a parity test between them would be checking that a function
+agrees with itself."*
+
+Measured against that property, `reference.rs` wins outright: *"the same
+Program evaluated ONE ROW AT A TIME in plain Rust, with no SIMD facade
+anywhere in this file (law L4: a test greps the source)"* — and L4 is
+**enforced by a grep test**, where `kernels::scalar_*`'s independence rests on
+the discipline of living in the same file as the SIMD wrappers and not calling
+them. Fork A therefore **strengthens** the exact property the symbol exists
+for, and it upgrades the comparison from kernel-vs-kernel to
+whole-evaluator-vs-whole-evaluator.
+
+**Decision: Fork A.** `lgj_plan_eval_scalar` lowers the same plan and runs
+`reference_execute`.
+
+### The two costs, stated rather than absorbed
+
+**1. `reference_scratch` allocates by design** — it materialises one `bool`
+per row per slot, which is its whole reason for existing (an oracle sharing
+the executor's bit packing could not falsify a bit-packing bug). So the
+C-ALLOC gate is scoped to `lgj_plan_eval` **only**, and must name its symbol
+in its own failure message. That is row **D9**, and under Fork A D9 must go
+RED — a gate accidentally written against the scalar symbol is green for the
+wrong reason.
+
+**2. `simd_and_scalar_plans_agree_bit_for_bit` changes meaning and must be
+renamed.** It stops being a SIMD-vs-scalar backend-parity test and becomes
+executor-vs-oracle. That is not a loss: per §5.6 and the `lib.rs` correction
+in lance-graph #1230, **backend parity is `ndarray::simd`'s business**, and an
+ABI-level test could only reach it through a proxy. Renaming it is mandatory —
+a test whose name claims backend parity it no longer checks is worse than no
+test, because a future session reads the name.
+
+### The consequence that makes C1 permanent
+
+Both symbols now share the **lowering**. A lowering bug is therefore shared,
+and no ABI-level differential between the two can see it — which is precisely
+why the frozen oracle exists. **`legacy_plan_eval_impl` is not PR4 scaffolding
+to be deleted after the merge; it is the only remaining independent check on
+the lowering, and it stays.** Its cost is one frozen function that nothing
+else may call.
+
+---
+
+## OQ-4 — the G11 fence must grow a CRATE allowlist in the same commit as the dep
+
+The fence today (`native/lgj-abi/tests/g11_contract_import_fence.rs`) walks
+`src/` and rejects any `lance_graph_contract::` module outside four named
+ones. It says nothing about which CRATES `lgj-abi` may depend on, so adding
+`lance-graph-mask-risc` passes it silently — and the fence's own history is
+that it *was prose for months while already false*.
+
+PR4 adds the crate allowlist in the same commit as the dep, spelled once in
+the test and once in `CLAUDE.md`, with the same red-then-green discipline the
+module allowlist got.
+
+---
+
+## OQ-1 — CLOSED: a thread-local growing arena
+
+The blocker is gone: `Scratch::over(buf, words, slots)` and
+`scratch_words_for` landed in lance-graph #1230 and are on `main`. What
+remained was only *where the buffer lives*, with per-pattern already
+disqualified (it would give the one deliberately lock-free resource kind a
+`RwLock` and serialise concurrent `lgj_plan_eval` calls on one pattern — the
+common shape).
+
+**Decision: a thread-local `RefCell<Vec<u64>>`, grown monotonically to
+`scratch_words_for(words_for(n_rows), SLOTS)`.**
+
+- No contention by construction — it is not shared, so there is no lock to
+  take and nothing for two threads to serialise on.
+- Allocation becomes a function of the **maximum** row count a thread has
+  seen, not of the history: a smaller call carves a strict prefix of the same
+  buffer. That is what makes the `UNSEEN = 999` arm (D11) pass rather than
+  being warmed into passing.
+- It allocates once per `(thread, high-water mark)`. The honest bound to state
+  in the PR body: a thread that has evaluated one 65,536-row plan holds
+  `SLOTS * 1024 * 8` bytes until it exits. That is a real cost, and it is
+  bounded, and it is not per-call.
+
+`acc` is deleted outright, per the finding above: after `validate_plan`
+returns `Ok` there is no error path left, so the copy-then-publish dance
+protects against an empty set of points. Slot 0 of the scratch is the
+accumulator, and one `copy_from_slice` publishes it under the existing write
+guard — the same single write the old loop did.
+
+**Falsifier owed and not optional:** the ordering that makes this safe —
+every remaining error fires BEFORE the first write — is now load-bearing
+rather than incidental. T4/T5 of `pr4_dst_reuse` pin it at every position in
+a plan, with a pre-poisoned destination so "unchanged" is an observation and
+not "still zero".
+
+### The lowering, stated so the implementation has nothing to invent
+
+Per OQ-5, `k` = the least index whose combine is AND (`k = n` if none).
+
+- **`k = n`** (every combine is OR): the answer is ALL rows, tail cleared,
+  `count = n_rows`. A constant — no program is built and none runs.
+- **`k < n`**: drop ops `0..k`; lower op `k` as
+  `MaskOp::Pred { under: None, dst: 0 }`; lower each later op `i` as
+  `Pred { under: .., dst: 1 }` followed by `And`/`Or { a: 0, b: 1, dst: 0 }`.
+- Terminal: `Count { mask: Scratch(0) }`; the words are read back out of
+  `scratch.slot(0)`.
+- `SLOTS = 2`.
+
+Opcode map, one arm each, exhaustive over the nine:
+`EQ_U32 -> EqU32`, `GT_I32 -> GtI32`, `NE_U32 -> NeU32`, `EQ_I32 -> EqI32`,
+`NE_I32 -> NeI32`, `LT_I32 -> LtI32`, `LE_I32 -> LeI32`, `GE_I32 -> GeI32`,
+`TERNARY_MATCH_U32 -> MatchU32 { pattern, care }` unpacked from
+`(care << 32) | pattern`.
