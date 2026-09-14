@@ -1,3 +1,66 @@
+## 2026-09-14 (5) — PR4 C3: the allocation gate, and what it actually measures
+
+Two new integration binaries, both disable-verified.
+
+**`tests/plan_eval_no_alloc.rs`** — one `#[test]`, a pass-through
+`GlobalAlloc` over `System` counting bytes. Rust-side deliberately: this
+repo's other allocation gates use `getThreadAllocatedBytes`, which measures the
+JAVA heap and cannot see a Rust `vec!` at all, so citing them for this property
+would have been an overclaim.
+
+**Measured, not predicted: 160 B per call at 64, 999, 1_000, 8_192 and 65_536
+rows — identical.** A 32-op plan costs 2_016 B. The old loop allocated
+`2 * n_words * 8` per call: 16 KiB at 65_536 rows, growing without bound with
+the population. So the claim the gate pins is not "zero" — the lowering's own
+`Vec<MaskOp>` is real and proportional to the OP count — it is the honest one:
+**per-call allocation is independent of `n_rows`.**
+
+**A defect in the gate, found by its own disable run.** `measure()` originally
+did one un-measured warm-up call per row count. Replacing the monotonic
+`resize` with a per-size `*buf = vec![…]` — a cache keyed by row count, the
+exact thing C-ALLOC denies — left the gate GREEN, because the per-measurement
+warm-up absorbed the first call at each size, which is the only place such a
+cache allocates. The plan predicted the shape ("a gate that warms up over a
+fixed sweep and then measures that same sweep is green while the property is
+false") and the gate had it anyway. Fixed: the arena is warmed ONCE, globally,
+at the largest row count, and every arm — including `UNSEEN = 999`, which is
+smaller and never seen before — is measured cold. D9/D10/D11 then all go red.
+
+D9 is worth its own line: routing the gate through `lgj_plan_eval_scalar`
+reddens it at 592 → 278_848 B per call across the sweep. That is Fork A's cost
+made visible — the row-at-a-time oracle allocates one `bool` per row per slot
+by design, which is what lets it falsify a bit-packing bug — and it is why the
+gate names `lgj_plan_eval` and only it.
+
+**`tests/c_one_evaluator.rs`** — the structural guard that there is one plan
+evaluator. The invariant is an allowlist over MODULES: only `abi.rs` (the
+definition), `exports.rs` (the `extern "C"` signatures and `validate_plan`,
+which rejects rather than evaluates) and `plan_lower.rs` (the one lowering) may
+name `LgjOpDesc` in code. Three narrower rules were tried and rejected against
+the tree, each recorded in the file: "only `plan_lower` may call
+`eval_predicate`" is false (the unfused single-predicate exports call it with
+constant opcodes, correctly); "the opcode argument must be a literal" fires on
+`lgj_mask_combine`, which legitimately takes a runtime combine; "no production
+function may iterate `&[LgjOpDesc]`" is the right property and not textually
+checkable.
+
+Two scanner defects its own assertions caught. Splitting production from test
+at the first `#[cfg(test)]` silently discarded most of `exports.rs` — that file
+and `registry.rs` carry test-only ITEMS long before their test module — so the
+split now anchors on the trailing `#[cfg(test)] mod` and brace-matches to
+prove it really is the file's last item. And scanning raw text flagged
+`kernels.rs`, which names the type four times in PROSE and never touches it;
+allowlisting it would have been the wrong repair, since kernels is exactly
+where a second evaluator would most plausibly grow, so comments are stripped
+instead.
+
+Disable table: D12a (a second production module holding plan ops) RED; D12b
+(widening the allowlist to a module that does NOT hold them) RED — the guard
+is a genuine equality, not the permissive `<=` the plan warned about; D12c
+(the type renamed out from under the scanner) RED on the anti-vacuity arm.
+
+Gate: 174 lib + 1 + 3 + 1 integration, clippy `-D warnings` and fmt clean.
+
 ## 2026-09-14 (4) — PR4 C2: `plan_eval` stops being a second evaluator
 
 `plan_eval_impl` no longer holds an opcode loop. It lowers
