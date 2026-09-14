@@ -39,6 +39,21 @@ public final class Lens {
         return view.sumOf(field);
     }
 
+    /**
+     * Minimum of this column over the selected rows, widened to 64 bits (docs/abi.md §19.3, ABI
+     * minor &ge; 11) — the first of this class's own documented growth: min/max. Absent when the
+     * underlying view selects no rows: unlike {@link #sum} (always present, since the sum of an
+     * empty population is {@code 0}), the minimum of an empty population has no answer.
+     */
+    public java.util.OptionalLong min() {
+        return view.minOf(field);
+    }
+
+    /** {@link #min}'s maximum sibling — same shape, same absence-on-empty-selection reading. */
+    public java.util.OptionalLong max() {
+        return view.maxOf(field);
+    }
+
     /** How many rows the underlying view selects. */
     public long count() {
         return view.count();

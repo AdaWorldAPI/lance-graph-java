@@ -1,9 +1,11 @@
 package com.adaworldapi.lancegraph;
 
 import com.adaworldapi.lancegraph.internal.ffm.Engine;
+import com.adaworldapi.lancegraph.internal.ffm.Layouts;
 import com.adaworldapi.lancegraph.internal.ffm.PlanOp;
 
 import java.util.List;
+import java.util.OptionalLong;
 
 /**
  * A set of rows held natively, opened once and closed once.
@@ -189,6 +191,39 @@ public final class NativePattern implements NativeResource, AutoCloseable {
             }
             return Engine.sumI32(handle, field.lane().index(), mask);
         }
+    }
+
+    /**
+     * Evaluate a plan, then reduce one lane over the resulting selection under {@code reduceOp}
+     * (docs/abi.md §19.3), absent when the selection is empty. Unlike {@link #sumOf} — always
+     * present, since the sum of an empty population is {@code 0} — MIN/MAX have no answer over
+     * an empty population, so an {@link OptionalLong} is the honest shape rather than inventing
+     * one.
+     */
+    private OptionalLong reduceI32(List<Predicate> predicates, I32Field field, int reduceOp) {
+        requireOpen("reduce()");
+        synchronized (lock) {
+            requireOpen("reduce()");
+            long mask;
+            if (predicates.isEmpty()) {
+                mask = all();
+            } else {
+                mask = scratch();
+                Engine.evaluateFused(handle, plan(predicates), mask);
+            }
+            Engine.ReduceOutcome r = Engine.reduceI32(handle, field.lane().index(), reduceOp, mask);
+            return r.present() ? OptionalLong.of(r.value()) : OptionalLong.empty();
+        }
+    }
+
+    /** {@link #reduceI32}, fixed to {@link Layouts#REDUCE_OP_MIN}. */
+    OptionalLong minOf(List<Predicate> predicates, I32Field field) {
+        return reduceI32(predicates, field, Layouts.REDUCE_OP_MIN);
+    }
+
+    /** {@link #reduceI32}, fixed to {@link Layouts#REDUCE_OP_MAX}. */
+    OptionalLong maxOf(List<Predicate> predicates, I32Field field) {
+        return reduceI32(predicates, field, Layouts.REDUCE_OP_MAX);
     }
 
     /** Materialise a selection the caller owns and closes. */

@@ -90,6 +90,26 @@ public final class Layouts {
     /** {@code lane[i] > (i32) operand}, signed. Requires an {@code I32} lane. */
     public static final int OP_GT_I32 = 2;
 
+    // ── lgj_reduce_i32's reduce_op (docs/abi.md §19.3, ABI minor ≥ 11) ───────────────────────
+    //
+    // The parameterised reduce §15 mandated in advance: "if a second reduction is ever needed
+    // (min/max/count-distinct/histogram), do NOT add a second symbol ... an op-code parameter on
+    // one reduce symbol ... and sum becomes op-code 0." lgj_reduce_sum_i32 (no reduce_op
+    // parameter, this file's REDUCE_SUM_I32 handle) is retained unchanged; these three values are
+    // reduce_op's own numeric convention, confirmed against the compiled artifact.
+
+    /**
+     * Sum the selected elements, widened to {@code i64}. Always present — the sum of an empty
+     * population is {@code 0}, a real answer rather than a missing one.
+     */
+    public static final int REDUCE_OP_SUM = 0;
+
+    /** Minimum of the selected elements. Not present over an empty population. */
+    public static final int REDUCE_OP_MIN = 1;
+
+    /** Maximum of the selected elements. Not present over an empty population. */
+    public static final int REDUCE_OP_MAX = 2;
+
     /** Intersect into the accumulator — narrowing. */
     public static final int COMBINE_AND = 0;
 
@@ -320,6 +340,14 @@ public final class Layouts {
      */
     public static final long FACET_PAYLOAD_HI32_OFFSET =
             FACET_PAYLOAD_OFFSET + ValueLayout.JAVA_LONG.byteSize();
+
+    /**
+     * Width, in bytes, of the 12-byte content-blind register that follows a facet's classid —
+     * {@code lgj_op_ternary_match}'s {@code pattern}/{@code care} operand width (docs/abi.md
+     * §19.2; mirrors Rust's {@code kernels::FACET_REGISTER_BYTES}). Derived from the facet's own
+     * total size minus its classid field, never a literal {@code 12}.
+     */
+    public static final long FACET_REGISTER_BYTES = FACET_BYTES - ValueLayout.JAVA_INT.byteSize();
 
     /**
      * Compile-time-ish self check: the byte sizes the ABI document states in prose, checked against

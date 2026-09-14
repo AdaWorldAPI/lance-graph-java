@@ -2,6 +2,7 @@ package com.adaworldapi.lancegraph;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalLong;
 
 /**
  * An immutable, lazy description of a set of rows.
@@ -84,6 +85,33 @@ public final class View {
     public long sumOf(I32Field field) {
         java.util.Objects.requireNonNull(field, "field");
         return owner.sumOf(predicates, field);
+    }
+
+    /**
+     * Minimum of a signed 32-bit column over the rows this view selects, widened to 64 bits —
+     * the parameterised reduce §15 mandated in advance (docs/abi.md §19.3). Absent when this view
+     * selects no rows: unlike {@link #sumOf} (always present, since the sum of an empty
+     * population is {@code 0}), the minimum of an empty population has no answer, so this is the
+     * honest shape rather than an invented sentinel.
+     *
+     * <p>Two crossings: evaluate the chain, then reduce. Still independent of the row count.
+     *
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 11
+     */
+    public OptionalLong minOf(I32Field field) {
+        java.util.Objects.requireNonNull(field, "field");
+        return owner.minOf(predicates, field);
+    }
+
+    /**
+     * {@link #minOf}'s maximum sibling — same shape, same absence-on-empty-selection reading,
+     * same two-crossing cost.
+     *
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 11
+     */
+    public OptionalLong maxOf(I32Field field) {
+        java.util.Objects.requireNonNull(field, "field");
+        return owner.maxOf(predicates, field);
     }
 
     /**

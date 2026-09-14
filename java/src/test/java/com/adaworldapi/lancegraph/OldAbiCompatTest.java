@@ -148,6 +148,41 @@ public final class OldAbiCompatTest {
                     }
                 }
             });
+
+            // Minor 11 — the masking-op completion: mask_ternlog, TCAM
+            // ternary-match over the V3 register, and the parameterised
+            // min/max reduce. Against an older library each gate must name
+            // minor 11, never a missing symbol and never a failure of some
+            // OTHER minor's feature.
+            gate(c, loaded, 11, "Mask.ternlog", () -> {
+                try (RowStore s = RowStore.open(64, 0x1234L);
+                        Mask a = s.maskOfFacetClass(FacetId.of(0), 3);
+                        Mask b = s.maskOfFacetClass(FacetId.of(0), 4);
+                        Mask d = a.ternlog(a, b, 0xFC)) { // OR
+                    if (d.count() > 64) {
+                        throw new IllegalStateException("impossible count");
+                    }
+                }
+            });
+
+            gate(c, loaded, 11, "RowStore.maskOfFacetTernaryMatch", () -> {
+                try (RowStore s = RowStore.open(64, 0x1234L);
+                        Mask m = s.maskOfFacetTernaryMatch(FacetId.of(0), 0L, 0, 0L, 0)) {
+                    if (m.count() != 64) {
+                        throw new IllegalStateException("care=0 must match every row");
+                    }
+                }
+            });
+
+            gate(c, loaded, 11, "View.minOf/maxOf", () -> {
+                try (NativePattern p = NativePattern.open(64, 0x1234L)) {
+                    java.util.OptionalLong mn = p.view().minOf(Pattern.VALUE);
+                    java.util.OptionalLong mx = p.view().maxOf(Pattern.VALUE);
+                    if (mn.isEmpty() || mx.isEmpty()) {
+                        throw new IllegalStateException("64 rows must select something");
+                    }
+                }
+            });
         } else {
             c.note("minors 4 and 5 need a minor-2 row store to build a mask on; skipped here"
                     + " because this library predates it");

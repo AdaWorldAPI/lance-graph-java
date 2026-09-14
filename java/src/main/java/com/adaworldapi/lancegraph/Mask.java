@@ -96,6 +96,50 @@ public final class Mask implements AutoCloseable {
     }
 
     /**
+     * A new selection: {@code ternlog::<imm>(this, b, c)}, word-wise — the mask-op family's
+     * general member (docs/abi.md §19.1; {@code lgj_mask_ternlog}). {@code imm} is the 8-bit
+     * VPTERNLOG truth table, index {@code (a<<2)|(b<<1)|c} where {@code a} is {@code this}, result
+     * bit {@code (imm >> index) & 1}; every value {@code 0..255} is legal, so there is no
+     * unknown-immediate rejection path.
+     *
+     * <p>This generalises {@link #minus} and the raw AND/OR/XOR/NOT this facade otherwise omits
+     * (the {@code minus()} javadoc's "public and/or composition stays out of scope" scoped a
+     * DIFFERENT wave's plan, not this symbol — abi.md §19.1's whole argument is that one
+     * parameterised member closes the family a per-truth-table method set never would): common
+     * immediates are {@code 0xC0} = {@code a & b}, {@code 0xFC} = {@code a | b}, {@code 0x3C} =
+     * {@code a ^ b}, {@code 0x0F} = {@code !a} ({@code b}/{@code c} unused), {@code 0x80} =
+     * {@code a & b & c}, {@code 0xE8} = majority of three.
+     *
+     * <p>{@code b}/{@code c} need not share this selection's parent resource; if either does not,
+     * or the row counts differ, the ABI's own {@code MASK_LENGTH_MISMATCH} surfaces as a
+     * {@link NativeCallException} — this method performs no redundant Java-side parent/row-count
+     * check of its own, matching {@link #minus}'s own reading. {@code b} and/or {@code c} may be
+     * {@code this} (or each other) — every operand is read as it stood BEFORE the call, so no
+     * arrangement of aliasing changes the answer.
+     *
+     * @param b   the second operand
+     * @param c   the third operand
+     * @param imm the 8-bit truth table, {@code 0..255}
+     * @throws IllegalArgumentException if {@code imm} is outside {@code 0..255}
+     * @throws ClosedResourceException  if this selection, {@code b}, {@code c}, or its resource,
+     *                                  is closed
+     * @throws AbiMismatchException     if the loaded library reports ABI minor &lt; 11
+     */
+    public Mask ternlog(Mask b, Mask c, int imm) {
+        java.util.Objects.requireNonNull(b, "b");
+        java.util.Objects.requireNonNull(c, "c");
+        if (imm < 0 || imm > 255) {
+            throw new IllegalArgumentException("imm must be in 0..255, was " + imm);
+        }
+        requireUsable("ternlog()");
+        b.requireUsable("ternlog()'s b argument");
+        c.requireUsable("ternlog()'s c argument");
+        long dst = Engine.createMask(resourceHandleOf(parent), false);
+        Engine.maskTernlog(handle, b.handle, c.handle, dst, (byte) imm);
+        return new Mask(parent, dst);
+    }
+
+    /**
      * The set row indices, materialised into a fresh {@code long[]} — the ONE named terminal that
      * turns a native population into row ids (root CLAUDE.md's mask-native invariant, operator
      * §10: "row IDs are produced only by an explicit terminal whose NAME makes materialisation

@@ -161,6 +161,44 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * A selection of the rows whose {@code facet}'s 12-byte content-blind register matches
+     * {@code ((register ^ pattern) & care) == 0} — TCAM over the V3 register (docs/abi.md §19.2;
+     * {@code lgj_op_ternary_match}). {@code care} all-zero matches every row (a deliberate total,
+     * not an error); {@code care} all-ones is exact register equality. Setting the leading bytes
+     * of {@code care} and clearing the rest turns this into a PREFIX test — one call, one mask,
+     * a whole ancestry subtree (OGAR's 3×4 canon; prefix containment is ancestry).
+     *
+     * <p>{@code pattern} and {@code care} are each the 12-byte register split as low 64 / high 32
+     * bits, matching {@link #payloadLow64At}/{@link #payloadHi32At}'s own convention.
+     *
+     * <p>{@code AosRows} layout only: a store opened with {@link #openColumnar} splits the
+     * register into per-field regions no strided pass can gather without the serialization this
+     * ABI exists to forbid, and this method's {@code UNSUPPORTED_LAYOUT} surfaces as a
+     * {@link NativeCallException} there — checked before the mask is even resolved, matching the
+     * refusal {@link #facetSumAs} already gives a facet-major store.
+     *
+     * <p>One native crossing ({@code lgj_mask_create} then {@code lgj_op_ternary_match} — two,
+     * matching {@link #maskOfFacetClass}'s own accounting), a flat, per-call cost proportional to
+     * the row count, never to any prior result.
+     *
+     * @param facet       which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param patternLo64 the low 64 bits of the 12-byte pattern to match
+     * @param patternHi32 the high 32 bits of the 12-byte pattern to match
+     * @param careLo64    the low 64 bits of the 12-byte care mask
+     * @param careHi32    the high 32 bits of the 12-byte care mask
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 11
+     */
+    public Mask maskOfFacetTernaryMatch(FacetId facet, long patternLo64, int patternHi32,
+            long careLo64, int careHi32) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        requireOpen("maskOfFacetTernaryMatch()");
+        long mask = Engine.createMask(handle, false);
+        Engine.ternaryMatch(handle, facet.index(), patternLo64, patternHi32, careLo64, careHi32,
+                mask);
+        return new Mask(this, mask);
+    }
+
+    /**
      * For every facet, which register grouping this selection's rows carry (abi.md §16) — the
      * whole-row alignment answer, in ONE crossing.
      *

@@ -1,3 +1,30 @@
+## 2026-09-14 (2) — Java side of minor 11 landed UNVERIFIED under the documented JDK 26 — read this before trusting it
+
+`Downcalls.Minor11` (lazy holder mirroring `Minor10`), `Engine.{maskTernlog,
+ternaryMatch, reduceI32}` each behind `Abi.requireMinor(11)` FIRST (the shape
+minors 2–4 still violate), `Mask.ternlog(b, c, imm)`, `RowStore.
+maskOfFacetTernaryMatch(..)`, `View.{minOf,maxOf}` / `Lens.{min,max}` →
+`OptionalLong`, `Layouts.REDUCE_OP_*` + `FACET_REGISTER_BYTES` (derived, never a
+literal 12), `MaskingOpCompletionTest` (truth-table fixture for 8 immediates,
+ternary-match parity against an independent Java loop with anti-vacuity, the
+"extreme UNSELECTED row must not win" min/max falsifier), three
+`OldAbiCompatTest` gates on the existing `-Dlgj.oldlibrary=` path. 367
+insertions, 0 deletions.
+
+**Verification status, stated plainly:** the documented toolchain is JDK 26
+(`/opt/jdks/jdk-26.0.2`) and it is NOT installed in this sandbox. The full tree
+compiled with 0 errors under the only available JDK (21, preview FFM) in a
+SCRATCH copy that patched three pre-existing JDK-22+ `Arena.allocate` overloads
+the codebase already used before this change; at runtime that same JDK 21 build
+fails in the untouched `SmokeTest` at `Engine.rowCount` (`WrongMethodTypeException`,
+a VarHandle/FFM API difference) — so NO Java test in this change has been RUN.
+The `.so` was rebuilt into the Java-consumption `target/` per
+`valhalla-lab/README.md` and reports `abi 0.11`. This repo's CI runs fmt +
+clippy + rust-test only; nothing gates the Java side. **The next session with
+JDK 26 runs `AllTests` before anything else cites this entry as done.** Landed
+on the branch rather than left uncommitted in a live checkout (container-loss
+insurance), with this caveat in the commit message as well.
+
 ## 2026-09-14 — ABI minor 10 → 11: the ndarray masking facade reaches the ABI in THREE symbols, not fifteen
 
 **Branch `claude/clone-repositories-71a5sw`** (post ndarray #306). Every
