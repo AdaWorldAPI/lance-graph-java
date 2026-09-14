@@ -458,13 +458,24 @@ fn the_all_rows_shortcut_is_the_same_condition_on_both_sides() {
 /// always-true on this lane — so a swapped entry in either mapping table
 /// would have passed, which is precisely the defect this file exists to
 /// catch. Measured (n = 1000, seed = 33): values span `-150..=361` with
-/// median 100, so `LT_I32(200)` selects 676 and `LE_I32(300)` selects 865.
+/// median 100, so `LT_I32(200)` selects 676 and `LE_I32(300)` selects 866.
 ///
 /// The four ordered comparisons are also given DISTINCT counts on purpose.
 /// This is a differential between two arms, not against ground truth, so a
 /// mis-map is visible only when it moves ONE arm's count — and two opcodes
 /// that happen to select the same number of rows would hide a swap between
 /// exactly those two.
+///
+/// That is not a theoretical worry; it was MEASURED on this exact file.
+/// Mis-mapping `LGJ_OP_LE_I32` to `Pred::LtI32` in `plan_lower` — a
+/// one-token change, and the precise defect class this test exists to catch
+/// — is RED at operand `300` (`LeI32(300)` selects 866, `LtI32(300)` selects
+/// 865: one row of difference is all it takes) and **GREEN at operand
+/// `500`**, where both readings select all 1000 and the arms agree on an
+/// answer neither of them computed correctly. The operand is what makes this
+/// a test rather than a decoration; do not move it back inside the "the
+/// domain doc says 361, so 500 is safely past it" reasoning that put it
+/// there.
 const OPCODE_CASES: [(&str, u32, u32, i64); 9] = [
     ("EQ_U32", LGJ_OP_EQ_U32, LANE_CLASSES, 7),
     ("NE_U32", LGJ_OP_NE_U32, LANE_CLASSES, 7),

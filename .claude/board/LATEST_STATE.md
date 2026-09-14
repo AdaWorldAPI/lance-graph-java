@@ -52,6 +52,25 @@ the fixture is dead:
 Both are now `assert_eq!`, measured, with the incident recorded at the
 assertion. Zero `TODO`s left in the file.
 
+**And the fixture fix is itself measured, not asserted.** Mis-mapping
+`LGJ_OP_LE_I32` to `Pred::LtI32` in `plan_lower` — a one-token change, and
+exactly the defect class this file exists to catch — is **RED at operand
+300** (`LeI32(300)` = 866, `LtI32(300)` = 865; one row is enough) and
+**GREEN at operand 500**, where both readings select all 1000 and the two
+arms agree on an answer neither computed correctly. So the operand is the
+difference between a test and a decoration, and the pre-fix version of this
+file would have shipped blind to a real mis-map on two of its nine opcodes.
+
+**Disable table — five arms, all red:**
+
+| arm | disable |
+|---|---|
+| the AND/OR asymmetry | `plan_lower` gates an OR on the accumulator |
+| the prefix rewrite | `plan_lower` takes `k := 0` always |
+| a one-opcode mis-map | `LGJ_OP_LE_I32` -> `Pred::LtI32` |
+| the fold's OR node | the fold flattens an OR into the enclosing AND |
+| the fold's dead prefix | an OR before the first AND becomes a leaf |
+
 Numbers, from `--nocapture`: per-opcode seeds 65 / 935 / 2 / 998 / 498 /
 676 / 866 / 500 / 65; the 28-vector sweep runs 39, 498, 524, 1000 (n=2),
 0, 40, 40, 73, 112, 531, 557, 1000 (n=3) — both identical to
