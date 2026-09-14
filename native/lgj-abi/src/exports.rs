@@ -2212,6 +2212,9 @@ mod tests {
     /// pre-PR4 loop, kept in its own file so the freeze is visible as a file
     /// boundary rather than as a convention inside a 2000-line module.
     mod pr4_equivalence;
+    mod pr4_dst_reuse;
+    mod pr4_matrix;
+    mod pr4_seed;
 
     /// Safe wrappers over the pointer-taking exports.
     ///
