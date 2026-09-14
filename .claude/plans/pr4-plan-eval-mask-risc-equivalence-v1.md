@@ -656,3 +656,52 @@ Opcode map, one arm each, exhaustive over the nine:
 `NE_I32 -> NeI32`, `LT_I32 -> LtI32`, `LE_I32 -> LeI32`, `GE_I32 -> GeI32`,
 `TERNARY_MATCH_U32 -> MatchU32 { pattern, care }` unpacked from
 `(care << 32) | pattern`.
+
+---
+
+## C2 disable run — RESULTS (2026-09-14, commit `93da288`)
+
+Eleven arms run against the NEW implementation, each patched, tested and
+restored by a script that asserts its anchor matched exactly once first (the
+recorded failure this discipline exists for: anchors written against pre-`fmt`
+text, three edits silently no-op'd, three guards reported GREEN having never
+landed).
+
+**Nine load-bearing.** D1, D2, D4, D6, D7a, D7b, D8, plus two arms not in the
+table above that cover the two decisions C2 actually had to make:
+
+- **D-GATE** — gate an OR-combined op `under` the accumulator (i.e. delete the
+  `is_and` condition). RED, including `or_plans_widen` and the whole combine
+  sweep. This is the asymmetry the lowering's doc calls the correctness
+  question, and it is now measured rather than argued.
+- **D-LANE** — shift the lane index by one inside `pred_of`. RED across 17
+  tests. The `const _` lane-id assertions guard the OTHER direction (the
+  fixture renumbering under a correct lowering), which no runtime test can
+  reach; this arm covers the lowering getting it wrong directly.
+
+**D3 has no guard left to disable, and that is a finding rather than a gap.**
+The row reads "seed tail clear: delete `clear_tail_bits` on the seed". There
+is no seed. The prefix rewrite means op `k` writes the accumulator directly, so
+the all-ones seed the old loop built — and had to tail-clear — does not exist
+in the new path. The one remaining `clear_tail_bits` is the `AllRows` arm, and
+that is D4, which is RED.
+
+**Two came back VACUOUS, and both are exactly what the table predicted.**
+
+| arm | result | the table's own trap note |
+|---|---|---|
+| **D5** — publish accumulates (`\|=`) instead of overwriting | GREEN | *"this row proves the fresh-mask tests were never evidence for this property"* |
+| **D15** — `out_count` written above the error check | GREEN | the `12345` sentinel arm |
+
+Neither is a weak guard: every test that exists today publishes into a FRESHLY
+CREATED empty mask, and `|=` into an all-zero destination is `copy_from_slice`.
+Nothing in the suite has a non-empty prior to be polluted, and nothing triggers
+an error and then reads the sentinel. The arms that would redden both live in
+`pr4_dst_reuse.rs` (F-PR4-DST's re-used/poisoned destinations; the
+error-at-every-position sweep with a pre-poisoned `out_count`), which is why
+that file is C1's last owed piece rather than a nice-to-have.
+
+So the run did the thing a disable table is for: it converted "we think these
+two properties are untested" from a prediction into a measurement, BEFORE the
+file that fixes it landed. D5 and D15 are re-run once it does, and a green
+result there would then be the real defect.
