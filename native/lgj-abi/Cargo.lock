@@ -59,11 +59,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lance-graph-quack"
+version = "0.1.0"
+dependencies = [
+ "lance-graph-mask-risc",
+]
+
+[[package]]
 name = "lgj-abi"
 version = "0.1.0"
 dependencies = [
  "lance-graph-contract",
  "lance-graph-mask-risc",
+ "lance-graph-quack",
  "ndarray",
  "ogar-class-view",
 ]

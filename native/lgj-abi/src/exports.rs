@@ -2369,6 +2369,11 @@ mod tests {
     use super::*;
     use crate::fixture::{Fixture, LANE_CLASSES, LANE_IDS, LANE_VALUES};
 
+    /// The lowering differential: this crate's `plan_lower` (a flat op list)
+    /// against `lance-graph-quack`'s `lower` (a Boolean tree), both producing
+    /// a `mask_risc::Program`. Two implementations of one law; until this
+    /// file, nothing compared them.
+    mod lowering_convergence;
     mod pr4_dst_reuse;
     /// PR4's behaviour-equivalence oracle and falsifier matrix — the frozen
     /// pre-PR4 loop, kept in its own file so the freeze is visible as a file

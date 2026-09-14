@@ -1,3 +1,67 @@
+## 2026-09-14 (6) — the lowering differential: one law, two implementations, finally compared
+
+`plan_lower` lowers a FLAT OP LIST (a left fold seeded with all-ones,
+`acc &= p` / `acc |= p`) to a `mask_risc::Program`. `lance-graph-quack`'s
+`lower` lowers a Boolean TREE to the same `Program`. They implement the same
+law twice — the accumulator gate, the AND/OR gating asymmetry, and the drop
+of ops before the first AND — and until now nothing compared them, because
+each has its OWN oracle: this crate's is `pr4_equivalence.rs`'s frozen
+pre-PR4 loop; quack's is a per-row reading in its own crate that has never
+heard of `plan_lower`. Neither can see the other drift.
+
+`src/exports/tests/lowering_convergence.rs` closes that. Three tests, 603
+lines, all green.
+
+**The conversion is where the prefix rewrite turns out not to be a special
+case.** `fold_to_tree` reads the op list as the tree it denotes:
+`all_ones & p == p` makes the first AND the accumulator; `all_ones | p ==
+all_ones` makes an OR before that first AND simply never become a node.
+`plan_lower` reaches the identical answer by scanning for the least AND
+index. Same predicate, two routes — and
+`the_all_rows_shortcut_is_the_same_condition_on_both_sides` pins exactly
+that, two-sided: 3 of the 28 combine vectors are `AllRows` (one all-OR
+vector per arity), 25 are not.
+
+**Deliberately a differential, NOT a delegation.** `lance-graph-quack` is a
+**dev**-dependency, and the manifest comment says why: the membrane — the
+`cdylib` Java's `Linker` loads — must not depend on a CONSUMER of the IR it
+serves. Sharing the LAW between two independent implementations is the
+point; sharing a runtime dependency in that direction would invert the
+layering. `plan_lower` stays, and now it is pinned.
+
+**Both anti-vacuity bounds were floors, and both floors were hiding
+something.** The worker's spec said `>= 15` of 28 and `>= 7` of 9. Measured,
+both passed EXACTLY at their bound — which is what a floor looks like when
+the fixture is dead:
+
+- the arity-4 arm appended `LT_I32(500)`, and the values lane is
+  `-150..=361`, so the op was always-true. The whole 16-vector arm collapsed
+  to eight saturated 1000s plus eight verbatim copies of the arity-3 row:
+  zero additional discriminating power, and it cleared the floor by sitting
+  on it. `LT_I32(200)` (676 of 1000) took the count **15 -> 21**.
+- `LT_I32`/`LE_I32` were given `500` in the per-opcode arm too, so both
+  selected every row. Two arms agreeing that EVERY row survives cannot
+  separate `LtI32` from `LeI32` from any other always-true reading — the
+  exact swap this file exists to catch would have passed on those two rows.
+  `LT_I32(200)` / `LE_I32(300)` took it **7 of 9 -> 9 of 9**, and the four
+  ordered comparisons now carry distinct counts on purpose: this is a
+  differential between two ARMS, so a mis-map is visible only when it moves
+  one arm's count, and two opcodes selecting the same number of rows would
+  hide a swap between exactly those two.
+
+Both are now `assert_eq!`, measured, with the incident recorded at the
+assertion. Zero `TODO`s left in the file.
+
+Numbers, from `--nocapture`: per-opcode seeds 65 / 935 / 2 / 998 / 498 /
+676 / 866 / 500 / 65; the 28-vector sweep runs 39, 498, 524, 1000 (n=2),
+0, 40, 40, 73, 112, 531, 557, 1000 (n=3) — both identical to
+`pr4_matrix.rs`'s own recorded figures, which is the cross-reference the
+shared `(n=1000, seed=33)` fixture buys — and 0, 20, 20, 53, 64, 207, 233,
+676, 676, 696, 696, 696, 724, 1000, 1000, 1000 (n=4).
+
+lgj-abi 182 lib tests (179 + 3), every integration binary green, clippy
+`-D warnings` and fmt clean.
+
 ## 2026-09-14 (5) — PR4 C3: the allocation gate, and what it actually measures
 
 Two new integration binaries, both disable-verified.

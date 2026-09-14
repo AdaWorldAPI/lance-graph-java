@@ -64,6 +64,23 @@ lance-graph-mask-risc = { path = "../../../lance-graph/crates/lance-graph-mask-r
 # associations -- which is what makes `edge_participation` discriminate.
 ogar-class-view = { path = "../../../OGAR/crates/ogar-class-view", optional = true }
 
+[dev-dependencies]
+# TEST-ONLY, and the boundary is the point. `lance-graph-quack` is the
+# DuckDB-shaped query surface in the lance-graph repo; it lowers a Boolean
+# TREE to the same `mask_risc::Program` this crate's `plan_lower` lowers a
+# flat OP LIST to. The two therefore implement the same law twice — the
+# accumulator gate, the AND/OR gating asymmetry, the drop of ops before the
+# first AND — and nothing compared them, because each has its own oracle:
+# this crate's is the frozen pre-PR4 loop, quack's is a per-row reading.
+# Neither can see the other drift.
+#
+# `src/exports/tests/lowering_convergence.rs` closes that, and it is a
+# dev-dependency rather than a real one ON PURPOSE: the membrane must not
+# depend on a consumer of the IR it serves. Sharing the LAW is the goal;
+# sharing a DEPENDENCY in that direction would invert the layering. What
+# ships is the differential, not a delegation.
+lance-graph-quack = { path = "../../../lance-graph/crates/lance-graph-quack" }
+
 [profile.release]
 opt-level = 3
 lto = "thin"
