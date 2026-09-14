@@ -396,3 +396,76 @@ claim them. Cite the sibling suite by path.
   mandates has no representation. See `exec-runs/pr4-abi-membrane.md` — this is
   a second substrate-first blocker, and V1/F-PR4-SEED is the falsifier for the
   rewrite that would paper over it.
+
+---
+
+## OQ-5 — RESOLVED (2026-09-14, main thread). No `Fill` op is needed.
+
+The all-set accumulator is not a missing IR primitive. It is a statement about
+a **prefix of the op list**, decidable at lowering time.
+
+### The algebra
+
+`abi.md` §7 is `acc_0 = ALL`, then `acc_i = acc_{i-1} ⊕_{combine_i} pred_i`.
+Two facts settle it:
+
+- `ALL & p = p` — an AND against the all-set accumulator **is** the predicate.
+- `ALL | p = ALL` — an OR against it is a **no-op that discards `pred_i`**.
+
+So let `k` = the least index with `ops[k].combine == AND` (`k = n` if none).
+Every op before `k` ORs into `ALL` and leaves it `ALL`; op `k` reduces to
+`acc = pred_k`. Therefore:
+
+- **`k < n`** — drop ops `0..k`; lower op `k` as
+  `MaskOp::Pred { under: None, dst: 0 }` (a direct write, no seed); lower
+  `k+1..n` as their own combine into slot 0. Exact.
+- **`k = n`** (every combine is OR) — the result is `ALL`, tail-cleared, and
+  `count = n_rows`. A constant; no program runs.
+
+### Why dropping ops `0..k` cannot change ERROR behaviour
+
+This is the half that had to be checked rather than assumed, and it holds by
+construction rather than by test. After `validate_plan` returns `Ok`,
+`kernels::eval_predicate` is **infallible** for every op in the plan: its only
+two error arms are `LGJ_ERR_LANE_KIND_MISMATCH` and `LGJ_ERR_UNKNOWN_OPCODE`
+(`kernels.rs:928-938`), and `validate_plan` already rejects both, for every
+op, up front (`exports.rs:1662-1672` — `opcode_required_kind` and the
+`lane.kind() != required` test). The kernels below it return `()`, never a
+`Result`. The in-loop `lane_view` is the same argument: `validate_plan` called
+it for the same `lane_id` already.
+
+So a skipped op has no observable effect of any kind. That is what makes the
+prefix rewrite a **rewrite** rather than a behaviour change.
+
+### The trap the rewrite must NOT fall into
+
+`k == 0` for every plan the Java facade can currently build — `View` exposes
+no `or`, `PlanOp::narrowing` is documented as "the only kind reachable from
+`View.where`", and `COMBINE_OR` is "deliberately unreachable from here"
+(`View.java:23-32`, `PlanOp.java:22-24`). So the simple rewrite — *op 0 always
+writes directly* — passes every test that exists, and is **wrong for a C
+caller**, which `validate_plan` explicitly permits to send `LGJ_COMBINE_OR` in
+any position. Implement the general prefix rule; do not special-case `k = 0`.
+
+F-PR4-SEED must therefore carry a `combine = OR` leading op built at the ABI
+level, not through the Java facade, which cannot express one.
+
+### An ABI observation, recorded not fixed
+
+A plan whose ops are **all** `OR` returns every row, whatever the predicates
+say. That is the §7 contract read literally, it is reachable from C today, and
+it is not PR4's to change — PR4 owes behaviour equivalence, not correction.
+Filed here so the lowering's `k = n` arm reads as deliberate rather than as a
+degenerate case someone should "clean up" later.
+
+### Consequence for the OQ list
+
+OQ-5 no longer blocks: it needs no substrate change, no new `MaskOp` variant,
+and no ndarray primitive. It becomes a lowering requirement plus one falsifier.
+**OQ-1 remains the blocking one** — and note its shape is narrower than the
+plan states: `n_rows` is a property of the *pattern resource* and immutable for
+its lifetime, so there is exactly ONE row count per pattern and no
+"first sight of each n" cache is required at all. What that leaves open is
+purely **where a per-pattern scratch lives and how concurrent
+`lgj_plan_eval` calls on one handle share it** — a different and smaller
+question than the one recorded above.
