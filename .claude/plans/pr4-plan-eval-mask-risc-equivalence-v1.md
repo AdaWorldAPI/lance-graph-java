@@ -469,3 +469,65 @@ its lifetime, so there is exactly ONE row count per pattern and no
 purely **where a per-pattern scratch lives and how concurrent
 `lgj_plan_eval` calls on one handle share it** — a different and smaller
 question than the one recorded above.
+
+---
+
+## OQ-1 — the obvious home is DISQUALIFIED, and one of the two buffers can just go (2026-09-14, main thread)
+
+Not yet closed, but narrowed twice and with the tempting answer ruled out.
+
+### Per-pattern scratch would serialize a path that is parallel today
+
+`n_rows` is immutable per pattern resource, so "cache a scratch per row
+count" collapses to "cache a scratch per pattern" — one buffer, no keying,
+no first-sight-of-each-n problem. That is why the plan's framing was too
+wide. But the narrower version is **wrong for a different reason**, and the
+registry says so in its own words.
+
+`registry.rs:22-34`: a call takes a **short read lock**, clones the
+`Arc<ResourceEntry>`, and **drops the registry lock before touching the
+payload**; masks then carry a per-resource `RwLock` specifically "so bulk ops
+on distinct masks do not serialize". A pattern's payload is a fixture whose
+buffer is "immutable for the resource's whole life" (`:126`) — it takes no
+lock at all, which is exactly what lets N threads evaluate N plans against
+one pattern with zero contention.
+
+Hanging a mutable scratch off `ResourceEntry` ends that. It would need its
+own `RwLock`, and two concurrent `lgj_plan_eval` calls on the same pattern —
+the common shape, since a pattern is the thing you query repeatedly — would
+then block on each other. **Trading a per-call allocation for a per-call
+lock on the hot path is not an optimisation**, and it converts the one
+resource kind that is deliberately lock-free into a contended one.
+
+So per-pattern scratch is out. Remaining candidates, in preference order:
+a thread-local keyed by word count (no contention, allocates once per
+(thread, size), and the number of live sizes is the number of live
+patterns); or a scratch RESOURCE with its own handle, which is ABI-clean in
+principle — a handle is a name, not a byte position — but costs a new symbol
+and owes the membrane warden a reason.
+
+### `acc` needs no home at all — it can be deleted
+
+`plan_eval_impl` allocates TWO buffers. The second one, `acc`, exists for a
+stated reason (`exports.rs`): "dst_mask is written exactly once, and an error
+at any point leaves it byte-for-byte as it was."
+
+That reason is discharged by the OQ-5 finding above. After `validate_plan`
+returns `Ok`, **there is no error path left**: `eval_predicate` is infallible
+for every op in the plan, and the kernels beneath it return `()`. The
+in-loop `lane_view` re-check is the same argument. So "an error at any
+point" describes a set of points that is empty, and the copy-then-publish
+dance is protecting against nothing.
+
+With validation total and up front, the loop can accumulate directly into
+the `dst_mask` words under their existing write guard. One allocation
+disappears with no new storage, no new lock, and no ABI change — and it is
+the one that is exactly `n_words` of the caller's own destination.
+
+That leaves a single buffer to home, which is a materially smaller question
+than the one this OQ started as. **Falsifier owed:** a test that an error
+returned by `plan_eval` leaves `dst_mask` unchanged must still pass — the
+errors that remain (`EMPTY_PLAN`, `NULL_ARGUMENT`, the resolve failures,
+`validate_plan`'s own rejections, `MASK_LENGTH_MISMATCH`) all fire before
+the first write, and that ordering is now load-bearing rather than
+incidental. It should be pinned as such, not assumed.
