@@ -705,3 +705,45 @@ So the run did the thing a disable table is for: it converted "we think these
 two properties are untested" from a prediction into a measurement, BEFORE the
 file that fixes it landed. D5 and D15 are re-run once it does, and a green
 result there would then be the real defect.
+
+### D5 and D15 re-run once `pr4_dst_reuse.rs` landed — the receipt
+
+The two arms recorded VACUOUS above were re-run against the same C2
+implementation with the falsifier file in place. Both are now covered, and the
+second one is a correction to the disable, not to the code.
+
+**D5 — RED.** Changing `publish` from `copy_from_slice` to `|=` now reddens
+`the_same_plan_lands_identically_whatever_the_destination_held`,
+`a_poisoned_tail_is_published_clean` and
+`a_dirty_destination_is_not_read_as_an_input_plane`. Red-then-green complete,
+and the prediction the table made in advance — *"this row proves the fresh-mask
+tests were never evidence for this property"* — is now a measurement at both
+ends.
+
+**D15 — still GREEN as the table spells it, and that is a defect in the
+DISABLE.** The row says "move the write above the error check". Under the old
+loop the write and the error checks shared one function. Under C2 they do not:
+`out_count` is written in exactly ONE place (`publish`), and `publish` is
+reached only after every error has already returned — so moving the write to
+the top of `publish` cannot break anything, because on a failing plan `publish`
+is never called at all.
+
+The error check that is actually reachable is `validate_plan`, one level up.
+Re-targeted there, both directions redden:
+
+| arm | mutation | result |
+|---|---|---|
+| **D15a** | write `*out_count` before `validate_plan` | **RED** — `a_bad_plan_leaves_dst_mask_untouched`, `an_error_at_any_position_in_a_plan_leaves_the_destination_untouched` |
+| **D15b** | zero the destination before `validate_plan` | **RED** — the two above plus `every_minor_11_opcode_rejects_a_lane_of_the_wrong_kind` |
+
+So the property holds and is load-bearing; what changed is WHERE its guard
+lives. The lesson is the one this table's own header already carries in a
+different form: a disable written against the old structure can pass against
+the new one for a reason that has nothing to do with the guard. **The right
+reading of a green disable is "find out why", never "the guard is inert".**
+
+Both `publish`-internal error paths (`write_mask()` returning `None`, and the
+length mismatch) are unreachable for the same reason the `ExecError` map's arms
+are: `resolve_pattern_and_mask` rejects a wrong-kind handle and a
+wrong-length mask before the plan runs. They stay as defensive returns and are
+not claimed to be falsifiable.
