@@ -45,6 +45,19 @@ ndarray = { path = "../../../ndarray", default-features = false, features = ["st
 # this crate consumes, and the crate compiles fine without them.
 lance-graph-contract = { path = "../../../lance-graph/crates/lance-graph-contract", default-features = false }
 
+# The ONE mask evaluator. `plan_eval` lowers `&[LgjOpDesc]` to a
+# `mask_risc::Program` and runs it; this crate keeps no second opcode loop.
+# That is the whole point of PR4 — before it, `plan_eval_impl` held its own
+# accumulate-and-combine loop over `kernels::`, a second evaluator beside the
+# one in lance-graph, each able to drift from the other.
+#
+# It is NOT a second source of SIMD (abi.md §8 is unchanged): mask-risc names
+# no ISA at all — a test in that crate greps its own source for one — and
+# delegates every op to `ndarray::simd`, the same facade `kernels.rs` uses.
+# So the SIMD floor is still ndarray and only ndarray; what moved is who
+# sequences the ops.
+lance-graph-mask-risc = { path = "../../../lance-graph/crates/lance-graph-mask-risc" }
+
 # The REAL ClassView provider (OGAR Core). `FixtureClassView` answers the same
 # 32 facets for every classid; `OgarClassView` walks `ogar_vocab`'s promoted
 # classes and gives a genuine per-class field basis -- attributes AND

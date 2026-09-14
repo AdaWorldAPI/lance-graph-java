@@ -22,12 +22,49 @@
 //! `out_*` parameters are written **only on `OK`**, so a failed call cannot
 //! leave Java reading a half-filled descriptor.
 
+use std::cell::RefCell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use lance_graph_mask_risc::{
+    execute, reference_execute, reference_scratch, scratch_words_for, ExecError, LaneRef, Planes,
+    Scratch, Value,
+};
 
 use crate::abi::*;
 use crate::fixture::PATTERN_LANE_COUNT;
 use crate::kernels::{self, LaneView, Path};
+use crate::plan_lower::{self, Lowered};
 use crate::registry::{self, ResourceEntry};
+
+thread_local! {
+    /// The plan evaluator's scratch arena.
+    ///
+    /// Thread-local and grown monotonically, which is the whole of OQ-1's answer.
+    /// Per-pattern was disqualified: it would give the one deliberately lock-free
+    /// resource kind a `RwLock` and serialise concurrent `lgj_plan_eval` calls on
+    /// one pattern — the common shape. A thread-local has no lock to take.
+    ///
+    /// Allocation is a function of the MAXIMUM row count a thread has seen, never
+    /// of its history: a smaller call carves a strict prefix of the same buffer,
+    /// because `Scratch::over` is handed a length and uses exactly that prefix.
+    /// That is what lets an unseen, smaller row count stay allocation-free rather
+    /// than be warmed into passing by an earlier call of the same size.
+    ///
+    /// The cost, stated rather than absorbed: a thread that has evaluated one
+    /// 65,536-row plan holds `scratch_words_for(1024, 2) * 8` bytes until it
+    /// exits. Bounded, and not per call.
+    static PLAN_SCRATCH: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+}
+
+// The lowering addresses lanes by using `LgjOpDesc.lane_id` DIRECTLY as an
+// index into `Planes::lanes`. That is correct only while the fixture's lane
+// ids are 0, 1, 2 in this order — renumber them and every lowered predicate
+// silently reads a different column, of the right kind, on a plan the
+// validator happily accepts. The cheapest possible guard, and it fails the
+// build rather than the run.
+const _: () = assert!(crate::fixture::LANE_IDS == 0);
+const _: () = assert!(crate::fixture::LANE_CLASSES == 1);
+const _: () = assert!(crate::fixture::LANE_VALUES == 2);
 
 /// Run `f`, converting a panic into [`LGJ_ERR_PANIC`].
 ///
@@ -1677,6 +1714,55 @@ fn validate_plan(pattern: &ResourceEntry, ops: &[LgjOpDesc]) -> Result<(), i32> 
 /// The body behind both `lgj_plan_eval` and `lgj_plan_eval_scalar` — one code
 /// path, two symbols, so the parity test compares two *paths* rather than a
 /// function against itself.
+/// `mask_risc::ExecError` → an ABI status.
+///
+/// **Every arm here is unreachable through the ABI**, and saying so is worth
+/// more than implying otherwise. `validate_plan` runs first and rejects an
+/// unknown opcode, a bad combine, an out-of-range lane and a kind mismatch
+/// before the lowering is even built; the lowering names no input plane
+/// (`Planes::masks` is `&[]`), no sum terminal and no blend. What is left —
+/// the scratch-sizing family, `ScratchReadBeforeWrite`, `GateAliasesDst` —
+/// would be a bug in THIS file, not in a caller's plan.
+///
+/// So the map exists to turn such a bug into a status a caller can see
+/// instead of a panic, and its arms are deliberately NOT claimed to be
+/// individually falsifiable through the ABI. A future session looking for the
+/// disable run that pins each arm will not find one; this is why.
+fn exec_error_to_status(e: ExecError) -> i32 {
+    match e {
+        ExecError::LaneOutOfRange(_) => LGJ_ERR_INVALID_LANE,
+        ExecError::LaneKind { .. } => LGJ_ERR_LANE_KIND_MISMATCH,
+        ExecError::LenMismatch { .. } => LGJ_ERR_MASK_LENGTH_MISMATCH,
+        ExecError::PlaneOutOfRange(_) | ExecError::PlaneTail(_) => LGJ_ERR_INVALID_HANDLE,
+        ExecError::SumRowBound { .. } => LGJ_ERR_SUM_OVERFLOW,
+        ExecError::ScratchTooSmall { .. }
+        | ExecError::ScratchBufferTooSmall { .. }
+        | ExecError::ScratchSlotUndeclared { .. }
+        | ExecError::ScratchSlotsUnaddressable { .. }
+        | ExecError::ScratchReadBeforeWrite { .. }
+        | ExecError::ScratchWords { .. }
+        | ExecError::BlendNeedsOut
+        | ExecError::GateAliasesDst { .. } => LGJ_ERR_ALLOCATION_FAILED,
+    }
+}
+
+/// Write the answer into `dst_mask` and `out_count` — the ONE place either is
+/// written, reached only after every error has already returned.
+fn publish(mask: &ResourceEntry, words: &[u64], count: u64, out_count: *mut u64) -> i32 {
+    let mut g = match mask.write_mask() {
+        Some(g) => g,
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    if g.words.len() != words.len() {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    g.words.copy_from_slice(words);
+    drop(g);
+    // SAFETY: non-null (checked by the caller); written only on success.
+    unsafe { *out_count = count };
+    LGJ_OK
+}
+
 fn plan_eval_impl(
     res: u64,
     ops: *const LgjOpDesc,
@@ -1712,47 +1798,122 @@ fn plan_eval_impl(
     let n_rows = pattern.n_rows;
     let n_words = mask_words_for(n_rows) as usize;
 
-    // Accumulate into scratch, then publish. Two consequences, both wanted:
-    // dst_mask is written exactly once, and an error at any point leaves it
-    // byte-for-byte as it was.
-    let mut acc = vec![0u64; n_words];
-    // "the accumulator starts as all rows set" (§7).
-    for w in acc.iter_mut() {
-        *w = u64::MAX;
-    }
-    clear_tail_bits(&mut acc, n_rows);
-    let mut scratch = vec![0u64; n_words];
+    let lowered = match plan_lower::lower_plan(ops) {
+        Some(l) => l,
+        // Unreachable: `validate_plan` already rejected every unknown opcode.
+        // Reported rather than asserted — see `exec_error_to_status`.
+        None => return LGJ_ERR_UNKNOWN_OPCODE,
+    };
 
-    for op in ops {
-        let lane = match lane_view(&pattern, op.lane_id) {
-            Ok(l) => l,
-            Err(e) => return e,
-        };
-        if let Err(e) =
-            kernels::eval_predicate(path, op.op, op.operand, &lane, n_rows, &mut scratch)
-        {
-            return e;
+    // The old loop allocated an accumulator and a predicate buffer per call
+    // and copied the accumulator into the destination at the end, so that
+    // `dst_mask` was written exactly once and an error anywhere left it
+    // byte-for-byte as it was. Both properties survive without the
+    // allocation: the accumulator now lives in the thread-local arena, and
+    // every error path below returns before `publish` is ever reached.
+    let program = match lowered {
+        Lowered::AllRows => {
+            // No program at all. An accumulator that starts all-ones and is
+            // only ever OR-ed cannot shrink, so the answer is every row.
+            let mut g = match mask.write_mask() {
+                Some(g) => g,
+                None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+            };
+            if g.words.len() != n_words {
+                return LGJ_ERR_MASK_LENGTH_MISMATCH;
+            }
+            for w in g.words.iter_mut() {
+                *w = u64::MAX;
+            }
+            clear_tail_bits(&mut g.words, n_rows);
+            drop(g);
+            // SAFETY: non-null (checked above); written only on this success path.
+            unsafe { *out_count = n_rows };
+            return LGJ_OK;
         }
-        if let Err(e) = kernels::combine_into(path, op.combine, &mut acc, &scratch) {
-            return e;
-        }
-    }
-    clear_tail_bits(&mut acc, n_rows);
-    let count = kernels::popcount(path, &acc);
+        Lowered::Program(p) => p,
+    };
 
-    let mut g = match mask.write_mask() {
-        Some(g) => g,
+    let fixture = match pattern.fixture() {
+        Some(f) => f,
         None => return LGJ_ERR_WRONG_RESOURCE_KIND,
     };
-    if g.words.len() != acc.len() {
-        return LGJ_ERR_MASK_LENGTH_MISMATCH;
-    }
-    g.words.copy_from_slice(&acc);
-    drop(g);
+    let rows = match usize::try_from(n_rows) {
+        Ok(r) => r,
+        Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    // Index order is LANE_IDS, LANE_CLASSES, LANE_VALUES — pinned by the
+    // `const _` assertions at the top of this file, because the lowering uses
+    // `lane_id` directly as the index.
+    let lanes = [
+        LaneRef::U64(fixture.ids()),
+        LaneRef::U32(fixture.classes()),
+        LaneRef::I32(fixture.values()),
+    ];
+    // `masks` is EMPTY on purpose. Handing `dst_mask` in as an input plane
+    // would turn a caller's dirty prior tail into `ExecError::PlaneTail` — a
+    // spurious failure on a destination that is about to be overwritten
+    // wholesale. The destination is an output here and nothing else.
+    let planes = Planes {
+        n_rows: rows,
+        masks: &[],
+        lanes: &lanes,
+    };
 
-    // SAFETY: non-null (checked above); written only on the success path.
-    unsafe { *out_count = count };
-    LGJ_OK
+    match path {
+        Path::Simd => {
+            let need = match scratch_words_for(n_words, plan_lower::SLOTS as usize) {
+                Some(n) => n,
+                None => return LGJ_ERR_LENGTH_OVERFLOW,
+            };
+            PLAN_SCRATCH.with(|cell| {
+                let mut buf = cell.borrow_mut();
+                if buf.len() < need {
+                    buf.resize(need, 0);
+                }
+                let mut scratch =
+                    match Scratch::over(&mut buf[..need], n_words, plan_lower::SLOTS as usize) {
+                        Ok(s) => s,
+                        Err(e) => return exec_error_to_status(e),
+                    };
+                let count = match execute(&program, &planes, &mut scratch, None) {
+                    Ok(Value::Count(c)) => c as u64,
+                    // The lowering emits exactly one terminal and it is
+                    // `Count`; any other value means this file built a
+                    // program it did not intend to.
+                    Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
+                    Err(e) => return exec_error_to_status(e),
+                };
+                let words = match scratch.slot(plan_lower::ACC_SLOT) {
+                    Some(w) => w,
+                    None => return LGJ_ERR_ALLOCATION_FAILED,
+                };
+                publish(&mask, words, count, out_count)
+            })
+        }
+        // Fork A: the scalar symbol runs mask-risc's row-at-a-time oracle, so
+        // what it proves is whole-evaluator-against-whole-evaluator rather
+        // than kernel-against-kernel. The oracle ALLOCATES by design — one
+        // `bool` per row per slot is exactly what lets it falsify a
+        // bit-packing bug — which is why the allocation gate names
+        // `lgj_plan_eval` and only it.
+        Path::Scalar => {
+            let count = match reference_execute(&program, &planes, None) {
+                Ok(Value::Count(c)) => c as u64,
+                Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
+                Err(e) => return exec_error_to_status(e),
+            };
+            let slots = match reference_scratch(&program, &planes) {
+                Ok(s) => s,
+                Err(e) => return exec_error_to_status(e),
+            };
+            let words = match slots.get(plan_lower::ACC_SLOT as usize) {
+                Some(w) => w.as_slice(),
+                None => return LGJ_ERR_ALLOCATION_FAILED,
+            };
+            publish(&mask, words, count, out_count)
+        }
+    }
 }
 
 /// Evaluate `n_ops` predicates in **one** crossing.
@@ -2208,11 +2369,11 @@ mod tests {
     use super::*;
     use crate::fixture::{Fixture, LANE_CLASSES, LANE_IDS, LANE_VALUES};
 
+    mod pr4_dst_reuse;
     /// PR4's behaviour-equivalence oracle and falsifier matrix — the frozen
     /// pre-PR4 loop, kept in its own file so the freeze is visible as a file
     /// boundary rather than as a convention inside a 2000-line module.
     mod pr4_equivalence;
-    mod pr4_dst_reuse;
     mod pr4_matrix;
     mod pr4_seed;
 
@@ -2785,11 +2946,30 @@ mod tests {
         }
     }
 
-    /// The headline parity property, through the same code path the Java tests
-    /// exercise: SIMD and the independent scalar reference must agree exactly,
-    /// including at row counts that are not multiples of 64.
+    /// FAILS IF: the bit-packed executor and the row-at-a-time oracle
+    /// disagree on the same lowered plan, including at row counts that are
+    /// not multiples of 64.
+    ///
+    /// **Renamed in PR4, and the rename is mandatory rather than cosmetic.**
+    /// It was `simd_and_scalar_plans_agree_bit_for_bit`, and under the old
+    /// implementation that name was accurate: `lgj_plan_eval_scalar` ran
+    /// `kernels::scalar_*`, so the two symbols were two BACKENDS of one
+    /// evaluator and this test was backend parity.
+    ///
+    /// It is not that any more. Both symbols now lower the same plan and the
+    /// scalar one runs `mask_risc::reference_execute` — an oracle that
+    /// evaluates one ROW at a time in plain Rust with no SIMD facade anywhere
+    /// in its file, a property a grep test in that crate enforces. So what
+    /// this compares is executor-against-oracle, which is strictly stronger
+    /// (whole evaluator, not kernel) and is a DIFFERENT claim.
+    ///
+    /// Backend parity itself is `ndarray::simd`'s business — an ABI-level
+    /// test could only reach it through a proxy — so it is not lost here; it
+    /// was never really held here. A test whose name claims a property it no
+    /// longer checks is worse than no test, because the next session reads
+    /// the name and not the body.
     #[test]
-    fn simd_and_scalar_plans_agree_bit_for_bit() {
+    fn the_executor_and_the_row_oracle_agree_bit_for_bit() {
         for n in [0u64, 1, 63, 64, 65, 127, 1000, 4097] {
             for seed in [0u64, 7, 0xFEED_FACE] {
                 let p = open(n, seed);

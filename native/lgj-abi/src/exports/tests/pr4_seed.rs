@@ -11,7 +11,8 @@
 //!
 //! Every plan in this crate's pre-existing test suite begins with `AND` (the
 //! only two `LGJ_COMBINE_OR` sites are both the SECOND op — see
-//! `simd_and_scalar_plans_agree_bit_for_bit` and `or_plans_widen` in
+//! `the_executor_and_the_row_oracle_agree_bit_for_bit` (renamed in PR4 from
+//! `simd_and_scalar_plans_agree_bit_for_bit`) and `or_plans_widen` in
 //! `exports.rs`), so that wrong shortcut passes the entire suite as it stands
 //! today. These tests exist to make it fail: they are pure ADDITIONS, and per
 //! this module's freeze discipline they must be GREEN against the current

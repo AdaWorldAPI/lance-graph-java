@@ -1,3 +1,73 @@
+## 2026-09-14 (4) — PR4 C2: `plan_eval` stops being a second evaluator
+
+`plan_eval_impl` no longer holds an opcode loop. It lowers
+`&[LgjOpDesc]` to a `lance_graph_mask_risc::Program` (new module
+`src/plan_lower.rs`) and runs it — `execute` on the SIMD path,
+`reference_execute` on the scalar one. New path dep
+`lance-graph-mask-risc`; `ndarray` remains the only source of SIMD in this
+crate, because mask-risc names no ISA at all (a grep test in that crate
+enforces it) and delegates every op to the same `ndarray::simd` facade
+`kernels.rs` uses. What moved is who SEQUENCES the ops, not who computes them.
+
+**What the lowering is.** Let `k` be the least index whose combine is AND. The
+old loop seeded an all-ones accumulator and folded each op in, so an `|=`
+before the first AND cannot shrink anything and `all_ones & p == p` — every op
+in `0..k` is dead. So ops `0..k` are dropped; op `k` becomes a bare `Pred`
+writing slot 0 (it IS the accumulator); each later op writes slot 1 and folds
+into slot 0. If no op combines with AND, the answer is every row and **no
+program is built at all**. That prefix rewrite is not an optimisation bolted
+on: it is what lets the lowering work without a fill/constant op, which the
+mask-RISC deliberately does not have.
+
+**The asymmetry that is the whole correctness question.** A later AND-combined
+op is gated `under` slot 0 — `acc & p` depends on `p` only where `acc` already
+survives, so the predicate runs over the accumulator's live 64-row words. A
+later OR-combined op is NOT gated: `acc | p` depends on `p` exactly where
+`acc` is ZERO, so gating it would discard precisely the bits that matter and
+quietly answer `acc`. `pr4_matrix`'s full `{AND, OR}^n` sweep against the
+frozen oracle is what holds this.
+
+**Allocation.** The per-call `acc` and `scratch` vecs (`2 * n_words * 8` bytes
+— 16 KiB at 65,536 rows) are gone. The accumulator lives in a thread-local
+arena grown monotonically; a smaller call carves a strict prefix of the same
+buffer, so allocation is a function of the thread's MAXIMUM row count, never
+of its history. `acc` is deleted outright rather than kept: after
+`validate_plan` returns `Ok` there is no error path left before the single
+write, so the copy-then-publish dance was protecting against an empty set of
+points. Both properties it bought survive — `dst_mask` is written exactly
+once, and every error returns before `publish` is reached.
+
+**Fork A, and a rename that is mandatory.**
+`lgj_plan_eval_scalar` runs mask-risc's row-at-a-time oracle rather than
+`kernels::scalar_*`. So `simd_and_scalar_plans_agree_bit_for_bit` is renamed
+`the_executor_and_the_row_oracle_agree_bit_for_bit`: under the old
+implementation the name was accurate (two backends of one evaluator), and it
+is not any more. The comparison is now executor-against-oracle — strictly
+stronger, and a different claim. Backend parity is `ndarray::simd`'s business;
+an ABI-level test could only ever have reached it through a proxy. A test
+whose name claims a property it no longer checks is worse than no test.
+
+**Two guards worth naming.** Three `const _: () = assert!(…)` lines pin
+`LANE_IDS/CLASSES/VALUES == 0/1/2`, because the lowering uses `lane_id`
+DIRECTLY as an index into `Planes::lanes` — renumber the fixture and every
+lowered predicate silently reads a different column, of the right kind, on a
+plan the validator accepts. And `Planes::masks` is `&[]` on purpose: handing
+`dst_mask` in as an input plane would turn a caller's dirty prior tail into
+`ExecError::PlaneTail`, a spurious failure on a destination about to be
+overwritten wholesale.
+
+**Honest about the error map.** `exec_error_to_status` exists so a bug in this
+file becomes a status rather than a panic, and **every arm is unreachable
+through the ABI** — `validate_plan` rejects unknown opcodes, bad combines,
+out-of-range lanes and kind mismatches before the lowering is built, and the
+lowering names no plane, no sum terminal and no blend. Its arms are therefore
+NOT claimed to be individually falsifiable, and the doc comment says so rather
+than leaving a future session hunting for the disable run that pins each one.
+
+Gate: 174/174 lib tests, `clippy --all-targets -D warnings` clean, fmt clean.
+The 10 PR4 C1 falsifiers — written against the OLD loop and green before this
+change — pass UNCHANGED against the new one, which is the equivalence claim.
+
 ## 2026-09-14 (3) — minor 11 Java side VERIFIED under JDK 26: 409/409; the 11 `ApiSurfaceTest` failures were on `main` already, fence narrowed with a disable run
 
 JDK 26 obtained the documented way's equivalent: OpenJDK 26.0.2.1 GA tarball from

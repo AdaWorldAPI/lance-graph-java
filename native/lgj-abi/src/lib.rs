@@ -52,6 +52,7 @@ pub mod class_view_provider;
 pub mod exports;
 pub mod fixture;
 pub mod kernels;
+pub mod plan_lower;
 pub mod registry;
 pub mod rowstore;
 
