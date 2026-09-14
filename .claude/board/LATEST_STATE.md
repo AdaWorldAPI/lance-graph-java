@@ -1,3 +1,38 @@
+## 2026-09-14 — ABI minor 10 → 11: the ndarray masking facade reaches the ABI in THREE symbols, not fifteen
+
+**Branch `claude/clone-repositories-71a5sw`** (post ndarray #306). Every
+`ndarray::simd` mask primitive now has a `kernels.rs` wrapper; the ABI grew
+`lgj_mask_ternlog` (runtime `u8` immediate → the const-generic facade; xor/not/
+maj3 and 252 more ride it, no `lgj_mask_xor`/`lgj_mask_not`), `lgj_op_ternary_match`
+(the TCAM / prefix-ancestry op — the one genuinely new 24-byte operand), and
+`lgj_reduce_i32` (op-coded: sum 0 / min 1 / max 2, per `abi.md` §15's
+pre-commitment). The i32 comparison family (`eq/ne/lt/le/ge`, `ne_u32`) landed as
+**op-codes 3–8 on the existing compare symbol — zero new symbols**. Measured
+`nm -D`: 26 → **29** `T lgj_` (abi.md §1/§7 previously disagreed 26 vs 24; both now
+read 29). Deliberate non-exports with revisit conditions (`abi.md` §19.5):
+`mask_any`/`mask_all` (= `lgj_mask_count > 0` / `== n_rows` at identical cost),
+`blend_i32` (vacuous: no resource carries two `I32` lanes), `ternary_match_u64`
+(needs 128 bits of operand). One correction to the brief's census:
+`eq_u32_strided_to_mask` was already `lgj_op_eq_classid` (minor 2).
+
+Gates (orchestrator, in `native/lgj-abi`): `cargo test` 164 + 3 (was 138 + 3),
+`clippy --all-targets -D warnings` clean, `fmt --check` clean, release `.so`
+800 KB. Seven disable runs (`abi.md` §19.7) — two were vacuous on first try
+(an `if false {}` beside the real call; a knob that did not bind) and were
+re-done to assert the guard TEXTUALLY absent; a real bug caught by an
+anti-vacuity assertion (`FACET_PAYLOAD_HI32_OFFSET` is facet-relative, not
+register-relative).
+
+**Java side NOT touched** (not a one-line addition): follow-up = `Downcalls.Minor11`
+mirroring `Minor10` (`Downcalls.java:461`) + `Engine` wrappers behind
+`Abi.requireMinor(11)` + `Mask`/`View` facade methods. Nothing breaks meanwhile
+(`Layouts.LGJ_ABI_MINOR = 1`, `requireMinor` tests `>=`). Pre-existing E2/E3
+residue noticed, not fixed: `kernels.rs` private `FACET_CLASSID_BYTES` duplicates
+`rowstore::FACET_CLASSID_BYTES`; `scalar_rowstore_{classid_mask,facet_match}`
+are `pub fn` in `src/main` reachable only from tests. Measurement caveat: the
+`lance-graph` path dep was a live checkout with concurrent uncommitted edits
+during the run (its `8e5eb8f` + WIP); ndarray resolved to the local checkout.
+
 ## 2026-09-05 — storno: the gate's own first run corrected two claims above
 
 Corrects the entry immediately below, which is left in place per the

@@ -69,7 +69,20 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// require only the base 104-byte prefix rather than the full layout — without
 /// that, every future manifest field would be a hard incompatibility with every
 /// older artifact.
-pub const LGJ_ABI_MINOR: u32 = 10;
+///
+/// Minor **11** (2026-09-14): the masking-op completion (`docs/abi.md` §19).
+/// THREE symbols — [`crate::exports::lgj_mask_ternlog`] (the mask-op family's
+/// general member: every 3-input Boolean function of three masks, so XOR, NOT,
+/// MAJ3 and 252 others arrive as immediates rather than as symbols),
+/// [`crate::exports::lgj_op_ternary_match`] (TCAM over the V3 12-byte facet
+/// register — the first bitwise-over-payload predicate this ABI has ever
+/// carried), and [`crate::exports::lgj_reduce_i32`] (the PARAMETERISED
+/// reduction §15 mandated in advance: `sum`/`min`/`max` behind one op-code
+/// argument, never a second and third reduce symbol) — plus SEVEN new
+/// [`LgjOpDesc`] op-codes that cost no symbol at all
+/// ([`LGJ_OP_NE_U32`] … [`LGJ_OP_TERNARY_MATCH_U32`]). No new status and no
+/// manifest growth, so a minor-10 Java loads and sees none of it.
+pub const LGJ_ABI_MINOR: u32 = 11;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -251,6 +264,62 @@ pub const LGJ_OP_EQ_U32: u32 = 1;
 /// `lane[i] > operand as i32` (signed), over an `I32` lane.
 pub const LGJ_OP_GT_I32: u32 = 2;
 
+// ── ABI minor >= 11 (docs/abi.md §19) ───────────────────────────────────────
+//
+// These cost NO symbol. `LgjOpDesc.op` is the generalisation vehicle this ABI
+// already carries for predicates (§1: "growth is a design smell"), so the
+// comparison family lands as op-codes and is reachable BOTH fused
+// (`lgj_plan_eval`, N predicates one crossing) and unfused (`n_ops = 1`, whose
+// accumulator is all-set so the result is exactly `op0`).
+
+/// `lane[i] != operand as u32`, over a `U32` lane. ABI minor >= 11.
+pub const LGJ_OP_NE_U32: u32 = 3;
+/// `lane[i] == operand as i32` (signed lanes, exact), over an `I32` lane.
+/// ABI minor >= 11.
+pub const LGJ_OP_EQ_I32: u32 = 4;
+/// `lane[i] != operand as i32`, over an `I32` lane. ABI minor >= 11.
+pub const LGJ_OP_NE_I32: u32 = 5;
+/// `lane[i] < operand as i32` (signed, strict), over an `I32` lane.
+/// ABI minor >= 11.
+pub const LGJ_OP_LT_I32: u32 = 6;
+/// `lane[i] <= operand as i32` (signed), over an `I32` lane. ABI minor >= 11.
+pub const LGJ_OP_LE_I32: u32 = 7;
+/// `lane[i] >= operand as i32` (signed), over an `I32` lane. ABI minor >= 11.
+pub const LGJ_OP_GE_I32: u32 = 8;
+
+/// `((lane[i] ^ pattern) & care) == 0` — care-masked (ternary/TCAM) equality
+/// over a `U32` lane. ABI minor >= 11.
+///
+/// **The operand packs BOTH halves**: `operand as u64` is
+/// `(care << 32) | pattern`, i.e. `pattern` in the low 32 bits and `care` in
+/// the high 32. That is a new reading of an existing field for a NEW op-code
+/// only — every pre-existing op-code's reading of `operand` is untouched — and
+/// it is exact, because two `u32`s are exactly 64 bits. `care == 0` matches
+/// every element; `care == u32::MAX` is [`LGJ_OP_EQ_U32`].
+///
+/// The `u64` sibling (`ndarray::simd::ternary_match_u64_to_mask`) is a NAMED
+/// GAP, not an oversight: its pattern+care is 128 bits and `LgjOpDesc.operand`
+/// carries 64, so it cannot be an op-code without growing the descriptor —
+/// which would not be additive. It exists as a kernel
+/// ([`crate::kernels::simd_ternary_match_u64_to_mask`]) and is stated as
+/// unexposed in `docs/abi.md` §19 rather than half-exposed here.
+pub const LGJ_OP_TERNARY_MATCH_U32: u32 = 9;
+
+// ── Reduction op-codes for `lgj_reduce_i32` (ABI minor >= 11, §19) ──────────
+//
+// abi.md §15 wrote the rule this obeys BEFORE the need arose: "if a second
+// reduction is ever needed (min/max/count-distinct/histogram), do NOT add a
+// second symbol ... an op-code parameter on one reduce symbol ... and `sum`
+// becomes op-code 0."
+
+/// Sum the selected elements, widened to `i64`. Always "present" — the sum of
+/// an empty population is `0`, a real answer rather than a missing one.
+pub const LGJ_REDUCE_SUM: u32 = 0;
+/// Minimum of the selected elements. Not present over an empty population.
+pub const LGJ_REDUCE_MIN: u32 = 1;
+/// Maximum of the selected elements. Not present over an empty population.
+pub const LGJ_REDUCE_MAX: u32 = 2;
+
 /// Narrow the accumulator: `acc &= op_result`.
 pub const LGJ_COMBINE_AND: u32 = 0;
 /// Widen the accumulator: `acc |= op_result`.
@@ -259,8 +328,9 @@ pub const LGJ_COMBINE_OR: u32 = 1;
 /// The element kind an opcode requires of its lane. `None` ⇒ unknown opcode.
 pub(crate) const fn opcode_required_kind(op: u32) -> Option<LgjElemKind> {
     match op {
-        LGJ_OP_EQ_U32 => Some(LgjElemKind::U32),
-        LGJ_OP_GT_I32 => Some(LgjElemKind::I32),
+        LGJ_OP_EQ_U32 | LGJ_OP_NE_U32 | LGJ_OP_TERNARY_MATCH_U32 => Some(LgjElemKind::U32),
+        LGJ_OP_GT_I32 | LGJ_OP_EQ_I32 | LGJ_OP_NE_I32 | LGJ_OP_LT_I32 | LGJ_OP_LE_I32
+        | LGJ_OP_GE_I32 => Some(LgjElemKind::I32),
         _ => None,
     }
 }
