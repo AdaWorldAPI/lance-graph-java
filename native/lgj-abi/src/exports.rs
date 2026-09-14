@@ -2208,6 +2208,11 @@ mod tests {
     use super::*;
     use crate::fixture::{Fixture, LANE_CLASSES, LANE_IDS, LANE_VALUES};
 
+    /// PR4's behaviour-equivalence oracle and falsifier matrix — the frozen
+    /// pre-PR4 loop, kept in its own file so the freeze is visible as a file
+    /// boundary rather than as a convention inside a 2000-line module.
+    mod pr4_equivalence;
+
     /// Safe wrappers over the pointer-taking exports.
     ///
     /// These are not a second implementation: each one is a direct call into the
