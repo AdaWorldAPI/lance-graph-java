@@ -355,6 +355,106 @@ the signal the substrate is missing a word.
 `internal.*` in any public signature — the exact analog of "all SIMD from
 `ndarray::simd`, never `simd_{arch}`, never raw intrinsics".
 
+## The JDK is one apt command away — never skip the Java half (2026-09-16)
+
+**Operator ruling: document this so no future session runs without Panama at
+all.** This repo's history contains commits titled *"UNVERIFIED: JDK 26 not
+available in this sandbox"*. That conclusion was wrong in the only way that
+matters — it was never re-tested after an `apt-get update`. **JDK 25 installs
+from Ubuntu's own archive in one command, gives FINAL Panama FFM (final since
+22), and runs the entire Java suite green.** A session that reports "no JDK
+here" without running the three commands below is reporting a stale index, not
+a fact about the container.
+
+**JDK 26 — the version this repo's own commits targeted — needs ONE extra apt
+source, and Ubuntu's stock archive alone will never offer it.** Add Adoptium
+and it is an ordinary `apt-get install`:
+
+```sh
+# the extra source — Ubuntu noble stops at openjdk-25; Adoptium carries 8..26
+curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+  | sudo tee /etc/apt/keyrings/adoptium.asc >/dev/null
+. /etc/os-release && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] \
+https://packages.adoptium.net/artifactory/deb $VERSION_CODENAME main" \
+  | sudo tee /etc/apt/sources.list.d/adoptium.list
+sudo apt-get update
+sudo apt-get install -y temurin-26-jdk     # -> /usr/lib/jvm/temurin-26-jdk-amd64
+```
+
+Ubuntu's own archive serves **openjdk-25** (also fine — Panama is final since
+22, and the suite passes on it too):
+
+```sh
+sudo apt-get update                          # NOT optional — see the trap below
+sudo apt-get install -y openjdk-25-jdk-headless
+/usr/lib/jvm/java-25-openjdk-amd64/bin/java -version   # openjdk 25.0.4
+```
+
+**The trap that made this look impossible.** The pre-seeded apt index pointed
+at `openjdk-25 25.0.2+10-1~24.04`, a version already withdrawn from the pool,
+so the install died on a bare `404 Not Found` — which reads as *"this package
+does not exist"* rather than *"your index is stale"*. `apt-get update` moved
+the candidate to `25.0.4+7-1~24.04` and the install succeeded immediately.
+Same shape as this workspace's other freshness traps: **a cached view reporting
+absence is not evidence of absence.**
+
+### Running the Java suite — there is no build tool, and that is deliberate
+
+`java/src/test/.../AllTests.java` is a plain `main` that runs every suite in
+one JVM and exits 0 / 1 / 2 (passed / failed / **native artifact absent, so
+nothing ran** — a missing library reported as a failure would send the reader
+hunting a bug that is not there). So: build the `.so`, `javac`, `java`.
+
+```sh
+# 1. the native artifact
+cd native/lgj-abi && cargo build --release          # -> target/release/liblgj_abi.so
+
+# 2. compile main + test together (56 files)
+J=/usr/lib/jvm/temurin-26-jdk-amd64/bin      # or java-25-openjdk-amd64
+find java/src/main java/src/test -name '*.java' > /tmp/srcs.txt
+$J/javac -d /tmp/jout @/tmp/srcs.txt
+
+# 3. run. `-Dlgj.library` is an EXPLICIT request and `Abi.locateLibrary`
+#    refuses to fall back to a search path if it cannot be honoured — by
+#    design, so a run can never silently measure a different artifact.
+$J/java --enable-native-access=ALL-UNNAMED \
+        -Dlgj.library=$PWD/target/release/liblgj_abi.so \
+        -cp /tmp/jout com.adaworldapi.lancegraph.AllTests
+```
+
+**Measured 2026-09-16 on BOTH `Temurin 26.0.2.1` and `openjdk 25.0.4`:
+`ALL PASSED (409 checks)`** across all 16 suites, against `abi 0.11, simd
+ndarray::simd avx512, profile release` — identical on the two JDKs. The
+runtime line the suite prints at the end names the ABI minor, the SIMD backend
+and the library path — read it, because it is what tells you the run exercised
+the artifact you meant.
+
+### What JDK 25 does and does NOT give you
+
+| need | reachable here? | source |
+|---|---|---|
+| **Panama FFM** (`java.lang.foreign`, the whole `internal/ffm` membrane) | **YES** — final since 22 | Ubuntu `openjdk-25-jdk-headless`, or Adoptium `temurin-26-jdk` |
+| the 16-suite `AllTests` run (409 checks) | **YES**, verified on 25 AND 26 | either of the above |
+| `valhalla-lab/src/stable` (records, JDK 26) | **YES** | Adoptium `temurin-26-jdk` |
+| `valhalla-lab/src/valhalla` (**value** records, JDK 27 EA) | not via apt | `https://jdk.java.net/valhalla/` — reachable, `HTTP 200` |
+
+**Only the Valhalla EA arm needs a non-apt fetch, and it is not a gate.**
+Adoptium's noble repo carries 8 through 26 and stops there (`apt-cache search
+temurin` shows no 27+), and mainline 27 would not help anyway — `value record`
+is a Valhalla EA feature, not a mainline one. `https://jdk.java.net/valhalla/`
+**is reachable through this environment's proxy** (verified `HTTP 200`), so
+that build is a download away rather than a blocker. `bench/` and
+`valhalla-lab/` are measurement arms; the merge gate is the Rust suite plus the
+409-check Java run, and both of those are fully reachable here.
+`bench/` and `valhalla-lab/` are measurement arms, NOT gates; the merge gate is
+the Rust suite plus the 409-check Java run, and both are reachable here.
+
+**Consequence for every future session:** "the Java side could not be verified"
+is no longer an acceptable status line for this repo. The Rust half
+(`cargo test` in `native/lgj-abi`) and the Java half (409 checks) are BOTH
+runnable in this container, and a PR that claims the Java surface is unverified
+is claiming something that takes about four minutes to falsify.
+
 ## Missing-capability STOP rule
 
 A consumer or facade that needs a capability the substrate lacks does
