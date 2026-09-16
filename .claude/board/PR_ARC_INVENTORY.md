@@ -10,6 +10,13 @@
 
 ## PR #79 — `hop_cached_vs_gather`: the M1b tile pays off on hop two; the scatter walk is the access-shape question (opened 2026-09-16, merged `9cb63e9`, head `c10029b`)
 
+> **Post-merge backfill, owned (2026-09-16):** this entry was NOT written at
+> open. #79 was opened and merged without its arc entry — the same lapse the
+> header above records for PRs #1–#3 — and the entry below was reconstructed
+> after the merge in PR #80 (Codex P2 on #80 named the omission). Read it as a
+> reconstruction, not as a record made with the change; the numbers are the
+> ones banked in the probe's module doc and `LATEST_STATE.md` at merge time.
+
 **Added.** `native/lgj-abi/examples/hop_cached_vs_gather.rs` — `lgj_hop`'s
 selection three ways at 65 536 rows × 32 facets, every arm asserted
 bit-identical on every frontier before timing: `recompute` (the shipped
