@@ -344,24 +344,50 @@ fn an_error_at_any_position_in_a_plan_leaves_the_destination_untouched() {
 /// every measurement below "a DIFFERENT destination" for free.
 #[test]
 fn scratch_left_dense_by_one_call_does_not_leak_into_the_next() {
-    let everything = [op(LGJ_OP_EQ_U32, LANE_CLASSES, 999, LGJ_COMBINE_OR)];
+    // NOT a single all-OR op. `plan_lower::lower_plan` special-cases a plan
+    // with no AND-combined op at all into `Lowered::AllRows`: it writes
+    // `dst_mask` directly (all-ones, tail cleared) and returns WITHOUT ever
+    // building or running a `Program` — so it never touches the reusable
+    // scratch slots this test exists to exercise. An earlier version of this
+    // fixture (`[op(LGJ_OP_EQ_U32, LANE_CLASSES, 999, LGJ_COMBINE_OR)]`) was
+    // exactly that: a single OR-combined op, so `lower_plan` found no AND
+    // position and took the `AllRows` shortcut every time — the test never
+    // reached the code it claimed to be testing.
+    //
+    // This plan is TWO AND-combined ops instead, which `lower_plan` can only
+    // lower to a real `Program` (the shortcut applies solely when zero ops
+    // combine with AND — see the module doc in `plan_lower.rs`): op 0 writes
+    // scratch slot `plan_lower::ACC_SLOT` (0) directly, op 1 writes the
+    // predicate scratch slot (1) and ANDs it back into slot 0. Both
+    // thresholds sit strictly outside the fixture's own documented `values`
+    // range (`-150..=361`, `fixture.rs`'s `Fixture::generate` doc), so BOTH
+    // predicates are true for every row regardless of seed or row count —
+    // the plan executes for real and still leaves every scratch slot fully
+    // dense, exactly the state this test needs to seed before the selective
+    // call that follows.
+    let everything = [
+        op(LGJ_OP_GE_I32, LANE_VALUES, -1000, LGJ_COMBINE_AND),
+        op(LGJ_OP_LE_I32, LANE_VALUES, 1000, LGJ_COMBINE_AND),
+    ];
     let selective = [
         op(LGJ_OP_EQ_U32, LANE_CLASSES, 7, LGJ_COMBINE_AND),
         op(LGJ_OP_GT_I32, LANE_VALUES, 100, LGJ_COMBINE_AND),
     ];
 
-    // Round A: a call whose scratch ends DENSE (a leading OR saturates the
-    // whole accumulator to all-ones), immediately followed by a selective
-    // call — and then the identical selective call again, to pin
-    // idempotence on the same shared state.
+    // Round A: a call whose scratch ends DENSE — a two-op AND plan whose
+    // predicates are both unconditionally true saturates the accumulator to
+    // all-ones through a REAL program, not through the `AllRows` shortcut —
+    // immediately followed by a selective call — and then the identical
+    // selective call again, to pin idempotence on the same shared state.
     let n1 = 1000u64;
     let p1 = open(n1, 33);
 
     let dense_a: Outcome = assert_agrees(p1, &everything, "round A: dense seeding call");
     assert_eq!(
         dense_a.count, n1,
-        "round A's seeding call must actually saturate every row, or it \
-         never leaves scratch dense in the first place"
+        "round A's seeding call must actually saturate every row through a \
+         real program (both AND'd predicates are unconditionally true), or \
+         it never leaves scratch dense in the first place"
     );
 
     let selective_a: Outcome = assert_agrees(
@@ -410,8 +436,9 @@ fn scratch_left_dense_by_one_call_does_not_leak_into_the_next() {
     );
     assert_eq!(
         dense_b.count, n2,
-        "round B: a leading-OR plan must still select every row, whatever \
-         scratch state the preceding selective call left behind"
+        "round B: an always-true two-op AND plan must still select every \
+         row, whatever scratch state the preceding selective call left \
+         behind"
     );
 
     assert_eq!(lgj_close(p2), LGJ_OK);

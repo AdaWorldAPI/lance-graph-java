@@ -1,5 +1,6 @@
 package com.adaworldapi.lancegraph;
 
+import com.adaworldapi.lancegraph.internal.ffm.Abi;
 import com.adaworldapi.lancegraph.internal.ffm.Engine;
 import com.adaworldapi.lancegraph.internal.ffm.Layouts;
 
@@ -192,9 +193,28 @@ public final class RowStore implements NativeResource, AutoCloseable {
             long careLo64, int careHi32) {
         java.util.Objects.requireNonNull(facet, "facet");
         requireOpen("maskOfFacetTernaryMatch()");
+        // A pure manifest check, no handle touched -- run BEFORE mask is allocated rather than
+        // left solely to Engine.ternaryMatch's own copy of the same guard, so a too-old library
+        // never leaves an orphaned mask behind (there is nothing yet to leak). Engine.ternaryMatch
+        // still carries its own requireMinor(11) too, for any caller that reaches it directly.
+        // Mirrors Mask.ternlog's own reasoning (see that method).
+        Abi.requireMinor(11);
         long mask = Engine.createMask(handle, false);
-        Engine.ternaryMatch(handle, facet.index(), patternLo64, patternHi32, careLo64, careHi32,
-                mask);
+        try {
+            Engine.ternaryMatch(handle, facet.index(), patternLo64, patternHi32, careLo64,
+                    careHi32, mask);
+        } catch (LanceGraphException e) {
+            // The version gate above already passed; a failure here is the actual op --
+            // UNSUPPORTED_LAYOUT on a columnar store (see this method's own javadoc), or a
+            // MASK_LENGTH_MISMATCH. mask was allocated for a Mask this method never got to
+            // construct, so nothing else owns it -- release it before the failure propagates, or
+            // it and its registry slot leak for the life of the process. Mask.closeOnFailure is
+            // package-private "for peers" (the same standing Mask.handle() already grants
+            // RowStore) precisely so this site does not need to reinvent the same
+            // close-then-suppress shape.
+            Mask.closeOnFailure(mask, e);
+            throw e;
+        }
         return new Mask(this, mask);
     }
 
@@ -344,8 +364,21 @@ public final class RowStore implements NativeResource, AutoCloseable {
         java.util.Objects.requireNonNull(facets, "facets");
         java.util.Objects.requireNonNull(src, "src");
         requireOpen("hop()");
+        // Same reasoning as maskOfFacetTernaryMatch() above: a pure manifest check, no handle
+        // touched, run BEFORE dst is allocated rather than left solely to Engine.hop's own copy
+        // of the same guard, so a too-old library never leaves an orphaned mask behind.
+        Abi.requireMinor(4);
         long dst = Engine.createMask(handle, false);
-        Engine.hop(handle, edgeClassid, facets.bits(), 0, src.handle(), dst);
+        try {
+            Engine.hop(handle, edgeClassid, facets.bits(), 0, src.handle(), dst);
+        } catch (LanceGraphException e) {
+            // The version gate above already passed; a failure here is the actual op. dst was
+            // allocated for a Mask this method never got to construct, so nothing else owns it
+            // -- release it before the failure propagates, or it and its registry slot leak for
+            // the life of the process. Reuses Mask.closeOnFailure rather than a second helper.
+            Mask.closeOnFailure(dst, e);
+            throw e;
+        }
         return new Mask(this, dst);
     }
 

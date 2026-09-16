@@ -230,9 +230,24 @@ build):
   not row count — verified fixed-size on both the Rust and Java sides);
   `Abi.java`'s `readCarvings` (bounded by `CARVING_SLOTS`, a manifest
   constant, not n_rows); `Engine.facetSumResolved`'s fixed `long[2]`
-  result pair. None of the five is a hidden proportional-to-n_rows
-  population copy — keep this list exhaustive when a sixth site is added,
-  rather than letting the enumeration silently go stale again.
+  result pair; `View.where()`'s `List.copyOf` of the PREDICATE chain; and
+  `NativePattern.plan()`'s `predicates.stream()…toList()`. None of the
+  seven is a hidden proportional-to-n_rows population copy — keep this list
+  exhaustive when an eighth site is added, rather than letting the
+  enumeration silently go stale again.
+
+  > **⊘ RE-AUDITED 2026-09-16 and the list WAS stale — it claimed five and
+  > the tree had seven.** `View.where()` and `NativePattern.plan()` were
+  > never listed. Both are legitimate, and *why* is the sharper statement of
+  > the rule: they are bounded by the number of predicates the developer
+  > CHAINED, i.e. by the size of the query they typed — never by the data.
+  > So the invariant is not "no allocation on the Java side"; it is
+  > **nothing proportional to ROWS**, and a query-shaped allocation is the
+  > boring front's own size, not the substrate's. The audit that found this
+  > is one grep (`long[]`, `toArray`, `copyOf`, `.stream()` across
+  > `java/src/main`) and it is the check to re-run before citing the list —
+  > the enumeration had already gone stale once under a sentence telling the
+  > next session not to let it.
   Temporary kernel scratch (SIMD scratch masks, decode buffers) is
   allowed and is NOT the same claim as a second canonical copy.
 - **Layout parity is independently derived, not self-compared.**
@@ -327,6 +342,150 @@ simd_{amx,avx512,avx2,           Rust: lgj-abi kernels → ndarray::simd
 > Corollary for any design that reaches for this table: the isomorphism
 > holds at the TOP row (facade ↔ facade) and the BOTTOM row (backends ↔ the
 > Rust floor). It BREAKS in the middle. Do not reason from the middle row.
+
+## THE JAVA SURFACE IS `sql()`, NOT THE MASK ALGEBRA (operator-ruled, 2026-09-16)
+
+**Verbatim, in four parts:**
+
+> *"Java doesnt use masking ops. `Mask.minus()`, `RowStore.hop()`. Lance-graph
+> does. Java just sees boring `sql()` handed to duckdb (Example)."*
+>
+> *"nobody should ever start trying to optimize Java (except making it boring
+> front)."*
+>
+> *"the boringness is then handed to lancegraph as zero copy."*
+>
+> *"and handled akin to ndarray polyfill — java doesnt know why there is
+> `sql()` polyfill, we just make sure there is."*
+
+### What this corrects, by name
+
+⊘ The sentence three paragraphs up — *"offers the menu to the table in a
+pleasing way, **using masking ops**"* — is **struck on those three words**.
+The menu framing survives; the mechanism named in it does not. lance-graph
+uses masking ops. Java does not, must not, and is never told they exist.
+
+⊘ The isomorphism table's top row previously read `Java (View / Mask /
+RowStore / consumers)` as the facade. **`Mask` and `RowStore` are NOT the
+facade** — they are the substrate's algebra standing on the Java side of the
+wall. `Mask.minus()` and `RowStore.hop()` are the operator's own two examples
+of the wrong shape. The facade is the boring call a Java developer already
+knows how to write.
+
+### The polyfill relation is EXACT, and it is the whole design
+
+This is the part that makes the ruling operational rather than stylistic.
+`ndarray::simd` is a facade with **37 functions and zero shipping
+instructions** — a consumer crate calls `U8x64::cmpeq_mask` and has no idea
+whether AVX-512, NEON, wasm or scalar answered it. The consumer does not
+know why the polyfill exists. It only knows it is there.
+
+`sql()` is that, one tier up:
+
+| tier | the caller writes | the caller does not know |
+|---|---|---|
+| consumer crate → ndarray | `U8x64::cmpeq_mask(..)` | which of six backends ran |
+| Java → lance-graph | `sql("select …")` | that masks, ternlog, hops or popcounts exist at all |
+
+**"We just make sure there is one"** is the standing obligation, and it falls
+on the Rust side, never on Java. A missing `sql()` capability is a
+lance-graph/ABI gap to close — exactly as a missing SIMD primitive is an
+`ndarray::simd` gap to close, never a licence for a consumer to write
+intrinsics. This is the MISSING-CAPABILITY STOP RULE already in this file,
+now with its Java-side spelling.
+
+### The three operational consequences
+
+1. **Nobody optimizes Java. Ever.** The only sanctioned work on the Java side
+   is making it **more boring** — more ordinary, more familiar, closer to what
+   a Java developer would have written without us. A PR whose stated goal is a
+   faster Java path is rejected on its goal, before its diff is read. "Boring"
+   is the performance strategy: the speed is elsewhere.
+2. **The boringness is handed down as zero copy.** The ordinary-looking call
+   is not translated, re-encoded, or marshalled. It crosses as a NAME and the
+   bytes stay put — which is what makes the boring surface honest rather than
+   a disguise. Zero-copy is not an optimization applied to the glove; it is
+   the condition under which a boring glove is allowed to exist.
+3. **A mask concept on a public Java signature is a defect**, regardless of
+   how well it works. `java-surface-warden` already blocks byte positions and
+   arithmetic; this ruling adds the population algebra by name — `Mask`,
+   `minus`, `hop`, `ternlog`, `popcount`, lane ids, opcodes. Those are
+   T1/T2 words (see `kernel-membrane-warden`), and T3 does not speak them.
+
+4. **Java never does materialization — and the row count is what proves it**
+   (operator, same day): *"Java never does materialization. A billion rows op
+   is handed behind the front and handled as a masking hattrick nobody knew
+   what's coming."* This is the boring front's load-bearing property, not a
+   performance note. A billion-row operation crosses as a NAME and returns a
+   scalar; the billion never exists on the Java side, in any form, at any
+   moment. That is why the surface can afford to be boring: `sql()` looks
+   identical at 10 rows and at 10^9, because Java's work is the same at both —
+   none.
+
+   **The checkable form of "never":** every public Java call must be
+   **O(1) in rows**, and the ONLY exit is a method whose name begins with
+   `materialize` (today: exactly one, `Mask.materializeRows()`, O(n), stated
+   in its javadoc). The naming rule is not a loophole in "never" — it is the
+   mechanism that makes "never" auditable, because anything proportional to
+   row count that is NOT named that way is a defect by inspection, with no
+   judgement call required. Keep the exhaustive materialization-site list in
+   the zero-copy section current for exactly this reason: an unnamed sixth
+   site is the failure this rule exists to catch.
+
+   **The corollary that bites hardest in review:** a Java-side loop is not
+   merely slow, it is *proof that something was materialized to loop over*.
+   E1 forbids the loop; this forbids the thing that made a loop expressible.
+   Two statements of one rule from opposite ends.
+
+### THE ENDGAME — why "boring" is strategy, not taste (operator, same day)
+
+> *"endgame is make Java low code **'Bring your own software'** to beat
+> palantir foundry at its own game."*
+
+Foundry's proposition is *bring your data to our platform* — and then learn
+its ontology tooling, its pipeline builder, its workshop, its idioms. The
+learning curve is not a cost of the product; **it IS the product**, because
+every hour a customer spends learning it is an hour of lock-in that a
+competitor must refund before they can switch.
+
+BYOS inverts exactly that: **bring your own software.** The customer keeps
+their Java, their SQL, their JDBC-shaped habits, their existing build — and
+the substrate is underneath without them learning a new vocabulary to reach
+it. Nothing to port, nothing to adopt, nothing to unlearn if they leave.
+
+**This is what makes each of the three consequences above non-negotiable
+rather than stylistic:**
+
+- **Novel API is the enemy, not slow API.** `Mask.minus()` is something a
+  customer must LEARN; `sql()` is something they already know. Every unit of
+  novelty on the Java surface is a unit of Foundry-shaped lock-in-by-curve —
+  built by us, against our own pitch. That is why optimizing Java loses the
+  game even when it succeeds: optimization on that side produces novel API,
+  and novel API is precisely the thing BYOS promises not to require.
+- **"Boring" is therefore the competitive moat, measured as absence.** The
+  win condition is that a Java developer writes what they would have written
+  anyway and the result arrives at substrate speed. There is no demo of this
+  that looks impressive — it looks like nothing happened, which is the point.
+- **The advantage must live where the customer does not have to look.** Speed
+  comes from lance-graph and ndarray; the customer gets it by writing ordinary
+  code. A surface that has to be studied to be fast has already conceded the
+  argument, however fast it then is.
+
+**Practical test for any proposed Java-side addition:** *would a customer who
+has never read our documentation write this line by accident, from habit
+alone?* If yes, it is a candidate. If it needs a paragraph of explanation, it
+is Foundry's business model with our name on it — reject it and close the gap
+on the Rust side instead.
+
+### Scope — what this does NOT do
+
+It does not delete `Mask` or `RowStore` today. They exist, they are tested,
+and the four leak-on-throw fixes that landed with this ruling make existing
+code correct rather than expanding it. What the ruling settles is the
+DIRECTION: the boring `sql()`-shaped surface is the target, the mask algebra
+is not to be grown on the Java side, and no future session may cite the
+struck sentence above as licence to add another `Mask.*` verb.
+
 
 Measured grounding (2026-08-27, in-tree): `simd.rs` is 37 functions and
 ZERO shipping instructions — every raw intrinsic in it sits inside

@@ -204,8 +204,23 @@ fn per_call_allocation_does_not_depend_on_the_row_count() {
     // used and smaller than the largest already seen. A monotonically grown
     // arena carves a prefix and allocates nothing extra; a cache keyed by row
     // count allocates here and only here.
+    //
+    // The divisibility check below is not decoration — skipping it (as an
+    // earlier version of this arm did, dividing straight into `unseen_bytes`)
+    // is a real gap: a ONE-OFF allocation smaller than `REPS` bytes on the
+    // very first `UNSEEN` call — exactly what a row-count-keyed cache would
+    // produce, populating its entry once and never again — truncates to zero
+    // under plain integer division and reads as identical to `baseline`,
+    // hiding precisely the defect this arm exists to catch.
     let (_, up, um) = unseen;
-    let unseen_bytes = measure(up, um, &ops) / REPS;
+    let unseen_raw_bytes = measure(up, um, &ops);
+    assert_eq!(
+        unseen_raw_bytes % REPS,
+        0,
+        "n={UNSEEN}: {unseen_raw_bytes} bytes is not a clean per-call figure \
+         over {REPS} reps"
+    );
+    let unseen_bytes = unseen_raw_bytes / REPS;
 
     let baseline = per_call[0].1;
     for &(n, bytes) in &per_call {

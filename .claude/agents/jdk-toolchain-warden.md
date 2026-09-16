@@ -85,6 +85,20 @@ somewhere else**, and Java is never told. That fluency is exactly what a
 menu" and "a pleasing menu that lies about what the kitchen did." Shipping it
 unverified forfeits the product, not a test.
 
+> **⊘ CORRECTED, same day — the menu is BORING, and the example above is the
+> wrong one.** Operator: *"Java doesnt use masking ops. `Mask.minus()`,
+> `RowStore.hop()`. Lance-graph does. Java just sees boring `sql()` handed to
+> duckdb."* and *"nobody should ever start trying to optimize Java (except
+> making it boring front)."* So `view.where(..).hop(..).count()` is the mask
+> algebra on the wrong side of the wall, not the product. Read the paragraph
+> above with `sql("select …")` in its place; every word of it still holds, and
+> the reason the 409-check run matters is unchanged — it is what keeps a
+> boring surface honest instead of a disguise, since **the boringness is handed
+> down zero-copy**. The endgame: low-code *"Bring your own software"* against
+> Palantir Foundry, where novel API is lock-in-by-learning-curve and therefore
+> the enemy. Full ruling: `CLAUDE.md` § "THE JAVA SURFACE IS `sql()`, NOT THE
+> MASK ALGEBRA".
+
 The allocation the menu sits on (operator, same day):
 
 | what | lives in | membrane that keeps Java out of it |
