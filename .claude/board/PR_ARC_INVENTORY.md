@@ -8,6 +8,46 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #79 — `hop_cached_vs_gather`: the M1b tile pays off on hop two; the scatter walk is the access-shape question (opened 2026-09-16, merged `9cb63e9`, head `c10029b`)
+
+**Added.** `native/lgj-abi/examples/hop_cached_vs_gather.rs` — `lgj_hop`'s
+selection three ways at 65 536 rows × 32 facets, every arm asserted
+bit-identical on every frontier before timing: `recompute` (the shipped
+body: per facet two contiguous `eq_u32` passes + `ternlog<AND3>` + scatter),
+`cached` (`sel_f = class_f ∧ struct_f` built once per store generation —
+32 × 8 KiB = 256 KiB, the §9 M1b tile keyed `(generation, edge_classid)` —
+then one `mask_and` per facet + scatter), `gather` (the scalar row walk on
+AosRows, the access-shape baseline, not a candidate). `LATEST_STATE.md`
+entry with the full table. No ABI symbol, no Java change.
+
+**Measured** (Xeon 2.10 GHz, `avx512f=true`, release, median of 7, two
+runs, every output `black_box`ed inside its timed closure): cache build
+843–930 µs; cached **14.4–15.0 / 31.8–33.0 / 96–100 / 159–196 /
+903–1 056 µs** across rand7 / rand655 / classid / hop2 / all, against
+recompute 728–1 779 µs — break-even **0.9–1.3 hops** at every frontier.
+
+**Locked.** *A store generation's predicates do not change between hops;
+re-deriving them per hop is 64 contiguous 256 KiB passes for nothing.* The
+scatter is `O(N/64 + selected bits)` per facet (it walks every word of
+`selected` before it can know which are empty), not O(frontier) —
+CodeRabbit's correction, carried into the doc and the board.
+
+**Deferred.** Invalidation cost (a write to any classid/hi32 lane drops all
+32 masks — the registry already does this wholesale for `cached_carving`);
+the per-`edge_classid` multiplication of the 256 KiB; and the operator's
+actual question — inside the random-access scatter walk, decide a visited
+row's 32 facets with one zmm `mask_cmpeq_epi32` per 4 facets (8 loads) or
+one xmm compare per facet, instead of the scalar 64-load / 64-branch loop
+(`gather_xmm` / `gather_zmm_row`, named, not built).
+
+**Review.** Codex P1 (timed closures returned `()`, outputs unread — LLVM
+could drop the scatter stores): fixed, re-measured, every number held.
+CodeRabbit: the O(frontier) claim, fixed; docstring-coverage warning
+(40 %) on private helpers, not addressed. Bugbot: usage limit, no run.
+
+**Confidence.** HIGH on the numbers (two runs, ranges banked). The
+access-granularity arms are unmeasured; the door is named, not opened.
+
 ## PR #77 — first CI lint gate: fmt + clippy + rust-test, Rust pinned to 1.98.1 (opened 2026-09-05, head `6d4b1a2`)
 
 **Added.** `.github/workflows/lint.yml` (three jobs: `format`, `clippy`,
