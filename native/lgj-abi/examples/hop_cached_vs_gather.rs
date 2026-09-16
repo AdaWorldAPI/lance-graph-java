@@ -16,50 +16,21 @@
 //!
 //! Every arm is asserted bit-identical on every frontier before timing.
 //!
-//! # Measured 2026-09-16 — Xeon @ 2.10 GHz, `avx512f=true`, release, median of 7
+//! # Measured 2026-09-16 — Xeon @ 2.10 GHz, `avx512f=true`, release, median of 7, 2 runs
 //!
-//! Cache build (32 × `sel_f`): **850 µs**, 256 KiB resident.
+//! Every output buffer is `black_box`ed inside its timed closure (Codex P1 on
+//! #79: with `()`-returning closures and outputs never read, LLVM may drop the
+//! scatter stores; re-measured with them observed — the numbers held).
 //!
-//! | frontier | \|src\| | \|dst\| | recompute µs | **cached µs** | gather µs | cached vs recompute | cached vs gather | break-even |
-//! |---|---:|---:|---:|---:|---:|---:|---:|---:|
-//! | rand7 | 7 | 11 | 756 | **15.5** | 0.8 | 48.8× | 0.05× | 1.1 hops |
-//! | rand655 | 655 | 1 279 | 853 | **28.0** | 26.5 | 30.4× | 0.95× | 1.0 hops |
-//! | classid | 3 933 | 6 943 | 773 | **78.4** | 395 | 9.9× | 5.0× | 1.2 hops |
-//! | hop2 | 6 943 | 12 125 | 848 | **141** | 617 | 6.0× | 4.4× | 1.2 hops |
-//! | all | 65 536 | 56 841 | 1 395 | **797** | 3 022 | 1.8× | 3.8× | 1.4 hops |
-//!
-//! **The cache pays for itself on the SECOND hop** (break-even 1.0–1.4 hops
-//! at every frontier), because a store generation's predicates do not change
-//! between hops and the shipped body recomputes 64 contiguous 256 KiB passes
-//! per hop to re-derive them. What is left per hop is one 8 KiB `mask_and`
-//! per facet (≤ 5 µs total) plus the scatter, which is O(frontier) and now the
-//! whole cost above ~1 %.
-//!
-//! **Cached beats the gather from ~1 % up (0.95× at 655 rows, 5× at the
-//! classid frontier, 3.8× at the full population)** and loses below it —
-//! at 7 rows the gather is 0.8 µs against 15.5 µs, and those 15.5 µs are
-//! 32 × (8 KiB `mask_and` + a 1 024-word scatter walk over a nearly empty
-//! mask): the same word-walk floor `ternlogq_sparse_reapply_probe` measured.
-//! The crossover is where R1's "any whole-plane op is O(population)" boundary
-//! sits: below ~1 % the population serialization is cheaper in absolute
-//! terms, and the doctrine still declines it (lgj `LATEST_STATE` 2026-08-27).
-//!
-//! What this does NOT measure: the invalidation cost (a write to any facet's
-//! classid or hi32 lane of the store generation drops all 32 masks), and a
-//! per-`edge_classid` cache multiplies the 256 KiB by the number of edge
-//! classes queried. The tile is keyed `(generation, edge_classid)` per M1b.
-//!
-//! # Measured 2026-09-16 — Xeon @ 2.10 GHz, `avx512f=true`, release, median of 7
-//!
-//! Cache build (32 × `sel_f`): **850 µs**, 256 KiB resident.
+//! Cache build (32 × `sel_f`): **843–930 µs**, 256 KiB resident.
 //!
 //! | frontier | src | dst | recompute µs | **cached µs** | gather µs (scalar walk) | break-even |
 //! |---|---:|---:|---:|---:|---:|---:|
-//! | rand7 | 7 | 11 | 756 | **15.5** | 0.8 | 1.1 hops |
-//! | rand655 | 655 | 1 279 | 853 | **28.0** | 26.5 | 1.0 hops |
-//! | classid | 3 933 | 6 943 | 773 | **78.4** | 395 | 1.2 hops |
-//! | hop2 | 6 943 | 12 125 | 848 | **141** | 617 | 1.2 hops |
-//! | all | 65 536 | 56 841 | 1 395 | **797** | 3 022 | 1.4 hops |
+//! | rand7 | 7 | 11 | 728–782 | **14.4–15.0** | 0.8 | 1.2 hops |
+//! | rand655 | 655 | 1 279 | 855–864 | **31.8–33.0** | 34.7–36.1 | 1.0–1.1 hops |
+//! | classid | 3 933 | 6 943 | 947–954 | **96–100** | 462–632 | 1.0–1.1 hops |
+//! | hop2 | 6 943 | 12 125 | 1 019–1 102 | **159–196** | 705–758 | 0.9–1.1 hops |
+//! | all | 65 536 | 56 841 | 1 630–1 779 | **903–1 056** | 3 583–3 863 | 1.2–1.3 hops |
 //!
 //! **The cached tile pays for itself on the second hop** (break-even 1.0–1.4
 //! hops at every frontier): a store generation's predicates do not change
@@ -286,7 +257,8 @@ fn main() {
                 &mut out_r,
                 &mut sel,
                 &mut st,
-            )
+            );
+            black_box(&out_r);
         });
         let t_c = time_us(|| {
             hop_cached(
@@ -295,9 +267,13 @@ fn main() {
                 black_box(src),
                 &mut out_c,
                 &mut sel,
-            )
+            );
+            black_box(&out_c);
         });
-        let t_g = time_us(|| hop_gather(black_box(&aos), black_box(src), &mut out_g));
+        let t_g = time_us(|| {
+            hop_gather(black_box(&aos), black_box(src), &mut out_g);
+            black_box(&out_g);
+        });
         println!(
             "{:<9} {:>7} {:>7} | {:>11.1} {:>10.1} {:>10.1} | {:.1}x, {:.2}x   break-even {:.1} hops",
             name, n_src, n_dst, t_r, t_c, t_g, t_r / t_c, t_g / t_c, t_build / (t_r - t_c).max(1e-9)
