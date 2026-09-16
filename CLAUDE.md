@@ -300,7 +300,26 @@ simd_{amx,avx512,avx2,           Rust: lgj-abi kernels → ndarray::simd
 > **What they are FOR, stated positively** (operator, same day): *Java is
 > the low-code thin surface over zero-copy, with methods that look so
 > natural and still compute in lance-graph — Java just thinks it's on
-> steroids without knowing why.* The fluency of `view.where(..).hop(..)
+> steroids without knowing why.*
+>
+> Sharpened 2026-09-16, and this is the sentence to keep: *"java is the low
+> code intake GLOVE around the lance-graph spine — lance-graph-java just
+> happens to offer the MENU TO THE TABLE in a pleasing way, using masking ops,
+> offering 5 star for the price of a blink."* The menu is the product. The
+> kitchen is elsewhere and the diner never sees it; what makes the menu honest
+> rather than a disguise is that the work and the data genuinely never cross.
+> The whole allocation, same ruling:
+>
+> | what | lives in | membrane that keeps Java out of it |
+> |---|---|---|
+> | **thinking** | lance-graph | **Panama** |
+> | **SIMD** | ndarray | the `ndarray::simd` facade |
+> | **storage** | lance-graph | **Valhalla** |
+>
+> Note both membranes name the SAME home for two different things — thinking
+> and storage are both lance-graph's, and Panama and Valhalla are two
+> orthogonal ways of keeping Java out of them. That is why the middle row of
+> the table above is wrong: they are not one layer. The fluency of `view.where(..).hop(..)
 > .count()` is real; the work and the data are both elsewhere; and Java is
 > never told. Zero-copy is what makes the naturalness honest rather than a
 > disguise — there is no hidden hydration behind the nice method name.
@@ -355,16 +374,38 @@ the signal the substrate is missing a word.
 `internal.*` in any public signature — the exact analog of "all SIMD from
 `ndarray::simd`, never `simd_{arch}`, never raw intrinsics".
 
-## The JDK is one apt command away — never skip the Java half (2026-09-16)
+## Never skip the Java half — check FOUR places before saying "no JDK" (2026-09-16)
 
 **Operator ruling: document this so no future session runs without Panama at
 all.** This repo's history contains commits titled *"UNVERIFIED: JDK 26 not
-available in this sandbox"*. That conclusion was wrong in the only way that
-matters — it was never re-tested after an `apt-get update`. **JDK 25 installs
-from Ubuntu's own archive in one command, gives FINAL Panama FFM (final since
-22), and runs the entire Java suite green.** A session that reports "no JDK
-here" without running the three commands below is reporting a stale index, not
-a fact about the container.
+available in this sandbox"*, and the Java half of an ABI-minor-11 change went
+to PR on that basis.
+
+> ⊘ **The first version of this section, written earlier the same day, led with
+> the apt route and was itself misleading.** Re-checked: **`/opt/jdks/jdk-26.0.2`
+> was present the whole time** (26.0.2.1), the suite runs `ALL PASSED (409
+> checks)` on it, and `.claude/knowledge/jdk-toolchain-facts.md` had already
+> named that exact path. Nothing needed installing. The session looked at
+> `java -version` and `/usr/lib/jvm` — **neither of which sees `/opt/jdks`** —
+> and inferred absence. So the apt routes below are a RECOVERY path, not the
+> answer; the answer is `ls /opt/jdks`.
+
+**The rungs, in order. Report "no JDK" only after all four fail.**
+
+```sh
+ls -d /opt/jdks/*/ && for d in /opt/jdks/*/; do "$d/bin/java" -version; done   # 1
+ls /usr/lib/jvm/                                                              # 2
+```
+
+Rung 1 is the production path this repo pins, and it is the one that was
+missed. `which java` answers "what is on PATH", never "what is installed" — it
+is not evidence about the second question. Full ladder with the
+verified-by-execution table: `.claude/knowledge/jdk-toolchain-facts.md`
+§ ACQUISITION LADDER; the guard is `.claude/agents/jdk-toolchain-warden.md`.
+
+Rungs 3 and 4 are apt, and matter when `/opt/jdks` is absent — which it may
+well be in a rebuilt container, since **`/opt/jdks/jdk-27` (the JEP 401
+Valhalla EA build) is already GONE from this one.**
 
 **JDK 26 — the version this repo's own commits targeted — needs ONE extra apt
 source, and Ubuntu's stock archive alone will never offer it.** Add Adoptium
@@ -444,10 +485,8 @@ temurin` shows no 27+), and mainline 27 would not help anyway — `value record`
 is a Valhalla EA feature, not a mainline one. `https://jdk.java.net/valhalla/`
 **is reachable through this environment's proxy** (verified `HTTP 200`), so
 that build is a download away rather than a blocker. `bench/` and
-`valhalla-lab/` are measurement arms; the merge gate is the Rust suite plus the
-409-check Java run, and both of those are fully reachable here.
-`bench/` and `valhalla-lab/` are measurement arms, NOT gates; the merge gate is
-the Rust suite plus the 409-check Java run, and both are reachable here.
+`valhalla-lab/` are measurement arms, NOT gates; the merge gate is the Rust
+suite plus the 409-check Java run, and both are reachable here.
 
 **Consequence for every future session:** "the Java side could not be verified"
 is no longer an acceptable status line for this repo. The Rust half
