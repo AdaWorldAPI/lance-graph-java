@@ -1,3 +1,59 @@
+## 2026-09-16 — `hop_cached_vs_gather`: the M1b tile pays off on the second hop; the scatter walk is the access-shape question
+
+**PR #79**, `native/lgj-abi/examples/hop_cached_vs_gather.rs` only — no ABI
+symbol, no Java change. Operator framing: not "is the gather faster" (R1 ruled
+the population serialization out) but *cached mask vs gather* as two shapes of
+the same selection, and then — for the random-access walk that remains — *"ob
+du bei kleinteiligen Aufgaben aus der Not eine Tugend machst und die
+kleinteilige Operation verwendest"*.
+
+**Three arms, all bit-identical on every frontier before timing**
+(65 536 rows × 32 facets, `avx512f=true`, release, median of 7, two runs,
+every output `black_box`ed inside its timed closure — Codex P1 on #79):
+
+| arm | per hop |
+|---|---|
+| `recompute` | the shipped `lgj_hop` body on FacetMajor: per facet two contiguous `eq_u32` passes + one `ternlog<AND3>` + scatter |
+| `cached` | `sel_f = class_f ∧ struct_f` built ONCE per store generation (32 × 8 KiB = **256 KiB**, the §9 M1b tile keyed `(generation, edge_classid)`); per hop one `mask_and` per facet + scatter |
+| `gather` | the scalar row-walk on AosRows (PR #40's shape) — the access-shape BASELINE, not a candidate |
+
+Cache build: **843–930 µs**.
+
+| frontier | src | dst | recompute µs | **cached µs** | gather µs | break-even |
+|---|---:|---:|---:|---:|---:|---:|
+| rand7 | 7 | 11 | 728–782 | **14.4–15.0** | 0.8 | 1.2 hops |
+| rand655 | 655 | 1 279 | 855–864 | **31.8–33.0** | 34.7–36.1 | 1.0–1.1 |
+| classid | 3 933 | 6 943 | 947–954 | **96–100** | 462–632 | 1.0–1.1 |
+| hop2 | 6 943 | 12 125 | 1 019–1 102 | **159–196** | 705–758 | 0.9–1.1 |
+| all | 65 536 | 56 841 | 1 630–1 779 | **903–1 056** | 3 583–3 863 | 1.2–1.3 |
+
+- **The tile pays for itself on the second hop at every frontier.** A store
+  generation's predicates do not change between hops; the shipped body
+  re-derives them with 64 contiguous 256 KiB passes per hop. With the tile,
+  what is left is ≤ 5 µs of `mask_and` plus the scatter, which is
+  `O(N/64 + selected bits)` per facet (it walks every word of `selected`
+  before knowing which are empty — CodeRabbit on #79 corrected an
+  "O(frontier)" claim here) and the whole cost above ~1 %.
+- **Not measured here:** invalidation (a write to any classid/hi32 lane of the
+  generation drops all 32 masks — the registry already does this wholesale for
+  `cached_carving`), and the cache multiplies by the number of edge classes
+  queried.
+- **The open question the gather column sets up** (the operator's actual
+  point): inside the random-access scatter walk, use the op that matches the
+  access granularity — one zmm `mask_cmpeq_epi32` per 4 facets deciding all 32
+  facets of a visited row in 8 loads (the `simd_rowstore_facet_match` shape,
+  plus the hi32 == 0 gate on lane 3), or one xmm compare per facet — instead
+  of the scalar 64-load / 64-branch loop. Arms `gather_xmm` / `gather_zmm_row`
+  are named in the module doc and NOT built. A facet is one xmm; a row is
+  eight zmm; the shipped `emit` reads neither as such.
+
+Cross-refs, same day: ndarray #311 (the `VPTERNLOGQ` tail descent 5–8× on
+1..7-word masks — `CallMask [u64; 3]` 18.1 → 2.3 ns — and the sparse
+re-apply probe showing a 64×2 rung is NOT the tool on a full-width 1 024-word
+mask, ≤ 1.24× from zmm chunk-skip only); lance-graph #1241 (the facet's
+per-axis LCP read straight off the `u128` masked to the axis bytes, 12.5 →
+5.8 ns for both axes — the `"{0}{1}" -f` done once at mint, never per call).
+
 ## 2026-09-14 (6) — the lowering differential: one law, two implementations, finally compared
 
 `plan_lower` lowers a FLAT OP LIST (a left fold seeded with all-ones,
