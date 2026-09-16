@@ -30,8 +30,10 @@ Cache build: **843–930 µs**.
 - **The tile pays for itself on the second hop at every frontier.** A store
   generation's predicates do not change between hops; the shipped body
   re-derives them with 64 contiguous 256 KiB passes per hop. With the tile,
-  what is left is ≤ 5 µs of `mask_and` plus the scatter, which is O(frontier)
-  and the whole cost above ~1 %.
+  what is left is ≤ 5 µs of `mask_and` plus the scatter, which is
+  `O(N/64 + selected bits)` per facet (it walks every word of `selected`
+  before knowing which are empty — CodeRabbit on #79 corrected an
+  "O(frontier)" claim here) and the whole cost above ~1 %.
 - **Not measured here:** invalidation (a write to any classid/hi32 lane of the
   generation drops all 32 masks — the registry already does this wholesale for
   `cached_carving`), and the cache multiplies by the number of edge classes

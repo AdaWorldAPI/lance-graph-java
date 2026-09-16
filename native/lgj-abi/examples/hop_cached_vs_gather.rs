@@ -36,8 +36,11 @@
 //! hops at every frontier): a store generation's predicates do not change
 //! between hops, and the shipped body re-derives them with 64 contiguous
 //! 256 KiB passes per hop. What remains per hop is one 8 KiB `mask_and` per
-//! facet (≤ 5 µs) plus the scatter, which is O(frontier) and is the whole
-//! cost above ~1 %.
+//! facet (≤ 5 µs) plus the scatter, which is `O(N/64 + selected bits)` per
+//! facet — it walks every word of `selected` before it can know which are
+//! empty (the same word-walk floor `ternlogq_sparse_reapply_probe` measured,
+//! ~360 ns at 1 024 words), then one payload read per set bit — and is the
+//! whole cost above ~1 %.
 //!
 //! The `gather` column is NOT a competitor to the mask (R1 ruled the
 //! population serialization out); it is the baseline for the *access shape*
