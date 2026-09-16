@@ -32,7 +32,7 @@
 //! | hop2 | 6 943 | 12 125 | 1 019–1 102 | **159–196** | 705–758 | 0.9–1.1 hops |
 //! | all | 65 536 | 56 841 | 1 630–1 779 | **903–1 056** | 3 583–3 863 | 1.2–1.3 hops |
 //!
-//! **The cached tile pays for itself on the second hop** (break-even 1.0–1.4
+//! **The cached tile pays for itself on the second hop** (break-even 0.9–1.3
 //! hops at every frontier): a store generation's predicates do not change
 //! between hops, and the shipped body re-derives them with 64 contiguous
 //! 256 KiB passes per hop. What remains per hop is one 8 KiB `mask_and` per
