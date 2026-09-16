@@ -53,6 +53,95 @@ pub fn simd_gt_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]
     ndarray::simd::gt_i32_to_mask(values, threshold, out_words);
 }
 
+// ── The comparison family (ABI minor >= 11, docs/abi.md §19) ────────────────
+//
+// Six more predicates, ZERO new ABI symbols: each is an `LgjOpDesc` op-code,
+// so they arrive through `lgj_plan_eval` — fused with any number of siblings
+// in one crossing, or alone (`n_ops = 1`, whose all-set accumulator makes the
+// result exactly `op0`). `LgjOpDesc.op` is the generalisation vehicle this ABI
+// already carries for predicates, and using it is why §1's "growth is a design
+// smell" is respected rather than argued around.
+//
+// Every one is ONE delegation. None re-derives a complement or a tail: the
+// facade owns both (`ge` is `lt` complemented WITH the tail re-cleared, `ne_i32`
+// is a single two-compare pass so its tail is zero by construction), and
+// duplicating that reasoning here would be a second surface to keep in step.
+
+/// `out_words[i-th bit] = (values[i] != needle)`, fully overwriting.
+#[inline]
+pub fn simd_ne_u32_to_mask(values: &[u32], needle: u32, out_words: &mut [u64]) {
+    ndarray::simd::ne_u32_to_mask(values, needle, out_words);
+}
+
+/// `out_words[i-th bit] = (values[i] == needle)`, signed lanes, exact.
+#[inline]
+pub fn simd_eq_i32_to_mask(values: &[i32], needle: i32, out_words: &mut [u64]) {
+    ndarray::simd::eq_i32_to_mask(values, needle, out_words);
+}
+
+/// `out_words[i-th bit] = (values[i] != needle)`, signed lanes.
+#[inline]
+pub fn simd_ne_i32_to_mask(values: &[i32], needle: i32, out_words: &mut [u64]) {
+    ndarray::simd::ne_i32_to_mask(values, needle, out_words);
+}
+
+/// `out_words[i-th bit] = (values[i] < threshold)`, signed, strict.
+///
+/// Exact at `i32::MIN`: the facade lowers it as `threshold > values[i]`, never
+/// as `values[i] > threshold - 1`, so the bottom of the range does not wrap.
+#[inline]
+pub fn simd_lt_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]) {
+    ndarray::simd::lt_i32_to_mask(values, threshold, out_words);
+}
+
+/// `out_words[i-th bit] = (values[i] <= threshold)`, signed.
+#[inline]
+pub fn simd_le_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]) {
+    ndarray::simd::le_i32_to_mask(values, threshold, out_words);
+}
+
+/// `out_words[i-th bit] = (values[i] >= threshold)`, signed.
+#[inline]
+pub fn simd_ge_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]) {
+    ndarray::simd::ge_i32_to_mask(values, threshold, out_words);
+}
+
+/// TCAM over a contiguous `U32` lane: `((values[i] ^ pattern) & care) == 0` —
+/// equality on the bits `care` selects, "don't care" elsewhere.
+///
+/// `care == 0` matches every element; `care == u32::MAX` is exact equality.
+/// The facade lowers it as ONE `ternlog::<XOR_AND>` per 16 lanes plus a
+/// compare-against-zero, which is why this is a genuine primitive rather than
+/// an XOR followed by an AND followed by a compare.
+#[inline]
+pub fn simd_ternary_match_u32_to_mask(
+    values: &[u32],
+    pattern: u32,
+    care: u32,
+    out_words: &mut [u64],
+) {
+    ndarray::simd::ternary_match_u32_to_mask(values, pattern, care, out_words);
+}
+
+/// The 64-bit sibling of [`simd_ternary_match_u32_to_mask`].
+///
+/// **Deliberately not reachable across the membrane, and that is a NAMED GAP
+/// rather than an oversight** (`docs/abi.md` §19): its `pattern` + `care` is
+/// 128 bits and `LgjOpDesc.operand` carries 64, so it cannot become an op-code
+/// without growing the descriptor — which would not be an additive change.
+/// It lands here, tested, so the capability exists at the substrate tier the
+/// moment a caller earns it, which is the direction the Missing-capability
+/// STOP rule requires.
+#[inline]
+pub fn simd_ternary_match_u64_to_mask(
+    values: &[u64],
+    pattern: u64,
+    care: u64,
+    out_words: &mut [u64],
+) {
+    ndarray::simd::ternary_match_u64_to_mask(values, pattern, care, out_words);
+}
+
 /// `dst = a & b`. `dst` must not alias `a` or `b` (Rust's borrow rules enforce
 /// it here; the aliasing ABI cases route to the `_assign` forms instead).
 #[inline]
@@ -94,6 +183,67 @@ pub fn simd_mask_andnot_assign(dst: &mut [u64], src: &[u64]) {
     ndarray::simd::mask_andnot_assign(dst, src);
 }
 
+// ── XOR / NOT / ANY / ALL (ABI minor >= 11, docs/abi.md §19) ────────────────
+//
+// All four are substrate-tier primitives here. Only XOR and NOT are reachable
+// across the membrane, and neither as its own symbol: both are immediates to
+// `lgj_mask_ternlog` (`XOR2 = 0x3C`, `NOT_A = 0x0F`). ANY and ALL are
+// deliberately NOT exported — see `docs/abi.md` §19's "what is not a symbol,
+// and why": both are exact functions of `lgj_mask_count`'s answer, cost the
+// same one crossing and the same one pass over the mask words, and so buy a
+// caller nothing that it does not already have.
+
+/// `dst = a ^ b` — symmetric difference.
+///
+/// XOR preserves the trailing-zero guarantee iff both inputs conform
+/// (`0 ^ 0 = 0`); this crate re-establishes it defensively anyway at every
+/// export, exactly as `lgj_mask_andnot` documents for the complement.
+#[inline]
+pub fn simd_mask_xor(a: &[u64], b: &[u64], dst: &mut [u64]) {
+    ndarray::simd::mask_xor(a, b, dst);
+}
+
+/// `dst ^= src`.
+#[inline]
+pub fn simd_mask_xor_assign(dst: &mut [u64], src: &[u64]) {
+    ndarray::simd::mask_xor_assign(dst, src);
+}
+
+/// `dst = !src` over `n_rows` rows — the TAIL-AWARE complement.
+///
+/// `n_rows` is a parameter and not an inference, because it has to be: a plain
+/// `!` over the words sets every bit past the population, and the tail's zero
+/// is normative here (`lgj_mask_count` reads it). This is the one mask-algebra
+/// primitive whose correctness cannot be stated without the row count.
+#[inline]
+pub fn simd_mask_not(src: &[u64], n_rows: usize, dst: &mut [u64]) {
+    ndarray::simd::mask_not(src, n_rows, dst);
+}
+
+/// `dst = !dst` over `n_rows` rows, in place. Same tail contract as
+/// [`simd_mask_not`].
+#[inline]
+pub fn simd_mask_not_assign(dst: &mut [u64], n_rows: usize) {
+    ndarray::simd::mask_not_assign(dst, n_rows);
+}
+
+/// `true` iff any row is selected — the `EXISTS` terminal.
+///
+/// Takes no `n_rows`: it relies on the normative tail-zero contract every
+/// writer in this crate re-establishes, which is exactly why that contract is
+/// defended defensively rather than inherited.
+#[inline]
+pub fn simd_mask_any(words: &[u64]) -> bool {
+    ndarray::simd::mask_any(words)
+}
+
+/// `true` iff every one of the first `n_rows` rows is selected. A zero-row
+/// population is vacuously `true`.
+#[inline]
+pub fn simd_mask_all(words: &[u64], n_rows: usize) -> bool {
+    ndarray::simd::mask_all(words, n_rows)
+}
+
 /// The truth-table immediates for [`simd_mask_ternlog_assign`] — re-exported
 /// so a call site in `exports` names `kernels::ternlog::AND3`, never reaching
 /// past this module for its SIMD vocabulary (abi.md §8).
@@ -112,10 +262,143 @@ pub fn simd_mask_ternlog_assign<const IMM: i32>(a: &mut [u64], b: &[u64], c: &[u
     ndarray::simd::mask_ternlog_assign::<IMM>(a, b, c);
 }
 
+/// `dst = ternlog::<IMM>(a, b, c)` — the out-of-place form, `dst` distinct
+/// from all three operands.
+///
+/// Not reached by any export today (`lgj_mask_ternlog` snapshots its operands
+/// and runs the in-place form, which is what makes every aliasing case one
+/// code path — see that symbol's doc). It lands here because the substrate
+/// tier is where a primitive belongs, and because the parity tests below need
+/// the non-aliasing spelling to check the aliasing one against.
+#[inline]
+pub fn simd_mask_ternlog<const IMM: i32>(a: &[u64], b: &[u64], c: &[u64], dst: &mut [u64]) {
+    ndarray::simd::mask_ternlog::<IMM>(a, b, c, dst);
+}
+
+/// One monomorphisation of [`simd_mask_ternlog_assign`], as a value.
+type TernlogAssignFn = fn(&mut [u64], &[u64], &[u64]);
+
+/// Expand one row of sixteen consecutive immediates.
+macro_rules! ternlog_row16 {
+    ($base:expr) => {
+        [
+            simd_mask_ternlog_assign::<{ $base }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 1 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 2 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 3 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 4 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 5 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 6 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 7 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 8 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 9 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 10 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 11 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 12 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 13 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 14 }> as TernlogAssignFn,
+            simd_mask_ternlog_assign::<{ $base + 15 }> as TernlogAssignFn,
+        ]
+    };
+}
+
+/// Every immediate, as a function pointer to its own monomorphisation.
+///
+/// # Why a TABLE and not a runtime truth-table evaluation
+///
+/// `IMM` is a *runtime* `u8` at the membrane and a *compile-time* `i32` at the
+/// facade, and closing that gap is this table's entire job. The tempting
+/// alternative — decompose the immediate into its eight minterms and OR them
+/// word-wise — is wrong here for a stated reason, not a preference: `ndarray`'s
+/// POLYFILL LAW puts truth-table specialisation *inside the backend file*
+/// (`VPTERNLOGQ` is one instruction per 512 bits on AVX-512, and each backend
+/// owns its own realization). A minterm decomposition would evaluate the table
+/// HERE, in this crate, in ~24 word ops instead of one — which is both slower
+/// and a locally-written SIMD abstraction, the thing `abi.md` §8 forbids
+/// outright. Reaching the const generic is what keeps the specialisation where
+/// the law puts it.
+///
+/// Indexed `[imm >> 4][imm & 15]`, so it is a `[[_; 16]; 16]` rather than a
+/// flat 256 purely to keep the source a 16-line list instead of a 256-line one.
+/// A `static` rather than a `const` so the 256 instantiations exist once in the
+/// artifact instead of being re-materialised at every use site.
+static TERNLOG_ASSIGN: [[TernlogAssignFn; 16]; 16] = [
+    ternlog_row16!(0),
+    ternlog_row16!(16),
+    ternlog_row16!(32),
+    ternlog_row16!(48),
+    ternlog_row16!(64),
+    ternlog_row16!(80),
+    ternlog_row16!(96),
+    ternlog_row16!(112),
+    ternlog_row16!(128),
+    ternlog_row16!(144),
+    ternlog_row16!(160),
+    ternlog_row16!(176),
+    ternlog_row16!(192),
+    ternlog_row16!(208),
+    ternlog_row16!(224),
+    ternlog_row16!(240),
+];
+
+/// `a = ternlog::<imm>(a, b, c)` with `imm` chosen at RUNTIME.
+///
+/// Total over `0..=255`: every 3-input Boolean function of three masks has an
+/// entry, so this one dispatch is the whole mask-op family — `AND2` (`0xC0`),
+/// `OR2` (`0xFC`), `XOR2` (`0x3C`), `AND2_ANDNOT` (`0x30`), `NOT_A` (`0x0F`),
+/// `AND3` (`0x80`), `MAJ3` (`0xE8`), and the 249 others. There is no unknown
+/// immediate and therefore no rejection path.
+///
+/// # Tail
+///
+/// The caller MUST clear the tail afterwards. The facade's contract is precise
+/// about why: the result's tail is `IMM & 1` replicated, so an ODD table — and
+/// `NOT_A` is odd — sets every bit past the population. Every export in this
+/// crate calls [`crate::abi::clear_tail_bits`] on the way out for exactly this
+/// class of reason.
+#[inline]
+pub fn simd_mask_ternlog_assign_dyn(imm: u8, a: &mut [u64], b: &[u64], c: &[u64]) {
+    TERNLOG_ASSIGN[(imm >> 4) as usize][(imm & 0x0F) as usize](a, b, c);
+}
+
 /// Sum of `values[i]` over set mask bits, widened to `i64`.
 #[inline]
 pub fn simd_masked_sum_i32(values: &[i32], mask_words: &[u64]) -> i64 {
     ndarray::simd::masked_sum_i32(values, mask_words)
+}
+
+/// Minimum of `values[i]` over set mask bits; `None` when nothing is selected.
+///
+/// `None` is the honest answer, not a sentinel: `i32::MAX` would be
+/// indistinguishable from a population that really does contain `i32::MAX`.
+/// The membrane carries the distinction out as a separate `out_present` flag
+/// (`lgj_reduce_i32`) rather than collapsing it.
+#[inline]
+pub fn simd_masked_min_i32(values: &[i32], mask_words: &[u64]) -> Option<i32> {
+    ndarray::simd::masked_min_i32(values, mask_words)
+}
+
+/// Maximum of `values[i]` over set mask bits; `None` when nothing is selected.
+#[inline]
+pub fn simd_masked_max_i32(values: &[i32], mask_words: &[u64]) -> Option<i32> {
+    ndarray::simd::masked_max_i32(values, mask_words)
+}
+
+/// `dst[i] = if mask bit i { a[i] } else { b[i] }` — conditional select
+/// (`CASE WHEN`) over a row mask, no compaction.
+///
+/// **Substrate-tier only; deliberately NOT an ABI symbol**, and the reason is
+/// arithmetic rather than taste: a blend needs TWO `I32` lanes, and neither
+/// resource kind this ABI carries has two. The pattern fixture has exactly one
+/// (`LANE_VALUES`); the row store has none at all (its lanes are `U8` raw,
+/// `U32` classid, `U64` lo64, `U32` hi32). Every legal call would therefore be
+/// `blend(m, values, values)`, which is `values` — a symbol whose only
+/// reachable invocation is the identity. `docs/abi.md` §19 records the
+/// condition that would earn it: a resource carrying two `I32` lanes, or a
+/// measured need for the constant-fallback form.
+#[inline]
+pub fn simd_blend_i32(mask_words: &[u64], a: &[i32], b: &[i32], dst: &mut [i32]) {
+    ndarray::simd::blend_i32(mask_words, a, b, dst);
 }
 
 /// Population count over mask words.
@@ -189,6 +472,53 @@ pub fn simd_rowstore_classid_mask(
     out_words: &mut [u64],
 ) {
     simd_rowstore_u32_eq_mask(bytes, first_offset, stride_bytes, n_rows, needle, out_words);
+}
+
+/// Bytes of the V3 content-blind register that follows a facet's classid.
+///
+/// DERIVED from the row store's own two constants, never written as `12`.
+/// E3 — the geometry has one spelling — is the rule; this is the spelling it
+/// points at, and a third literal here is exactly what that rule forbids.
+pub const FACET_REGISTER_BYTES: usize =
+    (crate::rowstore::FACET_BYTES - crate::rowstore::FACET_CLASSID_BYTES) as usize;
+
+/// THE strided TCAM over the row store: `out_words[row-th bit] =
+/// (((register(row, facet) ^ pattern) & care) == 0)`, over the 12-byte V3
+/// content-blind register.
+///
+/// This is the first BITWISE-over-payload predicate this crate has ever
+/// carried. Every predicate before it compared a whole scalar field — a
+/// classid, a value, an id. `care` makes it a PREFIX test: set the bytes that
+/// must match, clear the rest, and the answer is "which rows carry this
+/// prefix", which is the vertical (HHTL ancestry) axis
+/// `.claude/plans/mask-risc-lowering-v1.md` §0 puts the whole mask trie on.
+/// `care` all-zero matches every row; `care` all-ones is exact register
+/// equality.
+///
+/// Routes through `ndarray::simd::ternary_match_strided_to_mask`, which lowers
+/// the test to ONE `ternlog::<XOR_AND>` per 16 records over the lo64 halves
+/// plus a hi32 pass — never an XOR, then an AND, then a compare. The primitive
+/// owns bounds checking (overflow-safe, up front) and the trailing-bits-zero
+/// guarantee, exactly as [`simd_rowstore_u32_eq_mask`] does.
+#[inline]
+pub fn simd_rowstore_ternary_match_mask(
+    bytes: &[u8],
+    first_offset: usize,
+    stride_bytes: usize,
+    n_rows: usize,
+    pattern: &[u8; FACET_REGISTER_BYTES],
+    care: &[u8; FACET_REGISTER_BYTES],
+    out_words: &mut [u64],
+) {
+    ndarray::simd::ternary_match_strided_to_mask(
+        bytes,
+        first_offset,
+        stride_bytes,
+        n_rows,
+        pattern,
+        care,
+        out_words,
+    );
 }
 
 /// Per-row facet-match: `out[row]` gets bit `f` set iff facet `f`'s classid
@@ -268,6 +598,134 @@ pub fn scalar_gt_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u6
             out_words[i / 64] |= 1u64 << (i % 64);
         }
     }
+}
+
+// ── The minor-11 comparison family's scalar half ────────────────────────────
+//
+// These are NOT test-only oracles sitting in `src/main`: `lgj_plan_eval_scalar`
+// is a shipped symbol whose whole purpose is to run the SAME plan down the
+// independent path, so an op-code with no scalar arm would make the parity
+// escape hatch answer `UNKNOWN_OPCODE` for exactly the ops it was extended to
+// cover — an asymmetry between two symbols that `abi.md` §7 says have
+// "identical semantics". Each is written as the predicate's own definition, so
+// a facade that lowered `ge` as a buggy complement would be caught rather than
+// agreed with.
+
+/// Reference `ne_u32` → mask.
+pub fn scalar_ne_u32_to_mask(values: &[u32], needle: u32, out_words: &mut [u64]) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if v != needle {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference signed `eq_i32` → mask.
+pub fn scalar_eq_i32_to_mask(values: &[i32], needle: i32, out_words: &mut [u64]) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if v == needle {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference signed `ne_i32` → mask.
+pub fn scalar_ne_i32_to_mask(values: &[i32], needle: i32, out_words: &mut [u64]) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if v != needle {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference signed `lt_i32` → mask.
+pub fn scalar_lt_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if v < threshold {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference signed `le_i32` → mask.
+pub fn scalar_le_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if v <= threshold {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference signed `ge_i32` → mask.
+pub fn scalar_ge_i32_to_mask(values: &[i32], threshold: i32, out_words: &mut [u64]) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if v >= threshold {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference care-masked (TCAM) `u32` match → mask.
+pub fn scalar_ternary_match_u32_to_mask(
+    values: &[u32],
+    pattern: u32,
+    care: u32,
+    out_words: &mut [u64],
+) {
+    for w in out_words.iter_mut() {
+        *w = 0;
+    }
+    for (i, &v) in values.iter().enumerate() {
+        if (v ^ pattern) & care == 0 {
+            out_words[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+}
+
+/// Reference masked minimum. `None` when nothing is selected.
+pub fn scalar_masked_min_i32(values: &[i32], mask_words: &[u64]) -> Option<i32> {
+    let mut acc: Option<i32> = None;
+    for (i, &v) in values.iter().enumerate() {
+        if (mask_words[i / 64] >> (i % 64)) & 1 == 1 {
+            acc = Some(match acc {
+                Some(a) if a <= v => a,
+                _ => v,
+            });
+        }
+    }
+    acc
+}
+
+/// Reference masked maximum. `None` when nothing is selected.
+pub fn scalar_masked_max_i32(values: &[i32], mask_words: &[u64]) -> Option<i32> {
+    let mut acc: Option<i32> = None;
+    for (i, &v) in values.iter().enumerate() {
+        if (mask_words[i / 64] >> (i % 64)) & 1 == 1 {
+            acc = Some(match acc {
+                Some(a) if a >= v => a,
+                _ => v,
+            });
+        }
+    }
+    acc
 }
 
 /// Reference `dst &= src`.
@@ -413,7 +871,70 @@ pub fn eval_predicate(
                 Path::Scalar => scalar_gt_i32_to_mask(v, threshold, out_words),
             }
         }
-        (LGJ_OP_EQ_U32, _) | (LGJ_OP_GT_I32, _) => return Err(LGJ_ERR_LANE_KIND_MISMATCH),
+        (LGJ_OP_NE_U32, LaneView::U32(v)) => {
+            let needle = operand as u32;
+            match path {
+                Path::Simd => simd_ne_u32_to_mask(v, needle, out_words),
+                Path::Scalar => scalar_ne_u32_to_mask(v, needle, out_words),
+            }
+        }
+        (LGJ_OP_EQ_I32, LaneView::I32(v)) => {
+            let needle = operand as i32;
+            match path {
+                Path::Simd => simd_eq_i32_to_mask(v, needle, out_words),
+                Path::Scalar => scalar_eq_i32_to_mask(v, needle, out_words),
+            }
+        }
+        (LGJ_OP_NE_I32, LaneView::I32(v)) => {
+            let needle = operand as i32;
+            match path {
+                Path::Simd => simd_ne_i32_to_mask(v, needle, out_words),
+                Path::Scalar => scalar_ne_i32_to_mask(v, needle, out_words),
+            }
+        }
+        (LGJ_OP_LT_I32, LaneView::I32(v)) => {
+            let threshold = operand as i32;
+            match path {
+                Path::Simd => simd_lt_i32_to_mask(v, threshold, out_words),
+                Path::Scalar => scalar_lt_i32_to_mask(v, threshold, out_words),
+            }
+        }
+        (LGJ_OP_LE_I32, LaneView::I32(v)) => {
+            let threshold = operand as i32;
+            match path {
+                Path::Simd => simd_le_i32_to_mask(v, threshold, out_words),
+                Path::Scalar => scalar_le_i32_to_mask(v, threshold, out_words),
+            }
+        }
+        (LGJ_OP_GE_I32, LaneView::I32(v)) => {
+            let threshold = operand as i32;
+            match path {
+                Path::Simd => simd_ge_i32_to_mask(v, threshold, out_words),
+                Path::Scalar => scalar_ge_i32_to_mask(v, threshold, out_words),
+            }
+        }
+        (LGJ_OP_TERNARY_MATCH_U32, LaneView::U32(v)) => {
+            // The operand packs BOTH halves: pattern low, care high. Exact —
+            // two u32s are exactly 64 bits — and confined to this op-code, so
+            // no existing opcode's reading of `operand` changes. `abi.rs`
+            // documents the packing beside the constant.
+            let packed = operand as u64;
+            let pattern = packed as u32;
+            let care = (packed >> 32) as u32;
+            match path {
+                Path::Simd => simd_ternary_match_u32_to_mask(v, pattern, care, out_words),
+                Path::Scalar => scalar_ternary_match_u32_to_mask(v, pattern, care, out_words),
+            }
+        }
+        (LGJ_OP_EQ_U32, _)
+        | (LGJ_OP_GT_I32, _)
+        | (LGJ_OP_NE_U32, _)
+        | (LGJ_OP_EQ_I32, _)
+        | (LGJ_OP_NE_I32, _)
+        | (LGJ_OP_LT_I32, _)
+        | (LGJ_OP_LE_I32, _)
+        | (LGJ_OP_GE_I32, _)
+        | (LGJ_OP_TERNARY_MATCH_U32, _) => return Err(LGJ_ERR_LANE_KIND_MISMATCH),
         _ => return Err(LGJ_ERR_UNKNOWN_OPCODE),
     }
     // Both primitives already zero the tail, but re-establishing it here means
@@ -455,6 +976,49 @@ pub fn masked_sum_i32(path: Path, values: &[i32], mask_words: &[u64]) -> i64 {
     match path {
         Path::Simd => simd_masked_sum_i32(values, mask_words),
         Path::Scalar => scalar_masked_sum_i32(values, mask_words),
+    }
+}
+
+/// The PARAMETERISED masked reduction over an `I32` lane (ABI minor >= 11,
+/// `docs/abi.md` §19) — `sum` / `min` / `max` behind one op-code argument.
+///
+/// `abi.md` §15 wrote this shape down before the need arose: *"if a second
+/// reduction is ever needed (min/max/count-distinct/histogram), do NOT add a
+/// second symbol ... an op-code parameter on one reduce symbol, mirroring how
+/// `lgj_plan_eval`'s `LgjOpDesc` already generalises predicates — and `sum`
+/// becomes op-code 0."* This is that, and a future `count-distinct` or
+/// `histogram` is one more arm rather than one more symbol.
+///
+/// `Ok(None)` is "no answer", not "zero": min and max over an empty population
+/// have none, and `i32::MAX` / `i32::MIN` as sentinels would be
+/// indistinguishable from a population that genuinely contains them. `sum` is
+/// always `Ok(Some(_))` — the sum of nothing is `0`, which IS the answer.
+///
+/// Widening to `i64` is the SUM's contract, not a reinterpretation of min/max:
+/// an `i32` extremum is exact in `i64`, so one return type carries all three
+/// without a lossy case.
+pub fn reduce_i32(
+    path: Path,
+    reduce_op: u32,
+    values: &[i32],
+    mask_words: &[u64],
+) -> Result<Option<i64>, i32> {
+    match reduce_op {
+        LGJ_REDUCE_SUM => Ok(Some(masked_sum_i32(path, values, mask_words))),
+        LGJ_REDUCE_MIN => Ok(match path {
+            Path::Simd => simd_masked_min_i32(values, mask_words),
+            Path::Scalar => scalar_masked_min_i32(values, mask_words),
+        }
+        .map(i64::from)),
+        LGJ_REDUCE_MAX => Ok(match path {
+            Path::Simd => simd_masked_max_i32(values, mask_words),
+            Path::Scalar => scalar_masked_max_i32(values, mask_words),
+        }
+        .map(i64::from)),
+        // Not in abi.md's reduction set. Rejected like an unknown opcode rather
+        // than defaulted to SUM, so a future reduction cannot be silently
+        // misread by an older build.
+        _ => Err(LGJ_ERR_UNKNOWN_OPCODE),
     }
 }
 
@@ -1421,6 +1985,624 @@ mod tests {
         assert_eq!(
             resolve_population_carving(&b, 0, 512, 3, &[0b000], shape_by_class),
             None
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ABI minor 11 — the masking-op completion (docs/abi.md §19)
+    //
+    // Every op below carries the same three-part gate: an EQUIVALENCE arm
+    // against an independent scalar oracle across the row-count shapes that
+    // straddle every boundary in the packing (0/1 degenerate, 15/16/17 the
+    // 16-lane group, 63/64/65 the word, 4095 one short of a power of two), a
+    // CAN-FIRE arm proving the op changes something on non-trivial input, and
+    // a CAN-STAY-SILENT arm proving it does NOT touch what it must not — in
+    // this file's currency, the tail bits past `n_rows`.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// The row-count shapes every minor-11 arm sweeps. 4095 is deliberately
+    /// `64 * 64 - 1`: it exercises a final word with 63 live bits, the widest
+    /// possible tail, which is the shape a "clear the tail" bug survives on a
+    /// round row count.
+    const SHAPES: [u64; 14] = [
+        0, 1, 15, 16, 17, 63, 64, 65, 127, 128, 129, 1000, 4095, 4096,
+    ];
+
+    /// SplitMix64 — the generator `Fixture`/`RowStore` already use, repeated
+    /// here rather than imported so the test data is independent of whatever
+    /// the fixture happens to generate.
+    fn mix(state: &mut u64) -> u64 {
+        *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = *state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// `n_words` of pseudo-random mask words with the tail cleared — a
+    /// CONFORMING mask, which is what every op's contract is stated against.
+    fn random_mask(n_rows: u64, seed: u64) -> Vec<u64> {
+        let mut st = seed;
+        let mut w = words_for(n_rows);
+        for x in w.iter_mut() {
+            *x = mix(&mut st);
+        }
+        clear_tail_bits(&mut w, n_rows);
+        w
+    }
+
+    /// Assert every bit at or past `n_rows` is zero, naming the offender.
+    fn assert_tail_clear(words: &[u64], n_rows: u64, what: &str) {
+        let used = (n_rows % 64) as u32;
+        if used != 0 {
+            if let Some(&last) = words.last() {
+                assert_eq!(
+                    last >> used,
+                    0,
+                    "{what}: tail bits past n_rows={n_rows} survived (last word {last:#018x})"
+                );
+            }
+        }
+    }
+
+    // ── The comparison family ───────────────────────────────────────────────
+
+    /// EQUIVALENCE. Each of the six new comparisons, and the `u32` TCAM,
+    /// against its independently-written scalar definition at every shape.
+    #[test]
+    fn minor_11_predicates_match_their_scalar_references_at_every_row_count_shape() {
+        for n in SHAPES {
+            for seed in [0u64, 1, 0xDEAD_BEEF] {
+                let f = Fixture::generate(n, seed).unwrap();
+                let (mut a, mut b) = (words_for(n), words_for(n));
+
+                simd_ne_u32_to_mask(f.classes(), 7, &mut a);
+                scalar_ne_u32_to_mask(f.classes(), 7, &mut b);
+                assert_eq!(a, b, "ne_u32 at n={n} seed={seed}");
+                assert_tail_clear(&a, n, "ne_u32");
+
+                for needle in [-1000i32, 0, 100, i32::MIN, i32::MAX] {
+                    simd_eq_i32_to_mask(f.values(), needle, &mut a);
+                    scalar_eq_i32_to_mask(f.values(), needle, &mut b);
+                    assert_eq!(a, b, "eq_i32({needle}) at n={n} seed={seed}");
+                    assert_tail_clear(&a, n, "eq_i32");
+
+                    simd_ne_i32_to_mask(f.values(), needle, &mut a);
+                    scalar_ne_i32_to_mask(f.values(), needle, &mut b);
+                    assert_eq!(a, b, "ne_i32({needle}) at n={n} seed={seed}");
+                    assert_tail_clear(&a, n, "ne_i32");
+
+                    simd_lt_i32_to_mask(f.values(), needle, &mut a);
+                    scalar_lt_i32_to_mask(f.values(), needle, &mut b);
+                    assert_eq!(a, b, "lt_i32({needle}) at n={n} seed={seed}");
+                    assert_tail_clear(&a, n, "lt_i32");
+
+                    simd_le_i32_to_mask(f.values(), needle, &mut a);
+                    scalar_le_i32_to_mask(f.values(), needle, &mut b);
+                    assert_eq!(a, b, "le_i32({needle}) at n={n} seed={seed}");
+                    assert_tail_clear(&a, n, "le_i32");
+
+                    simd_ge_i32_to_mask(f.values(), needle, &mut a);
+                    scalar_ge_i32_to_mask(f.values(), needle, &mut b);
+                    assert_eq!(a, b, "ge_i32({needle}) at n={n} seed={seed}");
+                    assert_tail_clear(&a, n, "ge_i32");
+                }
+
+                for (pat, care) in [(0u32, 0u32), (7, 0xFFFF_FFFF), (5, 0b101), (0, 0b1)] {
+                    simd_ternary_match_u32_to_mask(f.classes(), pat, care, &mut a);
+                    scalar_ternary_match_u32_to_mask(f.classes(), pat, care, &mut b);
+                    assert_eq!(a, b, "tcam_u32({pat},{care}) at n={n} seed={seed}");
+                    assert_tail_clear(&a, n, "ternary_match_u32");
+                }
+            }
+        }
+    }
+
+    /// CAN-FIRE + CAN-STAY-SILENT, on the boundaries the signed comparisons
+    /// get wrong when they are lowered as a complement or an off-by-one.
+    ///
+    /// `lt` at `i32::MIN` must select NOTHING (silence), and `ge` at
+    /// `i32::MIN` must select EVERYTHING (fire) — the pair that catches a
+    /// `x > t - 1` lowering, which wraps at the bottom of the range and
+    /// inverts both answers.
+    #[test]
+    fn the_signed_comparisons_are_exact_at_the_extremes() {
+        let v: Vec<i32> = vec![i32::MIN, -1000, -1, 0, 1, 100, i32::MAX];
+        let n = v.len() as u64;
+        let all = (1u64 << v.len()) - 1;
+        let mut w = words_for(n);
+
+        simd_lt_i32_to_mask(&v, i32::MIN, &mut w);
+        assert_eq!(w[0], 0, "nothing is < i32::MIN");
+        simd_ge_i32_to_mask(&v, i32::MIN, &mut w);
+        assert_eq!(w[0], all, "everything is >= i32::MIN");
+        simd_le_i32_to_mask(&v, i32::MAX, &mut w);
+        assert_eq!(w[0], all, "everything is <= i32::MAX");
+        simd_lt_i32_to_mask(&v, 0, &mut w);
+        assert_eq!(w[0], 0b000_0111, "i32::MIN, -1000 and -1 are the negatives");
+        simd_eq_i32_to_mask(&v, i32::MIN, &mut w);
+        assert_eq!(w[0], 0b000_0001, "exactly one element equals i32::MIN");
+        simd_ne_i32_to_mask(&v, i32::MIN, &mut w);
+        assert_eq!(w[0], all & !0b1, "and exactly the others differ from it");
+    }
+
+    /// CAN-STAY-SILENT for the whole family: a predicate true of EVERY row
+    /// must still leave the tail zero. 70 rows leaves word 1 with 6 live bits
+    /// and 58 that `popcount` would otherwise count.
+    #[test]
+    fn minor_11_predicates_leave_no_tail_bit_set_even_when_every_row_matches() {
+        let n = 70u64;
+        let u: Vec<u32> = vec![7; n as usize];
+        let i: Vec<i32> = vec![7; n as usize];
+        let mut w = words_for(n);
+
+        // `!=` against a needle no element carries: true of every row.
+        simd_ne_u32_to_mask(&u, 9, &mut w);
+        assert_eq!(simd_popcount(&w), n, "the predicate really does select all");
+        assert_tail_clear(&w, n, "ne_u32");
+
+        for f in [
+            simd_ne_i32_to_mask as fn(&[i32], i32, &mut [u64]),
+            simd_le_i32_to_mask,
+            simd_lt_i32_to_mask,
+        ] {
+            f(&i, 9, &mut w);
+            assert_eq!(simd_popcount(&w), n);
+            assert_tail_clear(&w, n, "i32 predicate");
+        }
+        simd_ge_i32_to_mask(&i, 7, &mut w);
+        assert_eq!(simd_popcount(&w), n);
+        assert_tail_clear(&w, n, "ge_i32");
+        simd_eq_i32_to_mask(&i, 7, &mut w);
+        assert_eq!(simd_popcount(&w), n);
+        assert_tail_clear(&w, n, "eq_i32");
+        // care == 0 is "don't care about anything" — true of every row.
+        simd_ternary_match_u32_to_mask(&u, 0xDEAD_BEEF, 0, &mut w);
+        assert_eq!(simd_popcount(&w), n);
+        assert_tail_clear(&w, n, "ternary_match_u32");
+    }
+
+    /// The care mask is the whole point of a TCAM, so it gets its own
+    /// two-sided arm: a bit OUTSIDE `care` may differ freely (fire), and a bit
+    /// INSIDE `care` must exclude (silence). Without the second half a
+    /// "matches everything" implementation would pass.
+    #[test]
+    fn ternary_match_ignores_uncared_bits_and_honours_cared_ones() {
+        let v: Vec<u32> = vec![0b1010, 0b1110, 0b0010, 0b1011];
+        let mut w = words_for(4);
+        // care clears bit 2: elements 0 and 1 differ ONLY there, so both match.
+        simd_ternary_match_u32_to_mask(&v, 0b1010, 0b1011, &mut w);
+        assert_eq!(w[0], 0b0011, "an uncared bit must not exclude");
+        // care now includes bit 2: element 1 differs there and drops out.
+        simd_ternary_match_u32_to_mask(&v, 0b1010, 0b1111, &mut w);
+        assert_eq!(w[0], 0b0001, "a cared bit must exclude");
+        // The 64-bit sibling agrees on the same shape, one bit higher.
+        let v64: Vec<u64> = v.iter().map(|&x| u64::from(x) | (1u64 << 40)).collect();
+        let mut w64 = words_for(4);
+        simd_ternary_match_u64_to_mask(&v64, 0b1010 | (1 << 40), 0b1011 | (1 << 40), &mut w64);
+        assert_eq!(w64[0], 0b0011, "u64 TCAM must see the high bit too");
+        simd_ternary_match_u64_to_mask(&v64, 0b1010, 0b1011 | (1 << 40), &mut w64);
+        assert_eq!(w64[0], 0, "a cared HIGH bit must exclude every element");
+    }
+
+    // ── XOR / NOT / ANY / ALL ───────────────────────────────────────────────
+
+    /// EQUIVALENCE + the falsifier pair for XOR, at every shape.
+    #[test]
+    fn mask_xor_is_symmetric_difference_and_keeps_a_conforming_tail() {
+        for n in SHAPES {
+            let a = random_mask(n, 0x1234);
+            let b = random_mask(n, 0x5678);
+            let mut dst = words_for(n);
+            simd_mask_xor(&a, &b, &mut dst);
+            let expect: Vec<u64> = a.iter().zip(&b).map(|(x, y)| x ^ y).collect();
+            assert_eq!(dst, expect, "xor at n={n}");
+            assert_tail_clear(&dst, n, "mask_xor");
+
+            let mut inplace = a.clone();
+            simd_mask_xor_assign(&mut inplace, &b);
+            assert_eq!(inplace, dst, "xor_assign disagrees with xor at n={n}");
+
+            // CAN-STAY-SILENT: `x ^ x` is empty for every x.
+            let mut self_xor = a.clone();
+            simd_mask_xor_assign(&mut self_xor, &a);
+            assert!(
+                self_xor.iter().all(|&w| w == 0),
+                "x ^ x must be empty at n={n}"
+            );
+        }
+        // CAN-FIRE, with the anti-vacuity half explicit: the inputs really do
+        // differ, so an implementation that wrote zeros could not pass.
+        let a = [0b0110u64];
+        let b = [0b0011u64];
+        let mut dst = [0u64; 1];
+        simd_mask_xor(&a, &b, &mut dst);
+        assert_ne!(dst[0], a[0]);
+        assert_eq!(dst[0], 0b0101);
+    }
+
+    /// NOT is the ONE mask-algebra op whose correctness cannot be stated
+    /// without `n_rows`, so its falsifier is the tail itself — and it is
+    /// two-sided: the live bits must all flip (fire) and the tail must be
+    /// zero where a plain `!` would set every bit (silence).
+    #[test]
+    fn mask_not_flips_the_live_bits_and_clears_the_tail_a_plain_complement_would_set() {
+        for n in SHAPES {
+            let src = random_mask(n, 0xABCD);
+            let mut dst = words_for(n);
+            simd_mask_not(&src, n as usize, &mut dst);
+            assert_tail_clear(&dst, n, "mask_not");
+            // Every LIVE bit flipped: the two popcounts must partition n.
+            assert_eq!(
+                simd_popcount(&src) + simd_popcount(&dst),
+                n,
+                "complement must partition the population at n={n}"
+            );
+            let mut inplace = src.clone();
+            simd_mask_not_assign(&mut inplace, n as usize);
+            assert_eq!(inplace, dst, "not_assign disagrees with not at n={n}");
+        }
+        // The silence half, made concrete: at 4 rows a raw `!` leaves 60 stray
+        // bits in the word, and the test asserts the naive answer is NOT what
+        // we got — so a version without the clear fails here, not merely
+        // elsewhere.
+        let src = [0b0011u64];
+        let mut dst = [0u64; 1];
+        simd_mask_not(&src, 4, &mut dst);
+        assert_eq!(dst[0], 0b1100);
+        assert_ne!(dst[0], !src[0], "a plain complement must not be the answer");
+    }
+
+    /// ANY and ALL, both directions each. The non-trivial inputs matter: an
+    /// empty-vs-empty pair would pass for a function that always answered the
+    /// same way.
+    #[test]
+    fn mask_any_and_mask_all_both_fire_and_both_stay_silent() {
+        let n = 70u64;
+        let empty = words_for(n);
+        assert!(!simd_mask_any(&empty), "an empty mask selects nothing");
+        assert!(
+            !simd_mask_all(&empty, n as usize),
+            "and is certainly not full"
+        );
+
+        let mut one = words_for(n);
+        one[1] |= 1 << 5; // row 69 — the last live bit
+        assert!(simd_mask_any(&one), "one set row is 'any'");
+        assert!(!simd_mask_all(&one, n as usize), "one set row is not 'all'");
+
+        let mut full = vec![u64::MAX; mask_words_for(n) as usize];
+        clear_tail_bits(&mut full, n);
+        assert!(simd_mask_any(&full));
+        assert!(
+            simd_mask_all(&full, n as usize),
+            "a conforming full mask is 'all'"
+        );
+
+        // One row short of full is NOT all — the off-by-one this predicate
+        // invites, checked at the boundary between the two words.
+        let mut almost = full.clone();
+        almost[0] &= !(1u64 << 63);
+        assert!(
+            !simd_mask_all(&almost, n as usize),
+            "63 of 64 in word 0 is not 'all'"
+        );
+        // A zero-row population is vacuously full, and that must not read as a
+        // bug in the row-count arithmetic.
+        assert!(simd_mask_all(&[], 0));
+    }
+
+    // ── TERNLOG ─────────────────────────────────────────────────────────────
+
+    /// The 256-entry dispatch table's own falsifier: for EVERY immediate, the
+    /// runtime dispatch must equal the truth table evaluated bit by bit.
+    ///
+    /// This is what makes the table's indexing (`[imm >> 4][imm & 15]`)
+    /// checkable rather than asserted — a transposed index, an off-by-one row,
+    /// or a `$base` typo in the macro shifts some immediates and this fails on
+    /// exactly those.
+    #[test]
+    fn the_ternlog_dispatch_table_agrees_with_the_truth_table_for_all_256_immediates() {
+        let n = 129u64; // three words, the last one short
+        let a0 = random_mask(n, 0x11);
+        let b = random_mask(n, 0x22);
+        let c = random_mask(n, 0x33);
+        for imm in 0u8..=255 {
+            let mut got = a0.clone();
+            simd_mask_ternlog_assign_dyn(imm, &mut got, &b, &c);
+            // Bit-serial oracle: index (a<<2)|(b<<1)|c into the immediate.
+            let mut want = vec![0u64; got.len()];
+            for (w, out) in want.iter_mut().enumerate() {
+                for bit in 0..64u32 {
+                    let av = (a0[w] >> bit) & 1;
+                    let bv = (b[w] >> bit) & 1;
+                    let cv = (c[w] >> bit) & 1;
+                    let idx = (av << 2) | (bv << 1) | cv;
+                    if (u64::from(imm) >> idx) & 1 == 1 {
+                        *out |= 1u64 << bit;
+                    }
+                }
+            }
+            assert_eq!(got, want, "ternlog imm={imm:#04x}");
+        }
+    }
+
+    /// CAN-FIRE for the general member: the named immediates must reproduce
+    /// the dedicated ops exactly, which is the claim that lets XOR and NOT
+    /// arrive as immediates instead of as symbols.
+    #[test]
+    fn the_named_immediates_reproduce_the_dedicated_mask_ops() {
+        const AND2: u8 = 0xC0;
+        const OR2: u8 = 0xFC;
+        const XOR2: u8 = 0x3C;
+        const ANDNOT2: u8 = 0x30;
+        const NOT_A: u8 = 0x0F;
+
+        let n = 200u64;
+        let a = random_mask(n, 0xAAAA);
+        let b = random_mask(n, 0xBBBB);
+        let mut want = words_for(n);
+        let run = |imm: u8| {
+            let mut got = a.clone();
+            // `c` is ignored by every two-input table; feeding it a mask that
+            // is NOT all-zero is what proves it really is ignored.
+            simd_mask_ternlog_assign_dyn(imm, &mut got, &b, &random_mask(n, 0xCCCC));
+            got
+        };
+
+        simd_mask_and(&a, &b, &mut want);
+        assert_eq!(run(AND2), want, "AND2");
+        simd_mask_or(&a, &b, &mut want);
+        assert_eq!(run(OR2), want, "OR2");
+        simd_mask_xor(&a, &b, &mut want);
+        assert_eq!(run(XOR2), want, "XOR2");
+        simd_mask_andnot(&a, &b, &mut want);
+        assert_eq!(run(ANDNOT2), want, "AND2_ANDNOT");
+
+        // NOT is the interesting one: its table is ODD, so before the tail
+        // clear the result has every bit past n_rows set. That is the state
+        // the export's `clear_tail_bits` exists for, and asserting it here
+        // makes the export's tail step a measured requirement rather than a
+        // precaution.
+        let mut not_got = run(NOT_A);
+        assert_ne!(
+            not_got.last().copied().unwrap_or(0) >> (n % 64),
+            0,
+            "an odd immediate must set the tail — otherwise the export's clear is untested"
+        );
+        clear_tail_bits(&mut not_got, n);
+        simd_mask_not(&a, n as usize, &mut want);
+        assert_eq!(not_got, want, "NOT_A after the tail clear");
+    }
+
+    /// The in-place and out-of-place spellings must agree — the property the
+    /// export relies on when it copies `a` into `dst` and then assigns.
+    #[test]
+    fn ternlog_assign_and_out_of_place_agree() {
+        let n = 1000u64;
+        let a = random_mask(n, 1);
+        let b = random_mask(n, 2);
+        let c = random_mask(n, 3);
+        let mut out = words_for(n);
+        simd_mask_ternlog::<{ ternlog::MAJ3 }>(&a, &b, &c, &mut out);
+        let mut inplace = a.clone();
+        simd_mask_ternlog_assign::<{ ternlog::MAJ3 }>(&mut inplace, &b, &c);
+        assert_eq!(out, inplace);
+        // …and the runtime dispatch reaches the same monomorphisation.
+        let mut dynamic = a.clone();
+        simd_mask_ternlog_assign_dyn(ternlog::MAJ3 as u8, &mut dynamic, &b, &c);
+        assert_eq!(out, dynamic);
+    }
+
+    // ── Reductions + blend ──────────────────────────────────────────────────
+
+    /// EQUIVALENCE for min/max against their scalar definitions, plus the
+    /// empty-population arm that `None` exists for.
+    #[test]
+    fn masked_min_and_max_match_their_scalar_references_and_report_an_empty_population() {
+        for n in SHAPES {
+            for seed in [0u64, 7, 0xFEED] {
+                let f = Fixture::generate(n, seed).unwrap();
+                let m = random_mask(n, seed ^ 0x5A5A);
+                assert_eq!(
+                    simd_masked_min_i32(f.values(), &m),
+                    scalar_masked_min_i32(f.values(), &m),
+                    "min at n={n} seed={seed}"
+                );
+                assert_eq!(
+                    simd_masked_max_i32(f.values(), &m),
+                    scalar_masked_max_i32(f.values(), &m),
+                    "max at n={n} seed={seed}"
+                );
+                // CAN-STAY-SILENT: an empty mask has no extremum at all.
+                let empty = words_for(n);
+                assert_eq!(simd_masked_min_i32(f.values(), &empty), None);
+                assert_eq!(simd_masked_max_i32(f.values(), &empty), None);
+            }
+        }
+        // CAN-FIRE, and the mask must actually SELECT: a min over everything
+        // and a min over a subset must differ, or the mask is decorative.
+        let v = [10i32, -5, 30, 2];
+        assert_eq!(simd_masked_min_i32(&v, &[0b1111]), Some(-5));
+        assert_eq!(simd_masked_min_i32(&v, &[0b1101]), Some(2));
+        assert_eq!(simd_masked_max_i32(&v, &[0b1111]), Some(30));
+        assert_eq!(simd_masked_max_i32(&v, &[0b1011]), Some(10));
+    }
+
+    /// `reduce_i32` dispatch: every op on both paths, and an unknown op
+    /// rejected rather than defaulted to SUM.
+    #[test]
+    fn reduce_i32_dispatches_every_op_on_both_paths_and_rejects_an_unknown_one() {
+        let f = Fixture::generate(500, 3).unwrap();
+        let m = random_mask(500, 0x99);
+        for path in [Path::Simd, Path::Scalar] {
+            assert_eq!(
+                reduce_i32(path, LGJ_REDUCE_SUM, f.values(), &m),
+                Ok(Some(masked_sum_i32(path, f.values(), &m)))
+            );
+            assert_eq!(
+                reduce_i32(path, LGJ_REDUCE_MIN, f.values(), &m),
+                Ok(scalar_masked_min_i32(f.values(), &m).map(i64::from))
+            );
+            assert_eq!(
+                reduce_i32(path, LGJ_REDUCE_MAX, f.values(), &m),
+                Ok(scalar_masked_max_i32(f.values(), &m).map(i64::from))
+            );
+            for bogus in [3u32, 4, 99, u32::MAX] {
+                assert_eq!(
+                    reduce_i32(path, bogus, f.values(), &m),
+                    Err(LGJ_ERR_UNKNOWN_OPCODE),
+                    "an unknown reduction must not alias a known one"
+                );
+            }
+        }
+        // SUM is present over an empty population; MIN/MAX are not. That is
+        // the distinction `out_present` carries across the membrane.
+        let empty = words_for(500);
+        assert_eq!(
+            reduce_i32(Path::Simd, LGJ_REDUCE_SUM, f.values(), &empty),
+            Ok(Some(0))
+        );
+        assert_eq!(
+            reduce_i32(Path::Simd, LGJ_REDUCE_MIN, f.values(), &empty),
+            Ok(None)
+        );
+    }
+
+    /// `blend_i32` — substrate-tier only (no export; see its doc). Falsifier
+    /// pair: the mask really selects between the two sources, and a bit set
+    /// nowhere leaves `b` untouched.
+    #[test]
+    fn blend_i32_selects_from_both_sources() {
+        let a = [1i32, 2, 3, 4];
+        let b = [10i32, 20, 30, 40];
+        let mut dst = [0i32; 4];
+        simd_blend_i32(&[0b0101], &a, &b, &mut dst);
+        assert_eq!(dst, [1, 20, 3, 40]);
+        simd_blend_i32(&[0], &a, &b, &mut dst);
+        assert_eq!(dst, b, "an empty mask must take everything from b");
+        simd_blend_i32(&[0b1111], &a, &b, &mut dst);
+        assert_eq!(dst, a, "a full mask must take everything from a");
+    }
+
+    // ── The strided TCAM over a row store ───────────────────────────────────
+
+    /// EQUIVALENCE + can-fire/can-stay-silent for the register TCAM, over the
+    /// REAL row store, on every facet.
+    ///
+    /// The scalar oracle is local to this test rather than a `scalar_*` in
+    /// `src/main`: nothing on `Path::Scalar` reaches this kernel, so shipping
+    /// an oracle for it would put a scalar path in the artifact for the
+    /// benefit of the test suite alone (E2 licenses scalar code as a TEST
+    /// oracle, which is where this one lives).
+    #[test]
+    fn the_register_tcam_matches_a_byte_wise_oracle_on_every_facet() {
+        use crate::rowstore::{RowStore, FACET_BYTES, FACET_CLASSID_BYTES, ROW_BYTES, ROW_FACETS};
+        const N: usize = FACET_REGISTER_BYTES;
+
+        for n in [1u64, 63, 64, 65, 300] {
+            let store = RowStore::generate(n, 0xC0FFEE).unwrap();
+            let bytes = store.as_bytes();
+            for facet in 0..ROW_FACETS {
+                let off = (u64::from(facet) * FACET_BYTES + FACET_CLASSID_BYTES) as usize;
+                // Read row 0's own register and use it as the pattern, so the
+                // "exact" arm is guaranteed to have at least one hit — the
+                // anti-vacuity half of the can-fire assertion below.
+                let mut pattern = [0u8; N];
+                pattern.copy_from_slice(&bytes[off..off + N]);
+
+                for care in [[0u8; N], [0xFFu8; N], {
+                    let mut c = [0u8; N];
+                    c[0] = 0xFF;
+                    c
+                }] {
+                    let mut got = words_for(n);
+                    simd_rowstore_ternary_match_mask(
+                        bytes,
+                        off,
+                        ROW_BYTES as usize,
+                        n as usize,
+                        &pattern,
+                        &care,
+                        &mut got,
+                    );
+                    let mut want = words_for(n);
+                    for row in 0..n as usize {
+                        let o = off + row * ROW_BYTES as usize;
+                        let hit = (0..N).all(|k| (bytes[o + k] ^ pattern[k]) & care[k] == 0);
+                        if hit {
+                            want[row / 64] |= 1u64 << (row % 64);
+                        }
+                    }
+                    assert_eq!(got, want, "tcam n={n} facet={facet} care={care:?}");
+                    assert_tail_clear(&got, n, "register tcam");
+                }
+
+                // CAN-FIRE: the exact pattern selects at least row 0 …
+                let mut exact = words_for(n);
+                simd_rowstore_ternary_match_mask(
+                    bytes,
+                    off,
+                    ROW_BYTES as usize,
+                    n as usize,
+                    &pattern,
+                    &[0xFF; N],
+                    &mut exact,
+                );
+                assert_eq!(exact[0] & 1, 1, "row 0 must match its own register");
+                // … and CAN-STAY-SILENT: flipping a CARED byte drops it.
+                let mut miss = pattern;
+                miss[0] ^= 0xFF;
+                let mut none = words_for(n);
+                simd_rowstore_ternary_match_mask(
+                    bytes,
+                    off,
+                    ROW_BYTES as usize,
+                    n as usize,
+                    &miss,
+                    &[0xFF; N],
+                    &mut none,
+                );
+                assert_eq!(none[0] & 1, 0, "a cared-byte mismatch must exclude row 0");
+                // … while flipping it with that byte UN-cared keeps it.
+                let mut care_rest = [0xFFu8; N];
+                care_rest[0] = 0;
+                let mut still = words_for(n);
+                simd_rowstore_ternary_match_mask(
+                    bytes,
+                    off,
+                    ROW_BYTES as usize,
+                    n as usize,
+                    &miss,
+                    &care_rest,
+                    &mut still,
+                );
+                assert_eq!(still[0] & 1, 1, "an uncared byte must not exclude row 0");
+            }
+        }
+    }
+
+    /// The register geometry has ONE spelling (E3). This pins that the
+    /// constant is DERIVED — a literal `12` here would survive a change to
+    /// `FACET_BYTES` and this does not.
+    #[test]
+    fn the_register_size_is_derived_from_the_row_geometry() {
+        assert_eq!(
+            FACET_REGISTER_BYTES,
+            (crate::rowstore::FACET_BYTES - crate::rowstore::FACET_CLASSID_BYTES) as usize
+        );
+        // The same 12 bytes read the other way: the register is the lo64 span
+        // (hi32's offset measured from the REGISTER base, not the facet base)
+        // plus the 4-byte hi32 field. Getting this relation wrong is how a
+        // "12" ends up hand-written somewhere, which is what E3 forbids — the
+        // first version of this assertion added `4` to the facet-relative
+        // offset and measured 16, the facet's own size.
+        assert_eq!(
+            FACET_REGISTER_BYTES,
+            (crate::rowstore::FACET_PAYLOAD_HI32_OFFSET - crate::rowstore::FACET_CLASSID_BYTES)
+                as usize
+                + 4,
+            "register = lo64 span (8) + hi32 (4); the two spellings must agree"
         );
     }
 }

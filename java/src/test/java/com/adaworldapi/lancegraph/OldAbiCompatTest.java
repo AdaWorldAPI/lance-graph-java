@@ -88,6 +88,26 @@ public final class OldAbiCompatTest {
             }
         });
 
+        // Minor 11 — the parameterised min/max reduction. Gated here, UNCONDITIONALLY, rather
+        // than nested inside the `if (loaded >= 2)` block below: this feature is built entirely
+        // on NativePattern, the same minor-1 base surface already exercised in section (1)
+        // above, and has no RowStore dependency at all — unlike every other minor-11+ gate
+        // below, each of which needs a minor-2 RowStore just to construct its own fixture (a
+        // Mask, a facet sum, ...). Nesting this gate the same way would have SKIPPED it
+        // entirely against a genuinely minor-1 library — the exact library this compatibility
+        // suite exists to check against, and precisely the case a review caught: an
+        // eager-resolution or missing-symbol regression in lgj_reduce_i32 would have passed
+        // this run clean.
+        gate(c, loaded, 11, "View.minOf/maxOf", () -> {
+            try (NativePattern p = NativePattern.open(64, 0x1234L)) {
+                java.util.OptionalLong mn = p.view().minOf(Pattern.VALUE);
+                java.util.OptionalLong mx = p.view().maxOf(Pattern.VALUE);
+                if (mn.isEmpty() || mx.isEmpty()) {
+                    throw new IllegalStateException("64 rows must select something");
+                }
+            }
+        });
+
         // Minor 4 — mask complement. Needs a minor-2 store to build masks on, so it is only
         // meaningful once the library has minor 2 as well.
         if (loaded >= 2) {
@@ -145,6 +165,32 @@ public final class OldAbiCompatTest {
                 try (RowStore s = RowStore.openColumnar(64, 0x1234L)) {
                     if (!s.isOpen()) {
                         throw new IllegalStateException("columnar store did not open");
+                    }
+                }
+            });
+
+            // Minor 11 — the masking-op completion: mask_ternlog and TCAM
+            // ternary-match over the V3 register. Against an older library each
+            // gate must name minor 11, never a missing symbol and never a
+            // failure of some OTHER minor's feature. (The min/max reduce sibling
+            // of this trio has no RowStore dependency and is gated unconditionally
+            // above, before this block — see its own comment for why.)
+            gate(c, loaded, 11, "Mask.ternlog", () -> {
+                try (RowStore s = RowStore.open(64, 0x1234L);
+                        Mask a = s.maskOfFacetClass(FacetId.of(0), 3);
+                        Mask b = s.maskOfFacetClass(FacetId.of(0), 4);
+                        Mask d = a.ternlog(a, b, 0xFC)) { // OR
+                    if (d.count() > 64) {
+                        throw new IllegalStateException("impossible count");
+                    }
+                }
+            });
+
+            gate(c, loaded, 11, "RowStore.maskOfFacetTernaryMatch", () -> {
+                try (RowStore s = RowStore.open(64, 0x1234L);
+                        Mask m = s.maskOfFacetTernaryMatch(FacetId.of(0), 0L, 0, 0L, 0)) {
+                    if (m.count() != 64) {
+                        throw new IllegalStateException("care=0 must match every row");
                     }
                 }
             });

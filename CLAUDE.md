@@ -230,9 +230,24 @@ build):
   not row count — verified fixed-size on both the Rust and Java sides);
   `Abi.java`'s `readCarvings` (bounded by `CARVING_SLOTS`, a manifest
   constant, not n_rows); `Engine.facetSumResolved`'s fixed `long[2]`
-  result pair. None of the five is a hidden proportional-to-n_rows
-  population copy — keep this list exhaustive when a sixth site is added,
-  rather than letting the enumeration silently go stale again.
+  result pair; `View.where()`'s `List.copyOf` of the PREDICATE chain; and
+  `NativePattern.plan()`'s `predicates.stream()…toList()`. None of the
+  seven is a hidden proportional-to-n_rows population copy — keep this list
+  exhaustive when an eighth site is added, rather than letting the
+  enumeration silently go stale again.
+
+  > **⊘ RE-AUDITED 2026-09-16 and the list WAS stale — it claimed five and
+  > the tree had seven.** `View.where()` and `NativePattern.plan()` were
+  > never listed. Both are legitimate, and *why* is the sharper statement of
+  > the rule: they are bounded by the number of predicates the developer
+  > CHAINED, i.e. by the size of the query they typed — never by the data.
+  > So the invariant is not "no allocation on the Java side"; it is
+  > **nothing proportional to ROWS**, and a query-shaped allocation is the
+  > boring front's own size, not the substrate's. The audit that found this
+  > is one grep (`long[]`, `toArray`, `copyOf`, `.stream()` across
+  > `java/src/main`) and it is the check to re-run before citing the list —
+  > the enumeration had already gone stale once under a sentence telling the
+  > next session not to let it.
   Temporary kernel scratch (SIMD scratch masks, decode buffers) is
   allowed and is NOT the same claim as a second canonical copy.
 - **Layout parity is independently derived, not self-compared.**
@@ -273,6 +288,204 @@ simd_{amx,avx512,avx2,           Rust: lgj-abi kernels → ndarray::simd
   neon,wasm,scalar}.rs           (the pattern NESTS — lgj's bottom is
              (backends)           ndarray's top)
 ```
+
+> **⊘ THE MIDDLE ROW IS WRONG, AND IT MISLEADS (operator-corrected
+> 2026-09-14).** `Valhalla + Panama` is NOT this side's analog of ndarray's
+> `cfg dispatch`. There is **no analog**, because there is nothing to
+> dispatch: `ndarray` IS the SIMD polyfill, there is exactly one
+> implementation of every word, and it is in Rust. Reading the row as an
+> analogy invites treating Panama as a dispatch or compute layer — which is
+> precisely the confabulation it produced (a "T0 owns backend realization"
+> tier story invented to justify a conclusion that needed no tiers; see
+> lance-graph `TECH_DEBT.md`'s ternlog storno).
+>
+> Valhalla and Panama are **two ORTHOGONAL guarantees**, not a pair and not
+> a layer:
+>
+> - **Panama — computation never lives in Java.** The crossing mechanism.
+>   Java hands the question across and receives the projection; the
+>   decomposition of an answer never crosses. This is what E1 enforces.
+> - **Valhalla — storage never lives in Java.** The orthogonal axis. Value
+>   classes carry SHAPE without identity or heap storage, so the Java side
+>   holds names, handles and addresses — never the bytes. This is what the
+>   one-copy law, the `materialize*` naming rule, and
+>   `java-surface-warden`'s "no Stream-over-hydrated-elements" all enforce
+>   from different directions.
+>
+> **What they are FOR, stated positively** (operator, same day): *Java is
+> the low-code thin surface over zero-copy, with methods that look so
+> natural and still compute in lance-graph — Java just thinks it's on
+> steroids without knowing why.*
+>
+> Sharpened 2026-09-16, and this is the sentence to keep: *"java is the low
+> code intake GLOVE around the lance-graph spine — lance-graph-java just
+> happens to offer the MENU TO THE TABLE in a pleasing way, using masking ops,
+> offering 5 star for the price of a blink."* The menu is the product. The
+> kitchen is elsewhere and the diner never sees it; what makes the menu honest
+> rather than a disguise is that the work and the data genuinely never cross.
+> The whole allocation, same ruling:
+>
+> | what | lives in | membrane that keeps Java out of it |
+> |---|---|---|
+> | **thinking** | lance-graph | **Panama** |
+> | **SIMD** | ndarray | the `ndarray::simd` facade |
+> | **storage** | lance-graph | **Valhalla** |
+>
+> Note both membranes name the SAME home for two different things — thinking
+> and storage are both lance-graph's, and Panama and Valhalla are two
+> orthogonal ways of keeping Java out of them. That is why the middle row of
+> the table above is wrong: they are not one layer. The fluency of `view.where(..).hop(..)
+> .count()` is real; the work and the data are both elsewhere; and Java is
+> never told. Zero-copy is what makes the naturalness honest rather than a
+> disguise — there is no hidden hydration behind the nice method name.
+>
+> Corollary for any design that reaches for this table: the isomorphism
+> holds at the TOP row (facade ↔ facade) and the BOTTOM row (backends ↔ the
+> Rust floor). It BREAKS in the middle. Do not reason from the middle row.
+
+## THE JAVA SURFACE IS `sql()`, NOT THE MASK ALGEBRA (operator-ruled, 2026-09-16)
+
+**Verbatim, in four parts:**
+
+> *"Java doesnt use masking ops. `Mask.minus()`, `RowStore.hop()`. Lance-graph
+> does. Java just sees boring `sql()` handed to duckdb (Example)."*
+>
+> *"nobody should ever start trying to optimize Java (except making it boring
+> front)."*
+>
+> *"the boringness is then handed to lancegraph as zero copy."*
+>
+> *"and handled akin to ndarray polyfill — java doesnt know why there is
+> `sql()` polyfill, we just make sure there is."*
+
+### What this corrects, by name
+
+⊘ The sentence three paragraphs up — *"offers the menu to the table in a
+pleasing way, **using masking ops**"* — is **struck on those three words**.
+The menu framing survives; the mechanism named in it does not. lance-graph
+uses masking ops. Java does not, must not, and is never told they exist.
+
+⊘ The isomorphism table's top row previously read `Java (View / Mask /
+RowStore / consumers)` as the facade. **`Mask` and `RowStore` are NOT the
+facade** — they are the substrate's algebra standing on the Java side of the
+wall. `Mask.minus()` and `RowStore.hop()` are the operator's own two examples
+of the wrong shape. The facade is the boring call a Java developer already
+knows how to write.
+
+### The polyfill relation is EXACT, and it is the whole design
+
+This is the part that makes the ruling operational rather than stylistic.
+`ndarray::simd` is a facade with **37 functions and zero shipping
+instructions** — a consumer crate calls `U8x64::cmpeq_mask` and has no idea
+whether AVX-512, NEON, wasm or scalar answered it. The consumer does not
+know why the polyfill exists. It only knows it is there.
+
+`sql()` is that, one tier up:
+
+| tier | the caller writes | the caller does not know |
+|---|---|---|
+| consumer crate → ndarray | `U8x64::cmpeq_mask(..)` | which of six backends ran |
+| Java → lance-graph | `sql("select …")` | that masks, ternlog, hops or popcounts exist at all |
+
+**"We just make sure there is one"** is the standing obligation, and it falls
+on the Rust side, never on Java. A missing `sql()` capability is a
+lance-graph/ABI gap to close — exactly as a missing SIMD primitive is an
+`ndarray::simd` gap to close, never a licence for a consumer to write
+intrinsics. This is the MISSING-CAPABILITY STOP RULE already in this file,
+now with its Java-side spelling.
+
+### The three operational consequences
+
+1. **Nobody optimizes Java. Ever.** The only sanctioned work on the Java side
+   is making it **more boring** — more ordinary, more familiar, closer to what
+   a Java developer would have written without us. A PR whose stated goal is a
+   faster Java path is rejected on its goal, before its diff is read. "Boring"
+   is the performance strategy: the speed is elsewhere.
+2. **The boringness is handed down as zero copy.** The ordinary-looking call
+   is not translated, re-encoded, or marshalled. It crosses as a NAME and the
+   bytes stay put — which is what makes the boring surface honest rather than
+   a disguise. Zero-copy is not an optimization applied to the glove; it is
+   the condition under which a boring glove is allowed to exist.
+3. **A mask concept on a public Java signature is a defect**, regardless of
+   how well it works. `java-surface-warden` already blocks byte positions and
+   arithmetic; this ruling adds the population algebra by name — `Mask`,
+   `minus`, `hop`, `ternlog`, `popcount`, lane ids, opcodes. Those are
+   T1/T2 words (see `kernel-membrane-warden`), and T3 does not speak them.
+
+4. **Java never does materialization — and the row count is what proves it**
+   (operator, same day): *"Java never does materialization. A billion rows op
+   is handed behind the front and handled as a masking hattrick nobody knew
+   what's coming."* This is the boring front's load-bearing property, not a
+   performance note. A billion-row operation crosses as a NAME and returns a
+   scalar; the billion never exists on the Java side, in any form, at any
+   moment. That is why the surface can afford to be boring: `sql()` looks
+   identical at 10 rows and at 10^9, because Java's work is the same at both —
+   none.
+
+   **The checkable form of "never":** every public Java call must be
+   **O(1) in rows**, and the ONLY exit is a method whose name begins with
+   `materialize` (today: exactly one, `Mask.materializeRows()`, O(n), stated
+   in its javadoc). The naming rule is not a loophole in "never" — it is the
+   mechanism that makes "never" auditable, because anything proportional to
+   row count that is NOT named that way is a defect by inspection, with no
+   judgement call required. Keep the exhaustive materialization-site list in
+   the zero-copy section current for exactly this reason: an unnamed sixth
+   site is the failure this rule exists to catch.
+
+   **The corollary that bites hardest in review:** a Java-side loop is not
+   merely slow, it is *proof that something was materialized to loop over*.
+   E1 forbids the loop; this forbids the thing that made a loop expressible.
+   Two statements of one rule from opposite ends.
+
+### THE ENDGAME — why "boring" is strategy, not taste (operator, same day)
+
+> *"endgame is make Java low code **'Bring your own software'** to beat
+> palantir foundry at its own game."*
+
+Foundry's proposition is *bring your data to our platform* — and then learn
+its ontology tooling, its pipeline builder, its workshop, its idioms. The
+learning curve is not a cost of the product; **it IS the product**, because
+every hour a customer spends learning it is an hour of lock-in that a
+competitor must refund before they can switch.
+
+BYOS inverts exactly that: **bring your own software.** The customer keeps
+their Java, their SQL, their JDBC-shaped habits, their existing build — and
+the substrate is underneath without them learning a new vocabulary to reach
+it. Nothing to port, nothing to adopt, nothing to unlearn if they leave.
+
+**This is what makes each of the three consequences above non-negotiable
+rather than stylistic:**
+
+- **Novel API is the enemy, not slow API.** `Mask.minus()` is something a
+  customer must LEARN; `sql()` is something they already know. Every unit of
+  novelty on the Java surface is a unit of Foundry-shaped lock-in-by-curve —
+  built by us, against our own pitch. That is why optimizing Java loses the
+  game even when it succeeds: optimization on that side produces novel API,
+  and novel API is precisely the thing BYOS promises not to require.
+- **"Boring" is therefore the competitive moat, measured as absence.** The
+  win condition is that a Java developer writes what they would have written
+  anyway and the result arrives at substrate speed. There is no demo of this
+  that looks impressive — it looks like nothing happened, which is the point.
+- **The advantage must live where the customer does not have to look.** Speed
+  comes from lance-graph and ndarray; the customer gets it by writing ordinary
+  code. A surface that has to be studied to be fast has already conceded the
+  argument, however fast it then is.
+
+**Practical test for any proposed Java-side addition:** *would a customer who
+has never read our documentation write this line by accident, from habit
+alone?* If yes, it is a candidate. If it needs a paragraph of explanation, it
+is Foundry's business model with our name on it — reject it and close the gap
+on the Rust side instead.
+
+### Scope — what this does NOT do
+
+It does not delete `Mask` or `RowStore` today. They exist, they are tested,
+and the four leak-on-throw fixes that landed with this ruling make existing
+code correct rather than expanding it. What the ruling settles is the
+DIRECTION: the boring `sql()`-shaped surface is the target, the mask algebra
+is not to be grown on the Java side, and no future session may cite the
+struck sentence above as licence to add another `Mask.*` verb.
+
 
 Measured grounding (2026-08-27, in-tree): `simd.rs` is 37 functions and
 ZERO shipping instructions — every raw intrinsic in it sits inside
@@ -319,6 +532,126 @@ the signal the substrate is missing a word.
 `simd-savant`: no `java.lang.foreign.*`, `java.lang.invoke.*`, or
 `internal.*` in any public signature — the exact analog of "all SIMD from
 `ndarray::simd`, never `simd_{arch}`, never raw intrinsics".
+
+## Never skip the Java half — check FOUR places before saying "no JDK" (2026-09-16)
+
+**Operator ruling: document this so no future session runs without Panama at
+all.** This repo's history contains commits titled *"UNVERIFIED: JDK 26 not
+available in this sandbox"*, and the Java half of an ABI-minor-11 change went
+to PR on that basis.
+
+> ⊘ **The first version of this section, written earlier the same day, led with
+> the apt route and was itself misleading.** Re-checked: **`/opt/jdks/jdk-26.0.2`
+> was present the whole time** (26.0.2.1), the suite runs `ALL PASSED (409
+> checks)` on it, and `.claude/knowledge/jdk-toolchain-facts.md` had already
+> named that exact path. Nothing needed installing. The session looked at
+> `java -version` and `/usr/lib/jvm` — **neither of which sees `/opt/jdks`** —
+> and inferred absence. So the apt routes below are a RECOVERY path, not the
+> answer; the answer is `ls /opt/jdks`.
+
+**The rungs, in order. Report "no JDK" only after all four fail.**
+
+```sh
+ls -d /opt/jdks/*/ && for d in /opt/jdks/*/; do "$d/bin/java" -version; done   # 1
+ls /usr/lib/jvm/                                                              # 2
+```
+
+Rung 1 is the production path this repo pins, and it is the one that was
+missed. `which java` answers "what is on PATH", never "what is installed" — it
+is not evidence about the second question. Full ladder with the
+verified-by-execution table: `.claude/knowledge/jdk-toolchain-facts.md`
+§ ACQUISITION LADDER; the guard is `.claude/agents/jdk-toolchain-warden.md`.
+
+Rungs 3 and 4 are apt, and matter when `/opt/jdks` is absent — which it may
+well be in a rebuilt container, since **`/opt/jdks/jdk-27` (the JEP 401
+Valhalla EA build) is already GONE from this one.**
+
+**JDK 26 — the version this repo's own commits targeted — needs ONE extra apt
+source, and Ubuntu's stock archive alone will never offer it.** Add Adoptium
+and it is an ordinary `apt-get install`:
+
+```sh
+# the extra source — Ubuntu noble stops at openjdk-25; Adoptium carries 8..26
+curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+  | sudo tee /etc/apt/keyrings/adoptium.asc >/dev/null
+. /etc/os-release && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] \
+https://packages.adoptium.net/artifactory/deb $VERSION_CODENAME main" \
+  | sudo tee /etc/apt/sources.list.d/adoptium.list
+sudo apt-get update
+sudo apt-get install -y temurin-26-jdk     # -> /usr/lib/jvm/temurin-26-jdk-amd64
+```
+
+Ubuntu's own archive serves **openjdk-25** (also fine — Panama is final since
+22, and the suite passes on it too):
+
+```sh
+sudo apt-get update                          # NOT optional — see the trap below
+sudo apt-get install -y openjdk-25-jdk-headless
+/usr/lib/jvm/java-25-openjdk-amd64/bin/java -version   # openjdk 25.0.4
+```
+
+**The trap that made this look impossible.** The pre-seeded apt index pointed
+at `openjdk-25 25.0.2+10-1~24.04`, a version already withdrawn from the pool,
+so the install died on a bare `404 Not Found` — which reads as *"this package
+does not exist"* rather than *"your index is stale"*. `apt-get update` moved
+the candidate to `25.0.4+7-1~24.04` and the install succeeded immediately.
+Same shape as this workspace's other freshness traps: **a cached view reporting
+absence is not evidence of absence.**
+
+### Running the Java suite — there is no build tool, and that is deliberate
+
+`java/src/test/.../AllTests.java` is a plain `main` that runs every suite in
+one JVM and exits 0 / 1 / 2 (passed / failed / **native artifact absent, so
+nothing ran** — a missing library reported as a failure would send the reader
+hunting a bug that is not there). So: build the `.so`, `javac`, `java`.
+
+```sh
+# 1. the native artifact
+cd native/lgj-abi && cargo build --release          # -> target/release/liblgj_abi.so
+
+# 2. compile main + test together (56 files)
+J=/usr/lib/jvm/temurin-26-jdk-amd64/bin      # or java-25-openjdk-amd64
+find java/src/main java/src/test -name '*.java' > /tmp/srcs.txt
+$J/javac -d /tmp/jout @/tmp/srcs.txt
+
+# 3. run. `-Dlgj.library` is an EXPLICIT request and `Abi.locateLibrary`
+#    refuses to fall back to a search path if it cannot be honoured — by
+#    design, so a run can never silently measure a different artifact.
+$J/java --enable-native-access=ALL-UNNAMED \
+        -Dlgj.library=$PWD/target/release/liblgj_abi.so \
+        -cp /tmp/jout com.adaworldapi.lancegraph.AllTests
+```
+
+**Measured 2026-09-16 on BOTH `Temurin 26.0.2.1` and `openjdk 25.0.4`:
+`ALL PASSED (409 checks)`** across all 16 suites, against `abi 0.11, simd
+ndarray::simd avx512, profile release` — identical on the two JDKs. The
+runtime line the suite prints at the end names the ABI minor, the SIMD backend
+and the library path — read it, because it is what tells you the run exercised
+the artifact you meant.
+
+### What JDK 25 does and does NOT give you
+
+| need | reachable here? | source |
+|---|---|---|
+| **Panama FFM** (`java.lang.foreign`, the whole `internal/ffm` membrane) | **YES** — final since 22 | Ubuntu `openjdk-25-jdk-headless`, or Adoptium `temurin-26-jdk` |
+| the 16-suite `AllTests` run (409 checks) | **YES**, verified on 25 AND 26 | either of the above |
+| `valhalla-lab/src/stable` (records, JDK 26) | **YES** | Adoptium `temurin-26-jdk` |
+| `valhalla-lab/src/valhalla` (**value** records, JDK 27 EA) | not via apt | `https://jdk.java.net/valhalla/` — reachable, `HTTP 200` |
+
+**Only the Valhalla EA arm needs a non-apt fetch, and it is not a gate.**
+Adoptium's noble repo carries 8 through 26 and stops there (`apt-cache search
+temurin` shows no 27+), and mainline 27 would not help anyway — `value record`
+is a Valhalla EA feature, not a mainline one. `https://jdk.java.net/valhalla/`
+**is reachable through this environment's proxy** (verified `HTTP 200`), so
+that build is a download away rather than a blocker. `bench/` and
+`valhalla-lab/` are measurement arms, NOT gates; the merge gate is the Rust
+suite plus the 409-check Java run, and both are reachable here.
+
+**Consequence for every future session:** "the Java side could not be verified"
+is no longer an acceptable status line for this repo. The Rust half
+(`cargo test` in `native/lgj-abi`) and the Java half (409 checks) are BOTH
+runnable in this container, and a PR that claims the Java surface is unverified
+is claiming something that takes about four minutes to falsify.
 
 ## Missing-capability STOP rule
 

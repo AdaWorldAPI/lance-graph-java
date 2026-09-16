@@ -323,6 +323,62 @@ public final class Engine {
         }
     }
 
+    // ── the masking-op completion (docs/abi.md §19, ABI minor ≥ 11) ─────────────────────────
+    //
+    // Same requireMinor-before-any-downcall discipline as every section above: a Java build
+    // compiled against this feature never reaches a missing symbol inside Downcalls, it fails
+    // here, first, naming the version gap.
+
+    /**
+     * {@code dst = ternlog::<imm>(a, b, c)}, word-wise — the mask-op family's general member
+     * (docs/abi.md §19.1). Requires ABI minor &gt;= 11.
+     */
+    public static void maskTernlog(long a, long b, long c, long dst, byte imm) {
+        Abi.requireMinor(11);
+        Downcalls.maskTernlog(a, b, c, dst, imm);
+    }
+
+    /**
+     * Overwrites {@code dstMask} with the TCAM match {@code ((register(row, facet) ^ pattern) &
+     * care) == 0} over the 12-byte content-blind register that follows {@code facet}'s classid
+     * (docs/abi.md §19.2). {@code pattern}/{@code care} are each the register split as low 64 /
+     * high 32 bits, matching {@link RowStore#payloadLow64At}/{@link RowStore#payloadHi32At}'s own
+     * convention — the two halves are marshalled into scratch buffers here so no caller above
+     * this class ever touches a {@link MemorySegment}. {@code AosRows} layout only; a facet-major
+     * store answers {@code UNSUPPORTED_LAYOUT}. Requires ABI minor &gt;= 11.
+     */
+    public static void ternaryMatch(long res, int facet, long patternLo64, int patternHi32,
+            long careLo64, int careHi32, long dstMask) {
+        Abi.requireMinor(11);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment pattern = a.allocate(Layouts.FACET_REGISTER_BYTES, 8);
+            MemorySegment care = a.allocate(Layouts.FACET_REGISTER_BYTES, 8);
+            pattern.set(ValueLayout.JAVA_LONG, 0, patternLo64);
+            pattern.set(ValueLayout.JAVA_INT, 8, patternHi32);
+            care.set(ValueLayout.JAVA_LONG, 0, careLo64);
+            care.set(ValueLayout.JAVA_INT, 8, careHi32);
+            Downcalls.opTernaryMatch(res, facet, pattern, care, dstMask);
+        }
+    }
+
+    /** The two outputs of {@link #reduceI32}: a widened value and whether it is meaningful. */
+    public record ReduceOutcome(long value, boolean present) {}
+
+    /**
+     * The parameterised reduce §15 mandated in advance (docs/abi.md §19.3): {@code reduceOp}
+     * {@link Layouts#REDUCE_OP_SUM}/{@link Layouts#REDUCE_OP_MIN}/{@link Layouts#REDUCE_OP_MAX}
+     * over an {@code I32} lane, widened to {@code i64}. {@link ReduceOutcome#present} is
+     * {@code false} exactly when the selected population is empty and {@code reduceOp} is MIN or
+     * MAX — SUM is always present. Requires ABI minor &gt;= 11.
+     */
+    public static ReduceOutcome reduceI32(long resource, int laneId, int reduceOp, long mask) {
+        Abi.requireMinor(11);
+        Scratch s = SCRATCH.get();
+        long value = Downcalls.reduceI32(resource, laneId, reduceOp, mask, s.out, s.out2);
+        boolean present = s.out2.get(ValueLayout.JAVA_INT, 0) != 0;
+        return new ReduceOutcome(value, present);
+    }
+
     // ── mask complement + hop (docs/abi.md §13, ABI minor ≥ 4) ─────────────────────────────
     //
     // Same requireMinor-before-any-downcall discipline as the row store section above: a Java

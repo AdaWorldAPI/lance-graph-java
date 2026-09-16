@@ -1,3 +1,305 @@
+## 2026-09-14 (6) — the lowering differential: one law, two implementations, finally compared
+
+`plan_lower` lowers a FLAT OP LIST (a left fold seeded with all-ones,
+`acc &= p` / `acc |= p`) to a `mask_risc::Program`. `lance-graph-quack`'s
+`lower` lowers a Boolean TREE to the same `Program`. They implement the same
+law twice — the accumulator gate, the AND/OR gating asymmetry, and the drop
+of ops before the first AND — and until now nothing compared them, because
+each has its OWN oracle: this crate's is `pr4_equivalence.rs`'s frozen
+pre-PR4 loop; quack's is a per-row reading in its own crate that has never
+heard of `plan_lower`. Neither can see the other drift.
+
+`src/exports/tests/lowering_convergence.rs` closes that. Three tests, 603
+lines, all green.
+
+**The conversion is where the prefix rewrite turns out not to be a special
+case.** `fold_to_tree` reads the op list as the tree it denotes:
+`all_ones & p == p` makes the first AND the accumulator; `all_ones | p ==
+all_ones` makes an OR before that first AND simply never become a node.
+`plan_lower` reaches the identical answer by scanning for the least AND
+index. Same predicate, two routes — and
+`the_all_rows_shortcut_is_the_same_condition_on_both_sides` pins exactly
+that, two-sided: 3 of the 28 combine vectors are `AllRows` (one all-OR
+vector per arity), 25 are not.
+
+**Deliberately a differential, NOT a delegation.** `lance-graph-quack` is a
+**dev**-dependency, and the manifest comment says why: the membrane — the
+`cdylib` Java's `Linker` loads — must not depend on a CONSUMER of the IR it
+serves. Sharing the LAW between two independent implementations is the
+point; sharing a runtime dependency in that direction would invert the
+layering. `plan_lower` stays, and now it is pinned.
+
+**Both anti-vacuity bounds were floors, and both floors were hiding
+something.** The worker's spec said `>= 15` of 28 and `>= 7` of 9. Measured,
+both passed EXACTLY at their bound — which is what a floor looks like when
+the fixture is dead:
+
+- the arity-4 arm appended `LT_I32(500)`, and the values lane is
+  `-150..=361`, so the op was always-true. The whole 16-vector arm collapsed
+  to eight saturated 1000s plus eight verbatim copies of the arity-3 row:
+  zero additional discriminating power, and it cleared the floor by sitting
+  on it. `LT_I32(200)` (676 of 1000) took the count **15 -> 21**.
+- `LT_I32`/`LE_I32` were given `500` in the per-opcode arm too, so both
+  selected every row. Two arms agreeing that EVERY row survives cannot
+  separate `LtI32` from `LeI32` from any other always-true reading — the
+  exact swap this file exists to catch would have passed on those two rows.
+  `LT_I32(200)` / `LE_I32(300)` took it **7 of 9 -> 9 of 9**, and the four
+  ordered comparisons now carry distinct counts on purpose: this is a
+  differential between two ARMS, so a mis-map is visible only when it moves
+  one arm's count, and two opcodes selecting the same number of rows would
+  hide a swap between exactly those two.
+
+Both are now `assert_eq!`, measured, with the incident recorded at the
+assertion. Zero `TODO`s left in the file.
+
+**And the fixture fix is itself measured, not asserted.** Mis-mapping
+`LGJ_OP_LE_I32` to `Pred::LtI32` in `plan_lower` — a one-token change, and
+exactly the defect class this file exists to catch — is **RED at operand
+300** (`LeI32(300)` = 866, `LtI32(300)` = 865; one row is enough) and
+**GREEN at operand 500**, where both readings select all 1000 and the two
+arms agree on an answer neither computed correctly. So the operand is the
+difference between a test and a decoration, and the pre-fix version of this
+file would have shipped blind to a real mis-map on two of its nine opcodes.
+
+**Disable table — five arms, all red:**
+
+| arm | disable |
+|---|---|
+| the AND/OR asymmetry | `plan_lower` gates an OR on the accumulator |
+| the prefix rewrite | `plan_lower` takes `k := 0` always |
+| a one-opcode mis-map | `LGJ_OP_LE_I32` -> `Pred::LtI32` |
+| the fold's OR node | the fold flattens an OR into the enclosing AND |
+| the fold's dead prefix | an OR before the first AND becomes a leaf |
+
+Numbers, from `--nocapture`: per-opcode seeds 65 / 935 / 2 / 998 / 498 /
+676 / 866 / 500 / 65; the 28-vector sweep runs 39, 498, 524, 1000 (n=2),
+0, 40, 40, 73, 112, 531, 557, 1000 (n=3) — both identical to
+`pr4_matrix.rs`'s own recorded figures, which is the cross-reference the
+shared `(n=1000, seed=33)` fixture buys — and 0, 20, 20, 53, 64, 207, 233,
+676, 676, 696, 696, 696, 724, 1000, 1000, 1000 (n=4).
+
+lgj-abi 182 lib tests (179 + 3), every integration binary green, clippy
+`-D warnings` and fmt clean.
+
+## 2026-09-14 (5) — PR4 C3: the allocation gate, and what it actually measures
+
+Two new integration binaries, both disable-verified.
+
+**`tests/plan_eval_no_alloc.rs`** — one `#[test]`, a pass-through
+`GlobalAlloc` over `System` counting bytes. Rust-side deliberately: this
+repo's other allocation gates use `getThreadAllocatedBytes`, which measures the
+JAVA heap and cannot see a Rust `vec!` at all, so citing them for this property
+would have been an overclaim.
+
+**Measured, not predicted: 160 B per call at 64, 999, 1_000, 8_192 and 65_536
+rows — identical.** A 32-op plan costs 2_016 B. The old loop allocated
+`2 * n_words * 8` per call: 16 KiB at 65_536 rows, growing without bound with
+the population. So the claim the gate pins is not "zero" — the lowering's own
+`Vec<MaskOp>` is real and proportional to the OP count — it is the honest one:
+**per-call allocation is independent of `n_rows`.**
+
+**A defect in the gate, found by its own disable run.** `measure()` originally
+did one un-measured warm-up call per row count. Replacing the monotonic
+`resize` with a per-size `*buf = vec![…]` — a cache keyed by row count, the
+exact thing C-ALLOC denies — left the gate GREEN, because the per-measurement
+warm-up absorbed the first call at each size, which is the only place such a
+cache allocates. The plan predicted the shape ("a gate that warms up over a
+fixed sweep and then measures that same sweep is green while the property is
+false") and the gate had it anyway. Fixed: the arena is warmed ONCE, globally,
+at the largest row count, and every arm — including `UNSEEN = 999`, which is
+smaller and never seen before — is measured cold. D9/D10/D11 then all go red.
+
+D9 is worth its own line: routing the gate through `lgj_plan_eval_scalar`
+reddens it at 592 → 278_848 B per call across the sweep. That is Fork A's cost
+made visible — the row-at-a-time oracle allocates one `bool` per row per slot
+by design, which is what lets it falsify a bit-packing bug — and it is why the
+gate names `lgj_plan_eval` and only it.
+
+**`tests/c_one_evaluator.rs`** — the structural guard that there is one plan
+evaluator. The invariant is an allowlist over MODULES: only `abi.rs` (the
+definition), `exports.rs` (the `extern "C"` signatures and `validate_plan`,
+which rejects rather than evaluates) and `plan_lower.rs` (the one lowering) may
+name `LgjOpDesc` in code. Three narrower rules were tried and rejected against
+the tree, each recorded in the file: "only `plan_lower` may call
+`eval_predicate`" is false (the unfused single-predicate exports call it with
+constant opcodes, correctly); "the opcode argument must be a literal" fires on
+`lgj_mask_combine`, which legitimately takes a runtime combine; "no production
+function may iterate `&[LgjOpDesc]`" is the right property and not textually
+checkable.
+
+Two scanner defects its own assertions caught. Splitting production from test
+at the first `#[cfg(test)]` silently discarded most of `exports.rs` — that file
+and `registry.rs` carry test-only ITEMS long before their test module — so the
+split now anchors on the trailing `#[cfg(test)] mod` and brace-matches to
+prove it really is the file's last item. And scanning raw text flagged
+`kernels.rs`, which names the type four times in PROSE and never touches it;
+allowlisting it would have been the wrong repair, since kernels is exactly
+where a second evaluator would most plausibly grow, so comments are stripped
+instead.
+
+Disable table: D12a (a second production module holding plan ops) RED; D12b
+(widening the allowlist to a module that does NOT hold them) RED — the guard
+is a genuine equality, not the permissive `<=` the plan warned about; D12c
+(the type renamed out from under the scanner) RED on the anti-vacuity arm.
+
+Gate: 174 lib + 1 + 3 + 1 integration, clippy `-D warnings` and fmt clean.
+
+## 2026-09-14 (4) — PR4 C2: `plan_eval` stops being a second evaluator
+
+`plan_eval_impl` no longer holds an opcode loop. It lowers
+`&[LgjOpDesc]` to a `lance_graph_mask_risc::Program` (new module
+`src/plan_lower.rs`) and runs it — `execute` on the SIMD path,
+`reference_execute` on the scalar one. New path dep
+`lance-graph-mask-risc`; `ndarray` remains the only source of SIMD in this
+crate, because mask-risc names no ISA at all (a grep test in that crate
+enforces it) and delegates every op to the same `ndarray::simd` facade
+`kernels.rs` uses. What moved is who SEQUENCES the ops, not who computes them.
+
+**What the lowering is.** Let `k` be the least index whose combine is AND. The
+old loop seeded an all-ones accumulator and folded each op in, so an `|=`
+before the first AND cannot shrink anything and `all_ones & p == p` — every op
+in `0..k` is dead. So ops `0..k` are dropped; op `k` becomes a bare `Pred`
+writing slot 0 (it IS the accumulator); each later op writes slot 1 and folds
+into slot 0. If no op combines with AND, the answer is every row and **no
+program is built at all**. That prefix rewrite is not an optimisation bolted
+on: it is what lets the lowering work without a fill/constant op, which the
+mask-RISC deliberately does not have.
+
+**The asymmetry that is the whole correctness question.** A later AND-combined
+op is gated `under` slot 0 — `acc & p` depends on `p` only where `acc` already
+survives, so the predicate runs over the accumulator's live 64-row words. A
+later OR-combined op is NOT gated: `acc | p` depends on `p` exactly where
+`acc` is ZERO, so gating it would discard precisely the bits that matter and
+quietly answer `acc`. `pr4_matrix`'s full `{AND, OR}^n` sweep against the
+frozen oracle is what holds this.
+
+**Allocation.** The per-call `acc` and `scratch` vecs (`2 * n_words * 8` bytes
+— 16 KiB at 65,536 rows) are gone. The accumulator lives in a thread-local
+arena grown monotonically; a smaller call carves a strict prefix of the same
+buffer, so allocation is a function of the thread's MAXIMUM row count, never
+of its history. `acc` is deleted outright rather than kept: after
+`validate_plan` returns `Ok` there is no error path left before the single
+write, so the copy-then-publish dance was protecting against an empty set of
+points. Both properties it bought survive — `dst_mask` is written exactly
+once, and every error returns before `publish` is reached.
+
+**Fork A, and a rename that is mandatory.**
+`lgj_plan_eval_scalar` runs mask-risc's row-at-a-time oracle rather than
+`kernels::scalar_*`. So `simd_and_scalar_plans_agree_bit_for_bit` is renamed
+`the_executor_and_the_row_oracle_agree_bit_for_bit`: under the old
+implementation the name was accurate (two backends of one evaluator), and it
+is not any more. The comparison is now executor-against-oracle — strictly
+stronger, and a different claim. Backend parity is `ndarray::simd`'s business;
+an ABI-level test could only ever have reached it through a proxy. A test
+whose name claims a property it no longer checks is worse than no test.
+
+**Two guards worth naming.** Three `const _: () = assert!(…)` lines pin
+`LANE_IDS/CLASSES/VALUES == 0/1/2`, because the lowering uses `lane_id`
+DIRECTLY as an index into `Planes::lanes` — renumber the fixture and every
+lowered predicate silently reads a different column, of the right kind, on a
+plan the validator accepts. And `Planes::masks` is `&[]` on purpose: handing
+`dst_mask` in as an input plane would turn a caller's dirty prior tail into
+`ExecError::PlaneTail`, a spurious failure on a destination about to be
+overwritten wholesale.
+
+**Honest about the error map.** `exec_error_to_status` exists so a bug in this
+file becomes a status rather than a panic, and **every arm is unreachable
+through the ABI** — `validate_plan` rejects unknown opcodes, bad combines,
+out-of-range lanes and kind mismatches before the lowering is built, and the
+lowering names no plane, no sum terminal and no blend. Its arms are therefore
+NOT claimed to be individually falsifiable, and the doc comment says so rather
+than leaving a future session hunting for the disable run that pins each one.
+
+Gate: 174/174 lib tests, `clippy --all-targets -D warnings` clean, fmt clean.
+The 10 PR4 C1 falsifiers — written against the OLD loop and green before this
+change — pass UNCHANGED against the new one, which is the equivalence claim.
+
+## 2026-09-14 (3) — minor 11 Java side VERIFIED under JDK 26: 409/409; the 11 `ApiSurfaceTest` failures were on `main` already, fence narrowed with a disable run
+
+JDK 26 obtained the documented way's equivalent: OpenJDK 26.0.2.1 GA tarball from
+`jdk.java.net/26` (download.java.net) into `/opt/jdks/jdk-26.0.2.1`, symlinked to
+the path `java/README.md` names (`/opt/jdks/jdk-26.0.2`). The `.so` rebuilt into
+the Java-consumption `target/` reports `abi 0.11`. `AllTests` under the
+documented `javac`/`java` commands: **ALL PASSED (409 checks)** — every suite,
+including the new `MaskingOpCompletionTest` (48) and the three `OldAbiCompatTest`
+gates. The "UNVERIFIED" caveat of the previous entry is discharged.
+
+**One pre-existing defect surfaced and fixed on the way.** The first run was 408
+passed / 11 failed, all in `ApiSurfaceTest`'s unnamed-materialiser fence. Baseline
+check (origin/main `8720d1d`'s `java/` tree archived, compiled with JDK 26, same
+`.so`): the identical 11 breaches — five exception types × `Throwable.getStackTrace`
+/`getSuppressed`, plus `Carving.values()`. None is a project-authored crossing; the
+fence excluded only `Object.class` and so held JDK-declared members and the
+compiler-generated enum `values()` to the `materialize*/import*` naming law. Fixed
+by exempting members whose declaring class is outside `com.adaworldapi.lancegraph`
+and enum `values()`. **Disable run:** in a scratch copy, renaming
+`Mask.materializeRows` → `rows` makes the narrowed fence report exactly one breach
+(`Mask.rows returns long[]`) — it still fires on the thing it exists for. So the
+CI lint gate (fmt/clippy/rust-test) never saw this: the Java suite is not in CI,
+and nobody had run it under JDK 26 since the fence's allowlist was tightened.
+
+## 2026-09-14 (2) — Java side of minor 11 landed UNVERIFIED under the documented JDK 26 — read this before trusting it
+
+`Downcalls.Minor11` (lazy holder mirroring `Minor10`), `Engine.{maskTernlog,
+ternaryMatch, reduceI32}` each behind `Abi.requireMinor(11)` FIRST (the shape
+minors 2–4 still violate), `Mask.ternlog(b, c, imm)`, `RowStore.
+maskOfFacetTernaryMatch(..)`, `View.{minOf,maxOf}` / `Lens.{min,max}` →
+`OptionalLong`, `Layouts.REDUCE_OP_*` + `FACET_REGISTER_BYTES` (derived, never a
+literal 12), `MaskingOpCompletionTest` (truth-table fixture for 8 immediates,
+ternary-match parity against an independent Java loop with anti-vacuity, the
+"extreme UNSELECTED row must not win" min/max falsifier), three
+`OldAbiCompatTest` gates on the existing `-Dlgj.oldlibrary=` path. 367
+insertions, 0 deletions.
+
+**Verification status, stated plainly:** the documented toolchain is JDK 26
+(`/opt/jdks/jdk-26.0.2`) and it is NOT installed in this sandbox. The full tree
+compiled with 0 errors under the only available JDK (21, preview FFM) in a
+SCRATCH copy that patched three pre-existing JDK-22+ `Arena.allocate` overloads
+the codebase already used before this change; at runtime that same JDK 21 build
+fails in the untouched `SmokeTest` at `Engine.rowCount` (`WrongMethodTypeException`,
+a VarHandle/FFM API difference) — so NO Java test in this change has been RUN.
+The `.so` was rebuilt into the Java-consumption `target/` per
+`valhalla-lab/README.md` and reports `abi 0.11`. This repo's CI runs fmt +
+clippy + rust-test only; nothing gates the Java side. **The next session with
+JDK 26 runs `AllTests` before anything else cites this entry as done.** Landed
+on the branch rather than left uncommitted in a live checkout (container-loss
+insurance), with this caveat in the commit message as well.
+
+## 2026-09-14 — ABI minor 10 → 11: the ndarray masking facade reaches the ABI in THREE symbols, not fifteen
+
+**Branch `claude/clone-repositories-71a5sw`** (post ndarray #306). Every
+`ndarray::simd` mask primitive now has a `kernels.rs` wrapper; the ABI grew
+`lgj_mask_ternlog` (runtime `u8` immediate → the const-generic facade; xor/not/
+maj3 and 252 more ride it, no `lgj_mask_xor`/`lgj_mask_not`), `lgj_op_ternary_match`
+(the TCAM / prefix-ancestry op — the one genuinely new 24-byte operand), and
+`lgj_reduce_i32` (op-coded: sum 0 / min 1 / max 2, per `abi.md` §15's
+pre-commitment). The i32 comparison family (`eq/ne/lt/le/ge`, `ne_u32`) landed as
+**op-codes 3–8 on the existing compare symbol — zero new symbols**. Measured
+`nm -D`: 26 → **29** `T lgj_` (abi.md §1/§7 previously disagreed 26 vs 24; both now
+read 29). Deliberate non-exports with revisit conditions (`abi.md` §19.5):
+`mask_any`/`mask_all` (= `lgj_mask_count > 0` / `== n_rows` at identical cost),
+`blend_i32` (vacuous: no resource carries two `I32` lanes), `ternary_match_u64`
+(needs 128 bits of operand). One correction to the brief's census:
+`eq_u32_strided_to_mask` was already `lgj_op_eq_classid` (minor 2).
+
+Gates (orchestrator, in `native/lgj-abi`): `cargo test` 164 + 3 (was 138 + 3),
+`clippy --all-targets -D warnings` clean, `fmt --check` clean, release `.so`
+800 KB. Seven disable runs (`abi.md` §19.7) — two were vacuous on first try
+(an `if false {}` beside the real call; a knob that did not bind) and were
+re-done to assert the guard TEXTUALLY absent; a real bug caught by an
+anti-vacuity assertion (`FACET_PAYLOAD_HI32_OFFSET` is facet-relative, not
+register-relative).
+
+**Java side NOT touched** (not a one-line addition): follow-up = `Downcalls.Minor11`
+mirroring `Minor10` (`Downcalls.java:461`) + `Engine` wrappers behind
+`Abi.requireMinor(11)` + `Mask`/`View` facade methods. Nothing breaks meanwhile
+(`Layouts.LGJ_ABI_MINOR = 1`, `requireMinor` tests `>=`). Pre-existing E2/E3
+residue noticed, not fixed: `kernels.rs` private `FACET_CLASSID_BYTES` duplicates
+`rowstore::FACET_CLASSID_BYTES`; `scalar_rowstore_{classid_mask,facet_match}`
+are `pub fn` in `src/main` reachable only from tests. Measurement caveat: the
+`lance-graph` path dep was a live checkout with concurrent uncommitted edits
+during the run (its `8e5eb8f` + WIP); ndarray resolved to the local checkout.
+
 ## 2026-09-05 — storno: the gate's own first run corrected two claims above
 
 Corrects the entry immediately below, which is left in place per the

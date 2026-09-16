@@ -1,3 +1,13 @@
+## 2026-09-14 — lgj-abi missing mask ops (one Opus worker, orchestrator-gated, ABI minor 11)
+
+**D-ids:** D-MRL-1a (TERNLOG / TERNARY_MATCH ops — now REACHABLE at the ABI;
+the `ogar_loco::TERNLOG = 0x86` consumption is the lowering plan's, not this
+change's). **Output:** `native/lgj-abi/src/{abi.rs,kernels.rs,exports.rs}`,
+`docs/abi.md` §19. Worker ran `cargo test`/`clippy`/`fmt` in the crate only;
+the orchestrator re-ran all three (164+3 green, clippy clean, fmt clean) and
+`nm -D` (29 symbols) before this entry. One writer: this log and
+`LATEST_STATE.md` written by the main thread. No commit by the worker.
+
 ## 2026-08-28 — W1.1 epoch-recheck 5+3 council (8 agents, orchestrator-consolidated)
 
 **D-ids:** D-LGJ-MMV-1a (council half). **Output:**

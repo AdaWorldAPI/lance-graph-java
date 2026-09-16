@@ -468,6 +468,30 @@ public final class Downcalls {
     }
 
     /**
+     * ABI minor 11 symbols (docs/abi.md §19, the masking-op completion): the mask-op family's
+     * general member, TCAM over the V3 register, and the parameterised min/max reduce §15
+     * mandated in advance. Lazy per the minor-2..10 rule.
+     */
+    private static final class Minor11 {
+        static final MethodHandle MASK_TERNLOG = mh("lgj_mask_ternlog",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_BYTE));
+
+        static final MethodHandle OP_TERNARY_MATCH = mh("lgj_op_ternary_match",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                        ValueLayout.JAVA_LONG));
+
+        static final MethodHandle REDUCE_I32 = mh("lgj_reduce_i32",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+
+        private Minor11() {}
+    }
+
+    /**
      * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
      *
      * <p>Work is proportional to the mask's popcount, not the row count — this is a bulk op in
@@ -550,6 +574,69 @@ public final class Downcalls {
             throw wrap("lgj_rowstore_facet_match_count", t);
         }
         Status.check("lgj_rowstore_facet_match_count", st);
+    }
+
+    /**
+     * {@code dst = ternlog::<imm>(a, b, c)}, word-wise — the mask-op family's general member
+     * (docs/abi.md §19.1). {@code imm} is the 8-bit VPTERNLOG truth table (index
+     * {@code (a<<2)|(b<<1)|c}, result bit {@code (imm >> index) & 1}); every value
+     * {@code 0..=255} is legal, so there is no unknown-immediate rejection path or status for
+     * one. Each of {@code a}/{@code b}/{@code c} is read as it was BEFORE the call, so
+     * {@code dst} may alias any of them.
+     */
+    public static void maskTernlog(long a, long b, long c, long dst, byte imm) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor11.MASK_TERNLOG.invokeExact(a, b, c, dst, imm);
+        } catch (Throwable t) {
+            throw wrap("lgj_mask_ternlog", t);
+        }
+        Status.check("lgj_mask_ternlog", st);
+    }
+
+    /**
+     * Overwrites {@code dstMask} with {@code ((register(row, facet) ^ pattern) & care) == 0}
+     * over the 12-byte content-blind register that follows {@code facet}'s classid — TCAM over
+     * the V3 register (docs/abi.md §19.2). {@code AosRows} layout only; a facet-major store
+     * answers {@code UNSUPPORTED_LAYOUT}, checked before {@code dstMask} is even resolved, so it
+     * is provably untouched on that status. {@code pattern}/{@code care} must each point at
+     * {@link Layouts#FACET_REGISTER_BYTES} readable bytes; neither is written.
+     */
+    public static void opTernaryMatch(long res, int facet, MemorySegment pattern,
+            MemorySegment care, long dstMask) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor11.OP_TERNARY_MATCH.invokeExact(res, facet, pattern, care, dstMask);
+        } catch (Throwable t) {
+            throw wrap("lgj_op_ternary_match", t);
+        }
+        Status.check("lgj_op_ternary_match", st);
+    }
+
+    /**
+     * The parameterised reduce §15 mandated in advance (docs/abi.md §19.3): {@code reduceOp}
+     * {@code 0 = SUM}, {@code 1 = MIN}, {@code 2 = MAX} over an {@code I32} lane, widened to
+     * {@code i64} in {@code outValue}. {@code outPresent} is written {@code 0} exactly when the
+     * selected population is empty and {@code reduceOp} is MIN or MAX — SUM is always present.
+     * An unrecognised {@code reduceOp} is {@code UNKNOWN_OPCODE}, never a silent fallback to
+     * SUM. Both outputs are written on {@code LGJ_OK} and neither on any failure.
+     *
+     * @return {@code outValue}'s widened result, read back after the call
+     */
+    public static long reduceI32(long res, int laneId, int reduceOp, long mask,
+            MemorySegment outValue, MemorySegment outPresent) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor11.REDUCE_I32.invokeExact(res, laneId, reduceOp, mask, outValue,
+                    outPresent);
+        } catch (Throwable t) {
+            throw wrap("lgj_reduce_i32", t);
+        }
+        Status.check("lgj_reduce_i32", st);
+        return outValue.get(ValueLayout.JAVA_LONG, 0);
     }
 
     // ── row store (docs/abi.md §11, ABI minor 2) ─────────────────────────────────────────────

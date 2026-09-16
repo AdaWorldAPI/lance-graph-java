@@ -22,12 +22,49 @@
 //! `out_*` parameters are written **only on `OK`**, so a failed call cannot
 //! leave Java reading a half-filled descriptor.
 
+use std::cell::RefCell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use lance_graph_mask_risc::{
+    execute, reference_execute, reference_scratch, scratch_words_for, ExecError, LaneRef, Planes,
+    Scratch, Value,
+};
 
 use crate::abi::*;
 use crate::fixture::PATTERN_LANE_COUNT;
 use crate::kernels::{self, LaneView, Path};
+use crate::plan_lower::{self, Lowered};
 use crate::registry::{self, ResourceEntry};
+
+thread_local! {
+    /// The plan evaluator's scratch arena.
+    ///
+    /// Thread-local and grown monotonically, which is the whole of OQ-1's answer.
+    /// Per-pattern was disqualified: it would give the one deliberately lock-free
+    /// resource kind a `RwLock` and serialise concurrent `lgj_plan_eval` calls on
+    /// one pattern — the common shape. A thread-local has no lock to take.
+    ///
+    /// Allocation is a function of the MAXIMUM row count a thread has seen, never
+    /// of its history: a smaller call carves a strict prefix of the same buffer,
+    /// because `Scratch::over` is handed a length and uses exactly that prefix.
+    /// That is what lets an unseen, smaller row count stay allocation-free rather
+    /// than be warmed into passing by an earlier call of the same size.
+    ///
+    /// The cost, stated rather than absorbed: a thread that has evaluated one
+    /// 65,536-row plan holds `scratch_words_for(1024, 2) * 8` bytes until it
+    /// exits. Bounded, and not per call.
+    static PLAN_SCRATCH: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+}
+
+// The lowering addresses lanes by using `LgjOpDesc.lane_id` DIRECTLY as an
+// index into `Planes::lanes`. That is correct only while the fixture's lane
+// ids are 0, 1, 2 in this order — renumber them and every lowered predicate
+// silently reads a different column, of the right kind, on a plan the
+// validator happily accepts. The cheapest possible guard, and it fails the
+// build rather than the run.
+const _: () = assert!(crate::fixture::LANE_IDS == 0);
+const _: () = assert!(crate::fixture::LANE_CLASSES == 1);
+const _: () = assert!(crate::fixture::LANE_VALUES == 2);
 
 /// Run `f`, converting a panic into [`LGJ_ERR_PANIC`].
 ///
@@ -681,6 +718,142 @@ pub extern "C" fn lgj_mask_andnot(a: u64, b: u64, dst: u64) -> i32 {
     guard(|| mask_andnot_impl(a, b, dst))
 }
 
+/// The body behind [`lgj_mask_ternlog`].
+///
+/// # Why this does not use `lock_masks_ordered`
+///
+/// That helper solves the multi-mask lock problem for up to THREE entries, and
+/// this call has FOUR handles. Two things stop it being the tool here, and
+/// neither is the count:
+///
+/// 1. it takes a WRITE guard on every entry, and a write guard is how a mask's
+///    memoised carving is invalidated — so reading `a`/`b`/`c` through it would
+///    silently throw away three memos this operation does not touch;
+/// 2. the deadlock-freedom it buys is unnecessary once no two locks are ever
+///    held at once.
+///
+/// So this follows [`lgj_hop`]'s discipline instead — snapshot each operand
+/// under a READ lock that is fully RELEASED before the next lock is taken, then
+/// take the single WRITE lock. One lock at a time means aliasing carries zero
+/// deadlock risk **by construction rather than by case analysis**, and the
+/// snapshots give the aliasing SEMANTICS for free: every operand is the value
+/// it had BEFORE the call, whichever of the four handles `dst` happens to be.
+fn mask_ternlog_impl(a: u64, b: u64, c: u64, dst: u64, imm: u8) -> i32 {
+    let (ea, pa) = match registry::resolve_mask_with_parent(a) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let (eb, _) = match registry::resolve_mask_with_parent(b) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let (ec, _) = match registry::resolve_mask_with_parent(c) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let (ed, _) = match registry::resolve_mask_with_parent(dst) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+
+    // Same "share the same parent and row count" reading as `mask_binop` and
+    // `mask_andnot_impl` (abi.md §7/§13), extended from three masks to four —
+    // the rule is unchanged, only the arity is.
+    if ea.n_rows != eb.n_rows || ea.n_rows != ec.n_rows || ea.n_rows != ed.n_rows {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    if ea.parent != eb.parent || ea.parent != ec.parent || ea.parent != ed.parent {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    let n_rows = pa.n_rows;
+
+    // Snapshot `b` and `c`, each under its own read lock, each released before
+    // the next is taken.
+    let snap_b: Vec<u64> = match eb.read_mask() {
+        Some(g) => g.words.to_vec(),
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    let snap_c: Vec<u64> = match ec.read_mask() {
+        Some(g) => g.words.to_vec(),
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    // `a` is snapshotted ONLY when it is not already `dst`: in the aliasing
+    // case the write guard's own buffer already holds `a`'s pre-call value,
+    // which is the first truth-table operand, so the copy would be pure cost.
+    let snap_a: Option<Vec<u64>> = if std::sync::Arc::ptr_eq(&ed, &ea) {
+        None
+    } else {
+        match ea.read_mask() {
+            Some(g) => Some(g.words.to_vec()),
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        }
+    };
+
+    let mut g = match ed.write_mask() {
+        Some(g) => g,
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    if g.words.len() != snap_b.len() || g.words.len() != snap_c.len() {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    if let Some(sa) = &snap_a {
+        if g.words.len() != sa.len() {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+        g.words.copy_from_slice(sa);
+    }
+    kernels::simd_mask_ternlog_assign_dyn(imm, &mut g.words, &snap_b, &snap_c);
+    // MANDATORY, not defensive-in-the-usual-sense: the result's tail is
+    // `imm & 1` replicated, so every ODD table — `NOT_A = 0x0F` among them —
+    // sets every bit past the population. `lgj_mask_count` reads that tail.
+    clear_tail_bits(&mut g.words, n_rows);
+    LGJ_OK
+}
+
+/// `dst = ternlog::<imm>(a, b, c)` — ANY 3-input Boolean function of three
+/// masks, in one pass (ABI minor >= 11, `docs/abi.md` §19).
+///
+/// This is the mask-op family's GENERAL MEMBER, and adding it is why XOR, NOT,
+/// MAJ3 and 252 other functions arrive without a symbol each. `imm` is the
+/// 8-bit truth table in the VPTERNLOG convention (index `(a<<2)|(b<<1)|c`,
+/// result bit `(imm >> index) & 1`); every value `0..=255` is legal, so there
+/// is no unknown-immediate rejection path. The spellings this ABI's own prose
+/// names:
+///
+/// | function | `imm` |
+/// |---|---|
+/// | `a & b` | `0xC0` |
+/// | `a \| b` | `0xFC` |
+/// | `a ^ b` | `0x3C` |
+/// | `a & !b` | `0x30` |
+/// | `!a` | `0x0F` |
+/// | `a & b & c` | `0x80` |
+/// | majority of three | `0xE8` |
+///
+/// The three existing algebra symbols ([`lgj_mask_and`], [`lgj_mask_or`],
+/// [`lgj_mask_andnot`]) are NOT removed and NOT reimplemented on top of this:
+/// removal would not be an additive minor, and each keeps a two-mask aliasing
+/// analysis that is cheaper than this symbol's snapshot discipline. They remain
+/// the ones to call for their own function; this is the one to call for
+/// everything else.
+///
+/// **Aliasing:** `dst` may be any of `a`, `b`, `c`, or none of them, and every
+/// operand is read as it was BEFORE the call — see [`mask_ternlog_impl`] for
+/// the mechanism. All four must share the same parent and row count, or
+/// `MASK_LENGTH_MISMATCH`.
+///
+/// **Tail:** bits at row index `>= n_rows` are zero on return. That is load
+/// bearing rather than incidental here: unlike AND/OR/ANDNOT, whose tables are
+/// all even, an ODD `imm` is true of `(0,0,0)` and therefore sets every tail
+/// bit before the clear.
+///
+/// **Bulk (§6):** work is `n_rows / 64` words for the pass, plus up to three
+/// snapshots of the same size — doubling `n_rows` doubles both.
+#[no_mangle]
+pub extern "C" fn lgj_mask_ternlog(a: u64, b: u64, c: u64, dst: u64, imm: u8) -> i32 {
+    guard(|| mask_ternlog_impl(a, b, c, dst, imm))
+}
+
 /// Population count of a mask — how many rows are selected.
 /// # Safety
 ///
@@ -857,6 +1030,126 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
             stride,
             store_entry.n_rows as usize,
             needle,
+            &mut g.words,
+        );
+        clear_tail_bits(&mut g.words, store_entry.n_rows);
+        LGJ_OK
+    })
+}
+
+/// TCAM over a facet's 12-byte V3 register: **overwrites** `dst_mask` with
+/// `((register(row, facet) ^ pattern) & care) == 0` (ABI minor >= 11,
+/// `docs/abi.md` §19).
+///
+/// # Why this is a symbol and the comparison family is not
+///
+/// Every other predicate this minor adds is an `LgjOpDesc` op-code, because
+/// `operand: i64` carries all the parameter each of them has. This one carries
+/// **24 bytes** — a 12-byte pattern and a 12-byte care mask — so it cannot be
+/// an op-code without growing the descriptor, which would not be additive. It
+/// is also the first BITWISE-over-payload predicate in this ABI at all: every
+/// predicate before it compared a whole scalar field (a classid, a value, an
+/// id), and `.claude/plans/mask-risc-lowering-v1.md` §1 records that absence as
+/// the gap its vertical axis needs closed.
+///
+/// # What `care` buys
+///
+/// `care` selects which BITS must agree; the rest are "don't care". That makes
+/// this a PREFIX test — set the leading bytes, clear the rest, and the answer
+/// is "which rows carry this prefix", which is HHTL ancestry expressed as one
+/// mask. `care` all-zero matches every row (a deliberate total, not an error);
+/// `care` all-ones is exact register equality.
+///
+/// # Layout
+///
+/// `AosRows` only. A facet's register is 12 CONTIGUOUS bytes there — the
+/// property that makes one strided pass possible — and `FacetMajor`
+/// deliberately splits it into a lo64 region and a hi32 region far apart in the
+/// buffer. Gathering it back together per row would be the serialization this
+/// ABI exists to forbid, so the answer is `UNSUPPORTED_LAYOUT` (`-18`), the
+/// same deferral-stated-as-a-status the register-sweep family already uses
+/// (§14/§15/§16, abi.md §18).
+///
+/// # Mask compatibility
+///
+/// Row-count only, matching [`lgj_op_eq_classid`] — the closest sibling, a
+/// predicate that WRITES a mask — rather than the register sweeps' stricter
+/// parent-identity check. abi.md names only the row-count condition for a
+/// predicate's destination, and inventing a second reading for one new
+/// predicate would be the drift this membrane is built to prevent.
+///
+/// # Bulk (§6)
+///
+/// One strided pass over `n_rows` records. Doubling `n_rows` doubles the work.
+///
+/// # Safety
+///
+/// A null `pattern` or `care` is *handled*, not UB: `NULL_ARGUMENT`. Otherwise
+/// each must point at 12 readable bytes that stay valid for the call. Neither
+/// is written. `dst_mask` is written only on `LGJ_OK`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_op_ternary_match(
+    res: u64,
+    facet: u32,
+    pattern: *const u8,
+    care: *const u8,
+    dst_mask: u64,
+) -> i32 {
+    guard(|| {
+        if pattern.is_null() || care.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let store_entry = match registry::resolve_kind(res, LGJ_RESOURCE_ROWSTORE) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+        let store = match store_entry.rowstore() {
+            Some(s) => s,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // Checked BEFORE the mask is resolved and long before anything is
+        // written, so `dst_mask` is provably untouched on a refusal — the same
+        // ordering §14's carving check and §13's decode_mode check use.
+        if store.layout != crate::rowstore::RowLayout::AosRows {
+            return LGJ_ERR_UNSUPPORTED_LAYOUT;
+        }
+        if facet >= crate::rowstore::ROW_FACETS {
+            return LGJ_ERR_INVALID_LANE;
+        }
+        let (mask, _parent) = match registry::resolve_mask_with_parent(dst_mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        if mask.n_rows != store_entry.n_rows {
+            return LGJ_ERR_MASK_LENGTH_MISMATCH;
+        }
+
+        const N: usize = kernels::FACET_REGISTER_BYTES;
+        // SAFETY: both pointers are non-null (checked above) and the caller
+        // states each points at `N` readable bytes. Java builds them from a
+        // MemorySegment whose size it derived from the manifest's facet
+        // geometry. Copied out immediately; neither pointer outlives this call.
+        let (pat, car): ([u8; N], [u8; N]) =
+            unsafe { (*(pattern as *const [u8; N]), *(care as *const [u8; N])) };
+
+        let mut g = match mask.write_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        // ONE spelling of the geometry (E3): under `AosRows` the register
+        // BEGINS at the lo64 lane's base and the hi32 field is the four bytes
+        // that follow it, contiguously — which is exactly the property
+        // `FacetMajor` breaks and the refusal above exists for. Reading the
+        // pair off `RowLayout` rather than writing `facet * 16 + 4` here keeps
+        // the row geometry in the one place that owns it.
+        let (off, stride) = store.layout.lo64_lane(store_entry.n_rows, facet);
+        kernels::simd_rowstore_ternary_match_mask(
+            store.as_bytes(),
+            off,
+            stride,
+            store_entry.n_rows as usize,
+            &pat,
+            &car,
             &mut g.words,
         );
         clear_tail_bits(&mut g.words, store_entry.n_rows);
@@ -1421,6 +1714,55 @@ fn validate_plan(pattern: &ResourceEntry, ops: &[LgjOpDesc]) -> Result<(), i32> 
 /// The body behind both `lgj_plan_eval` and `lgj_plan_eval_scalar` — one code
 /// path, two symbols, so the parity test compares two *paths* rather than a
 /// function against itself.
+/// `mask_risc::ExecError` → an ABI status.
+///
+/// **Every arm here is unreachable through the ABI**, and saying so is worth
+/// more than implying otherwise. `validate_plan` runs first and rejects an
+/// unknown opcode, a bad combine, an out-of-range lane and a kind mismatch
+/// before the lowering is even built; the lowering names no input plane
+/// (`Planes::masks` is `&[]`), no sum terminal and no blend. What is left —
+/// the scratch-sizing family, `ScratchReadBeforeWrite`, `GateAliasesDst` —
+/// would be a bug in THIS file, not in a caller's plan.
+///
+/// So the map exists to turn such a bug into a status a caller can see
+/// instead of a panic, and its arms are deliberately NOT claimed to be
+/// individually falsifiable through the ABI. A future session looking for the
+/// disable run that pins each arm will not find one; this is why.
+fn exec_error_to_status(e: ExecError) -> i32 {
+    match e {
+        ExecError::LaneOutOfRange(_) => LGJ_ERR_INVALID_LANE,
+        ExecError::LaneKind { .. } => LGJ_ERR_LANE_KIND_MISMATCH,
+        ExecError::LenMismatch { .. } => LGJ_ERR_MASK_LENGTH_MISMATCH,
+        ExecError::PlaneOutOfRange(_) | ExecError::PlaneTail(_) => LGJ_ERR_INVALID_HANDLE,
+        ExecError::SumRowBound { .. } => LGJ_ERR_SUM_OVERFLOW,
+        ExecError::ScratchTooSmall { .. }
+        | ExecError::ScratchBufferTooSmall { .. }
+        | ExecError::ScratchSlotUndeclared { .. }
+        | ExecError::ScratchSlotsUnaddressable { .. }
+        | ExecError::ScratchReadBeforeWrite { .. }
+        | ExecError::ScratchWords { .. }
+        | ExecError::BlendNeedsOut
+        | ExecError::GateAliasesDst { .. } => LGJ_ERR_ALLOCATION_FAILED,
+    }
+}
+
+/// Write the answer into `dst_mask` and `out_count` — the ONE place either is
+/// written, reached only after every error has already returned.
+fn publish(mask: &ResourceEntry, words: &[u64], count: u64, out_count: *mut u64) -> i32 {
+    let mut g = match mask.write_mask() {
+        Some(g) => g,
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    if g.words.len() != words.len() {
+        return LGJ_ERR_MASK_LENGTH_MISMATCH;
+    }
+    g.words.copy_from_slice(words);
+    drop(g);
+    // SAFETY: non-null (checked by the caller); written only on success.
+    unsafe { *out_count = count };
+    LGJ_OK
+}
+
 fn plan_eval_impl(
     res: u64,
     ops: *const LgjOpDesc,
@@ -1456,47 +1798,122 @@ fn plan_eval_impl(
     let n_rows = pattern.n_rows;
     let n_words = mask_words_for(n_rows) as usize;
 
-    // Accumulate into scratch, then publish. Two consequences, both wanted:
-    // dst_mask is written exactly once, and an error at any point leaves it
-    // byte-for-byte as it was.
-    let mut acc = vec![0u64; n_words];
-    // "the accumulator starts as all rows set" (§7).
-    for w in acc.iter_mut() {
-        *w = u64::MAX;
-    }
-    clear_tail_bits(&mut acc, n_rows);
-    let mut scratch = vec![0u64; n_words];
+    let lowered = match plan_lower::lower_plan(ops) {
+        Some(l) => l,
+        // Unreachable: `validate_plan` already rejected every unknown opcode.
+        // Reported rather than asserted — see `exec_error_to_status`.
+        None => return LGJ_ERR_UNKNOWN_OPCODE,
+    };
 
-    for op in ops {
-        let lane = match lane_view(&pattern, op.lane_id) {
-            Ok(l) => l,
-            Err(e) => return e,
-        };
-        if let Err(e) =
-            kernels::eval_predicate(path, op.op, op.operand, &lane, n_rows, &mut scratch)
-        {
-            return e;
+    // The old loop allocated an accumulator and a predicate buffer per call
+    // and copied the accumulator into the destination at the end, so that
+    // `dst_mask` was written exactly once and an error anywhere left it
+    // byte-for-byte as it was. Both properties survive without the
+    // allocation: the accumulator now lives in the thread-local arena, and
+    // every error path below returns before `publish` is ever reached.
+    let program = match lowered {
+        Lowered::AllRows => {
+            // No program at all. An accumulator that starts all-ones and is
+            // only ever OR-ed cannot shrink, so the answer is every row.
+            let mut g = match mask.write_mask() {
+                Some(g) => g,
+                None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+            };
+            if g.words.len() != n_words {
+                return LGJ_ERR_MASK_LENGTH_MISMATCH;
+            }
+            for w in g.words.iter_mut() {
+                *w = u64::MAX;
+            }
+            clear_tail_bits(&mut g.words, n_rows);
+            drop(g);
+            // SAFETY: non-null (checked above); written only on this success path.
+            unsafe { *out_count = n_rows };
+            return LGJ_OK;
         }
-        if let Err(e) = kernels::combine_into(path, op.combine, &mut acc, &scratch) {
-            return e;
-        }
-    }
-    clear_tail_bits(&mut acc, n_rows);
-    let count = kernels::popcount(path, &acc);
+        Lowered::Program(p) => p,
+    };
 
-    let mut g = match mask.write_mask() {
-        Some(g) => g,
+    let fixture = match pattern.fixture() {
+        Some(f) => f,
         None => return LGJ_ERR_WRONG_RESOURCE_KIND,
     };
-    if g.words.len() != acc.len() {
-        return LGJ_ERR_MASK_LENGTH_MISMATCH;
-    }
-    g.words.copy_from_slice(&acc);
-    drop(g);
+    let rows = match usize::try_from(n_rows) {
+        Ok(r) => r,
+        Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    // Index order is LANE_IDS, LANE_CLASSES, LANE_VALUES — pinned by the
+    // `const _` assertions at the top of this file, because the lowering uses
+    // `lane_id` directly as the index.
+    let lanes = [
+        LaneRef::U64(fixture.ids()),
+        LaneRef::U32(fixture.classes()),
+        LaneRef::I32(fixture.values()),
+    ];
+    // `masks` is EMPTY on purpose. Handing `dst_mask` in as an input plane
+    // would turn a caller's dirty prior tail into `ExecError::PlaneTail` — a
+    // spurious failure on a destination that is about to be overwritten
+    // wholesale. The destination is an output here and nothing else.
+    let planes = Planes {
+        n_rows: rows,
+        masks: &[],
+        lanes: &lanes,
+    };
 
-    // SAFETY: non-null (checked above); written only on the success path.
-    unsafe { *out_count = count };
-    LGJ_OK
+    match path {
+        Path::Simd => {
+            let need = match scratch_words_for(n_words, plan_lower::SLOTS as usize) {
+                Some(n) => n,
+                None => return LGJ_ERR_LENGTH_OVERFLOW,
+            };
+            PLAN_SCRATCH.with(|cell| {
+                let mut buf = cell.borrow_mut();
+                if buf.len() < need {
+                    buf.resize(need, 0);
+                }
+                let mut scratch =
+                    match Scratch::over(&mut buf[..need], n_words, plan_lower::SLOTS as usize) {
+                        Ok(s) => s,
+                        Err(e) => return exec_error_to_status(e),
+                    };
+                let count = match execute(&program, &planes, &mut scratch, None) {
+                    Ok(Value::Count(c)) => c as u64,
+                    // The lowering emits exactly one terminal and it is
+                    // `Count`; any other value means this file built a
+                    // program it did not intend to.
+                    Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
+                    Err(e) => return exec_error_to_status(e),
+                };
+                let words = match scratch.slot(plan_lower::ACC_SLOT) {
+                    Some(w) => w,
+                    None => return LGJ_ERR_ALLOCATION_FAILED,
+                };
+                publish(&mask, words, count, out_count)
+            })
+        }
+        // Fork A: the scalar symbol runs mask-risc's row-at-a-time oracle, so
+        // what it proves is whole-evaluator-against-whole-evaluator rather
+        // than kernel-against-kernel. The oracle ALLOCATES by design — one
+        // `bool` per row per slot is exactly what lets it falsify a
+        // bit-packing bug — which is why the allocation gate names
+        // `lgj_plan_eval` and only it.
+        Path::Scalar => {
+            let count = match reference_execute(&program, &planes, None) {
+                Ok(Value::Count(c)) => c as u64,
+                Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
+                Err(e) => return exec_error_to_status(e),
+            };
+            let slots = match reference_scratch(&program, &planes) {
+                Ok(s) => s,
+                Err(e) => return exec_error_to_status(e),
+            };
+            let words = match slots.get(plan_lower::ACC_SLOT as usize) {
+                Some(w) => w.as_slice(),
+                None => return LGJ_ERR_ALLOCATION_FAILED,
+            };
+            publish(&mask, words, count, out_count)
+        }
+    }
 }
 
 /// Evaluate `n_ops` predicates in **one** crossing.
@@ -1602,6 +2019,96 @@ pub unsafe extern "C" fn lgj_reduce_sum_i32(
         drop(g);
         // SAFETY: non-null, checked above; written only on success.
         unsafe { *out_sum = sum };
+        LGJ_OK
+    })
+}
+
+/// The PARAMETERISED masked reduction over an `I32` lane — `sum` / `min` /
+/// `max` behind ONE symbol (ABI minor >= 11, `docs/abi.md` §19).
+///
+/// # This shape was mandated in advance
+///
+/// `abi.md` §15 set the condition and the answer before the need arose:
+/// *"if a second reduction is ever needed (min/max/count-distinct/histogram),
+/// do NOT add a second symbol ... an op-code parameter on one reduce symbol,
+/// mirroring how `lgj_plan_eval`'s `LgjOpDesc` already generalises predicates —
+/// and `sum` becomes op-code 0. Two reduction symbols would be the smell §1
+/// warns about; one parameterised symbol is the shape this ABI already uses
+/// elsewhere."* Min and max are that second reduction, so this is that symbol,
+/// and `count-distinct` or `histogram` is a future op-code rather than a future
+/// symbol.
+///
+/// [`lgj_reduce_sum_i32`] is retained unchanged: removing it would not be an
+/// additive minor, and a minor-1 Java is still entitled to it. `reduce_op = 0`
+/// here answers identically — pinned by a test, so the two cannot drift.
+///
+/// # `out_present` is not a formality
+///
+/// Min and max over an EMPTY population have no answer, and every in-band
+/// sentinel is wrong: `i32::MAX` is a value a real population can contain, and
+/// `0` is worse. So `out_present` carries the distinction out — `0` means
+/// "nothing selected; `*out_value` is 0 and means nothing". `LGJ_REDUCE_SUM` is
+/// always present, because the sum of an empty population is `0` and that IS
+/// the answer.
+///
+/// Both outputs are written on `LGJ_OK` and neither on any failure, matching
+/// [`lgj_reduce_facet_sum_resolved`]'s two-output precedent.
+///
+/// An unknown `reduce_op` is `UNKNOWN_OPCODE`, never a silent fall back to
+/// `SUM` — an unknown reduction must not alias a known one, exactly as §14
+/// argues for an unknown carving.
+///
+/// # Bulk (§6)
+///
+/// `O(mask_words + popcount)` for every op — the mask-word scan is
+/// unconditional, so an empty mask costs one pass rather than nothing, the same
+/// cost shape §14 states for the register sweep.
+///
+/// # Safety
+///
+/// A null `out_value`/`out_present` is *handled*, not UB: `NULL_ARGUMENT`.
+/// Otherwise each must point at one writable, correctly-aligned slot (`i64`
+/// and `u32`); both are written only on `LGJ_OK`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_reduce_i32(
+    res: u64,
+    lane_id: u32,
+    reduce_op: u32,
+    mask: u64,
+    out_value: *mut i64,
+    out_present: *mut u32,
+) -> i32 {
+    guard(|| {
+        if out_value.is_null() || out_present.is_null() {
+            return LGJ_ERR_NULL_ARGUMENT;
+        }
+        let (pattern, maskr) = match resolve_pattern_and_mask(res, mask) {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        let lane = match lane_view(&pattern, lane_id) {
+            Ok(l) => l,
+            Err(e) => return e,
+        };
+        let values = match lane {
+            LaneView::I32(v) => v,
+            _ => return LGJ_ERR_LANE_KIND_MISMATCH,
+        };
+        let g = match maskr.read_mask() {
+            Some(g) => g,
+            None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+        };
+        let answer = kernels::reduce_i32(Path::Simd, reduce_op, values, &g.words);
+        drop(g);
+        let answer = match answer {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        // SAFETY: both non-null, checked above; written only on success.
+        unsafe {
+            *out_value = answer.unwrap_or(0);
+            *out_present = u32::from(answer.is_some());
+        }
         LGJ_OK
     })
 }
@@ -1861,6 +2368,19 @@ pub extern "C" fn lgj_hop(
 mod tests {
     use super::*;
     use crate::fixture::{Fixture, LANE_CLASSES, LANE_IDS, LANE_VALUES};
+
+    /// The lowering differential: this crate's `plan_lower` (a flat op list)
+    /// against `lance-graph-quack`'s `lower` (a Boolean tree), both producing
+    /// a `mask_risc::Program`. Two implementations of one law; until this
+    /// file, nothing compared them.
+    mod lowering_convergence;
+    mod pr4_dst_reuse;
+    /// PR4's behaviour-equivalence oracle and falsifier matrix — the frozen
+    /// pre-PR4 loop, kept in its own file so the freeze is visible as a file
+    /// boundary rather than as a convention inside a 2000-line module.
+    mod pr4_equivalence;
+    mod pr4_matrix;
+    mod pr4_seed;
 
     /// Safe wrappers over the pointer-taking exports.
     ///
@@ -2431,11 +2951,30 @@ mod tests {
         }
     }
 
-    /// The headline parity property, through the same code path the Java tests
-    /// exercise: SIMD and the independent scalar reference must agree exactly,
-    /// including at row counts that are not multiples of 64.
+    /// FAILS IF: the bit-packed executor and the row-at-a-time oracle
+    /// disagree on the same lowered plan, including at row counts that are
+    /// not multiples of 64.
+    ///
+    /// **Renamed in PR4, and the rename is mandatory rather than cosmetic.**
+    /// It was `simd_and_scalar_plans_agree_bit_for_bit`, and under the old
+    /// implementation that name was accurate: `lgj_plan_eval_scalar` ran
+    /// `kernels::scalar_*`, so the two symbols were two BACKENDS of one
+    /// evaluator and this test was backend parity.
+    ///
+    /// It is not that any more. Both symbols now lower the same plan and the
+    /// scalar one runs `mask_risc::reference_execute` — an oracle that
+    /// evaluates one ROW at a time in plain Rust with no SIMD facade anywhere
+    /// in its file, a property a grep test in that crate enforces. So what
+    /// this compares is executor-against-oracle, which is strictly stronger
+    /// (whole evaluator, not kernel) and is a DIFFERENT claim.
+    ///
+    /// Backend parity itself is `ndarray::simd`'s business — an ABI-level
+    /// test could only reach it through a proxy — so it is not lost here; it
+    /// was never really held here. A test whose name claims a property it no
+    /// longer checks is worse than no test, because the next session reads
+    /// the name and not the body.
     #[test]
-    fn simd_and_scalar_plans_agree_bit_for_bit() {
+    fn the_executor_and_the_row_oracle_agree_bit_for_bit() {
         for n in [0u64, 1, 63, 64, 65, 127, 1000, 4097] {
             for seed in [0u64, 7, 0xFEED_FACE] {
                 let p = open(n, seed);
@@ -3396,5 +3935,703 @@ mod tests {
         let mut h = 0u64;
         assert_eq!(unsafe { lgj_rowstore_open(n, seed, &mut h) }, LGJ_OK);
         h
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ABI minor 11 — the masking-op completion, through the membrane
+    // (docs/abi.md §19). Each symbol gets: a CAN-FIRE arm, a CAN-STAY-SILENT
+    // arm, and the handle/status arms every export in this ABI owes.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    mod call11 {
+        use super::*;
+
+        pub fn op_ternary_match(
+            res: u64,
+            facet: u32,
+            pattern: *const u8,
+            care: *const u8,
+            dst: u64,
+        ) -> i32 {
+            unsafe { lgj_op_ternary_match(res, facet, pattern, care, dst) }
+        }
+        pub fn reduce_i32(
+            res: u64,
+            lane: u32,
+            reduce_op: u32,
+            m: u64,
+            out_value: *mut i64,
+            out_present: *mut u32,
+        ) -> i32 {
+            unsafe { lgj_reduce_i32(res, lane, reduce_op, m, out_value, out_present) }
+        }
+    }
+
+    /// Pack a `LGJ_OP_TERNARY_MATCH_U32` operand the way `abi.rs` documents:
+    /// pattern in the low 32 bits, care in the high 32. ONE spelling in the
+    /// tests, so a hand-packing typo cannot make a passing arm mean something
+    /// other than it reads.
+    fn tcam_operand(pattern: u32, care: u32) -> i64 {
+        ((u64::from(care) << 32) | u64::from(pattern)) as i64
+    }
+
+    /// Bit-serial truth-table oracle — deliberately NOT the kernel, so the two
+    /// cannot agree by sharing code.
+    fn ternlog_oracle(imm: u8, a: &[u64], b: &[u64], c: &[u64], n_rows: u64) -> Vec<u64> {
+        let mut out = vec![0u64; a.len()];
+        for w in 0..a.len() {
+            for bit in 0..64u32 {
+                let row = (w as u64) * 64 + u64::from(bit);
+                if row >= n_rows {
+                    continue; // the tail is normative zero
+                }
+                let idx =
+                    (((a[w] >> bit) & 1) << 2) | (((b[w] >> bit) & 1) << 1) | ((c[w] >> bit) & 1);
+                if (u64::from(imm) >> idx) & 1 == 1 {
+                    out[w] |= 1u64 << bit;
+                }
+            }
+        }
+        out
+    }
+
+    // ── lgj_mask_ternlog ───────────────────────────────────────────────────
+
+    /// CAN-FIRE, across the whole immediate space AND every aliasing shape.
+    ///
+    /// The aliasing matrix is the point: with FOUR handles there are more
+    /// overlap cases than `lgj_mask_andnot`'s three could be enumerated into,
+    /// which is why the implementation snapshots instead of case-analysing.
+    /// Every shape must give the value each operand had BEFORE the call.
+    #[test]
+    fn mask_ternlog_answers_the_truth_table_in_every_aliasing_shape() {
+        let n = 130u64; // three words, the last one with 2 live bits
+        let p = open(n, 7);
+        let (a, b, c, d) = (
+            mask(p, LGJ_MASK_INIT_EMPTY),
+            mask(p, LGJ_MASK_INIT_EMPTY),
+            mask(p, LGJ_MASK_INIT_EMPTY),
+            mask(p, LGJ_MASK_INIT_EMPTY),
+        );
+        let va = [0x0F0F_0F0F_0F0F_0F0Fu64, 0xFFFF_0000_FFFF_0000, 0b01];
+        let vb = [0x3333_3333_3333_3333u64, 0x00FF_00FF_00FF_00FF, 0b10];
+        let vc = [0x5555_5555_5555_5555u64, 0xF0F0_F0F0_F0F0_F0F0, 0b11];
+
+        // Every immediate, distinct destination.
+        for imm in 0u8..=255 {
+            set_words(a, &va);
+            set_words(b, &vb);
+            set_words(c, &vc);
+            assert_eq!(lgj_mask_ternlog(a, b, c, d, imm), LGJ_OK);
+            assert_eq!(
+                read_words(d),
+                ternlog_oracle(imm, &va, &vb, &vc, n),
+                "imm={imm:#04x}, distinct dst"
+            );
+        }
+
+        // dst aliases each operand in turn, plus the all-same degenerate case.
+        // MAJ3 is used because it depends on all three operands, so an
+        // implementation that silently dropped one would be caught.
+        const MAJ3: u8 = 0xE8;
+        for (label, dst) in [("dst==a", a), ("dst==b", b), ("dst==c", c)] {
+            set_words(a, &va);
+            set_words(b, &vb);
+            set_words(c, &vc);
+            assert_eq!(lgj_mask_ternlog(a, b, c, dst, MAJ3), LGJ_OK);
+            assert_eq!(
+                read_words(dst),
+                ternlog_oracle(MAJ3, &va, &vb, &vc, n),
+                "{label}: operands must be read as they were BEFORE the call"
+            );
+        }
+        // a == b == c == dst: majority of x with itself is x.
+        set_words(a, &va);
+        assert_eq!(lgj_mask_ternlog(a, a, a, a, MAJ3), LGJ_OK);
+        assert_eq!(read_words(a), va.to_vec(), "maj(x,x,x) == x");
+
+        for h in [a, b, c, d, p] {
+            assert_eq!(lgj_close(h), LGJ_OK);
+        }
+    }
+
+    /// CAN-STAY-SILENT: the tail. An ODD immediate is true of `(0,0,0)`, so
+    /// every bit past `n_rows` is set by the kernel and must be cleared before
+    /// return — otherwise `lgj_mask_count` reads rows that do not exist.
+    ///
+    /// Two-sided, and the second half is what makes it a falsifier rather than
+    /// a re-statement: `NOT` of a mask must count `n_rows - popcount`, a number
+    /// a leaked tail cannot produce.
+    #[test]
+    fn an_odd_immediate_leaves_no_tail_bit_behind() {
+        const NOT_A: u8 = 0x0F;
+        let n = 130u64;
+        let p = open(n, 11);
+        let (a, d) = (mask(p, LGJ_MASK_INIT_EMPTY), mask(p, LGJ_MASK_INIT_EMPTY));
+        set_words(a, &[u64::MAX, 0, 0b01]);
+        let before = count(a);
+        assert_eq!(before, 65, "fixture must be non-trivial: 64 + 1 rows set");
+
+        assert_eq!(lgj_mask_ternlog(a, a, a, d, NOT_A), LGJ_OK);
+        assert_eq!(
+            count(d),
+            n - before,
+            "NOT must partition the population — a leaked tail would over-count"
+        );
+        let w = read_words(d);
+        assert_eq!(w.last().unwrap() >> (n % 64), 0, "tail bits survived");
+
+        for h in [a, d, p] {
+            assert_eq!(lgj_close(h), LGJ_OK);
+        }
+    }
+
+    /// The handle/status arms. Stale, fabricated, cross-parent and
+    /// parent-closed each answer with a status — never a crash, never silently.
+    #[test]
+    fn mask_ternlog_rejects_every_incompatible_handle_shape() {
+        let p = open(128, 1);
+        let q = open(128, 2); // same size, DIFFERENT parent
+        let (a, b) = (mask(p, LGJ_MASK_INIT_ALL), mask(p, LGJ_MASK_INIT_ALL));
+        let other = mask(q, LGJ_MASK_INIT_ALL);
+        let short = {
+            let r = open(64, 3);
+            let m = mask(r, LGJ_MASK_INIT_ALL);
+            (r, m)
+        };
+
+        for bogus in [0u64, 1, 0xDEAD_BEEF, u64::MAX] {
+            assert_eq!(
+                lgj_mask_ternlog(bogus, a, b, a, 0xC0),
+                LGJ_ERR_INVALID_HANDLE
+            );
+            assert_eq!(
+                lgj_mask_ternlog(a, bogus, b, a, 0xC0),
+                LGJ_ERR_INVALID_HANDLE
+            );
+            assert_eq!(
+                lgj_mask_ternlog(a, b, bogus, a, 0xC0),
+                LGJ_ERR_INVALID_HANDLE
+            );
+            assert_eq!(
+                lgj_mask_ternlog(a, b, a, bogus, 0xC0),
+                LGJ_ERR_INVALID_HANDLE
+            );
+        }
+        // A pattern handle where a mask is required.
+        assert_eq!(
+            lgj_mask_ternlog(p, a, b, a, 0xC0),
+            LGJ_ERR_WRONG_RESOURCE_KIND
+        );
+        // Same row count, different parent — "a different population wearing
+        // the right size", the same rejection lgj_mask_and gives.
+        assert_eq!(
+            lgj_mask_ternlog(a, other, b, a, 0xC0),
+            LGJ_ERR_MASK_LENGTH_MISMATCH
+        );
+        // Different row count.
+        assert_eq!(
+            lgj_mask_ternlog(a, short.1, b, a, 0xC0),
+            LGJ_ERR_MASK_LENGTH_MISMATCH
+        );
+        // Parent closed.
+        assert_eq!(lgj_close(q), LGJ_OK);
+        assert_eq!(
+            lgj_mask_ternlog(other, other, other, other, 0xC0),
+            LGJ_ERR_PARENT_CLOSED
+        );
+
+        for h in [a, b, other, short.1, short.0, p] {
+            let _ = lgj_close(h);
+        }
+    }
+
+    // ── lgj_op_ternary_match ───────────────────────────────────────────────
+
+    /// CAN-FIRE + CAN-STAY-SILENT over a real row store, through the membrane.
+    ///
+    /// The three arms are the TCAM's whole contract: `care == 0` matches every
+    /// row (total), the exact register matches at least its own row, and
+    /// flipping a CARED byte of that same pattern drops it while flipping an
+    /// UNCARED one does not. The third arm is what stops a "compare the whole
+    /// register" implementation from passing.
+    #[test]
+    fn ternary_match_honours_care_and_is_two_sided_through_the_membrane() {
+        use crate::rowstore::{FACET_BYTES, FACET_CLASSID_BYTES, ROW_BYTES};
+        const N: usize = kernels::FACET_REGISTER_BYTES;
+        let n = 300u64;
+        let store = lgj_rowstore_open_handle(n, 0xBEEF);
+        let m = mask(store, LGJ_MASK_INIT_EMPTY);
+        let facet = 5u32;
+
+        // Row 0's own register, read through the registry (the same back door
+        // `set_words` uses) so the pattern is guaranteed to have a hit.
+        let pattern: [u8; N] = {
+            let e = registry::resolve(store).unwrap();
+            let rs = e.rowstore().unwrap();
+            let off = (u64::from(facet) * FACET_BYTES + FACET_CLASSID_BYTES) as usize;
+            rs.as_bytes()[off..off + N].try_into().unwrap()
+        };
+
+        // care == 0: every row matches. Total, not an error.
+        assert_eq!(
+            call11::op_ternary_match(store, facet, pattern.as_ptr(), [0u8; N].as_ptr(), m),
+            LGJ_OK
+        );
+        assert_eq!(count(m), n, "care == 0 must match every row");
+
+        // Exact: at least row 0, and strictly fewer than all — otherwise the
+        // predicate is not discriminating and the arms below prove nothing.
+        assert_eq!(
+            call11::op_ternary_match(store, facet, pattern.as_ptr(), [0xFFu8; N].as_ptr(), m),
+            LGJ_OK
+        );
+        let exact = count(m);
+        assert!(exact >= 1, "row 0 must match its own register");
+        assert!(
+            exact < n,
+            "an exact register match must not select everything"
+        );
+        assert_eq!(read_words(m)[0] & 1, 1, "and row 0 specifically");
+
+        // Flip a byte, CARE about it → row 0 drops out.
+        let mut flipped = pattern;
+        flipped[0] ^= 0xFF;
+        assert_eq!(
+            call11::op_ternary_match(store, facet, flipped.as_ptr(), [0xFFu8; N].as_ptr(), m),
+            LGJ_OK
+        );
+        assert_eq!(
+            read_words(m)[0] & 1,
+            0,
+            "a cared-byte mismatch must exclude"
+        );
+
+        // Same flip, DON'T care about it → row 0 comes back.
+        let mut care_rest = [0xFFu8; N];
+        care_rest[0] = 0;
+        assert_eq!(
+            call11::op_ternary_match(store, facet, flipped.as_ptr(), care_rest.as_ptr(), m),
+            LGJ_OK
+        );
+        assert_eq!(
+            read_words(m)[0] & 1,
+            1,
+            "an uncared byte must not exclude — this is what makes it a TCAM"
+        );
+
+        // The register really is 12 bytes at facet*16+4, stride 512: pin the
+        // geometry the export reads off RowLayout rather than trusting it.
+        assert_eq!(N, 12);
+        assert_eq!(ROW_BYTES, 512);
+
+        assert_eq!(lgj_close(m), LGJ_OK);
+        assert_eq!(lgj_close(store), LGJ_OK);
+    }
+
+    /// Every rejection path, and the layout gate PINNED TWO-SIDED: the same
+    /// call succeeds on AoS and refuses on facet-major, so the gate is proven
+    /// to discriminate rather than merely to exist.
+    #[test]
+    fn ternary_match_rejects_null_bad_facet_wrong_kind_and_a_facet_major_layout() {
+        const N: usize = kernels::FACET_REGISTER_BYTES;
+        let n = 128u64;
+        let aos = lgj_rowstore_open_handle(n, 5);
+        let m = mask(aos, LGJ_MASK_INIT_EMPTY);
+        let pat = [0u8; N];
+        let care = [0u8; N];
+
+        // Null pointers are HANDLED, not UB.
+        assert_eq!(
+            call11::op_ternary_match(aos, 0, std::ptr::null(), care.as_ptr(), m),
+            LGJ_ERR_NULL_ARGUMENT
+        );
+        assert_eq!(
+            call11::op_ternary_match(aos, 0, pat.as_ptr(), std::ptr::null(), m),
+            LGJ_ERR_NULL_ARGUMENT
+        );
+        // Facet out of range.
+        assert_eq!(
+            call11::op_ternary_match(
+                aos,
+                crate::rowstore::ROW_FACETS,
+                pat.as_ptr(),
+                care.as_ptr(),
+                m
+            ),
+            LGJ_ERR_INVALID_LANE
+        );
+        // A pattern resource where a row store is required.
+        let p = open(n, 1);
+        assert_eq!(
+            call11::op_ternary_match(p, 0, pat.as_ptr(), care.as_ptr(), m),
+            LGJ_ERR_WRONG_RESOURCE_KIND
+        );
+        // A mask of the wrong row count.
+        let small = open(64, 1);
+        let small_m = mask(small, LGJ_MASK_INIT_EMPTY);
+        assert_eq!(
+            call11::op_ternary_match(aos, 0, pat.as_ptr(), care.as_ptr(), small_m),
+            LGJ_ERR_MASK_LENGTH_MISMATCH
+        );
+        // Fabricated handles.
+        for bogus in [0u64, 0xDEAD_BEEF, u64::MAX] {
+            assert_eq!(
+                call11::op_ternary_match(bogus, 0, pat.as_ptr(), care.as_ptr(), m),
+                LGJ_ERR_INVALID_HANDLE
+            );
+            assert_eq!(
+                call11::op_ternary_match(aos, 0, pat.as_ptr(), care.as_ptr(), bogus),
+                LGJ_ERR_INVALID_HANDLE
+            );
+        }
+
+        // THE TWO-SIDED LAYOUT GATE. Same arguments, same facet, same care.
+        assert_eq!(
+            call11::op_ternary_match(aos, 0, pat.as_ptr(), care.as_ptr(), m),
+            LGJ_OK,
+            "AosRows must succeed — or the refusal below proves nothing"
+        );
+        let mut col = 0u64;
+        assert_eq!(
+            unsafe { lgj_rowstore_open_columnar(n, 5, 0, 0x0, 25, &mut col) },
+            LGJ_OK
+        );
+        let col_m = mask(col, LGJ_MASK_INIT_EMPTY);
+        assert_eq!(
+            call11::op_ternary_match(col, 0, pat.as_ptr(), care.as_ptr(), col_m),
+            LGJ_ERR_UNSUPPORTED_LAYOUT,
+            "a facet-major store splits the register; refuse rather than gather"
+        );
+
+        for h in [m, small_m, small, p, aos, col_m, col] {
+            let _ = lgj_close(h);
+        }
+    }
+
+    // ── lgj_reduce_i32 ─────────────────────────────────────────────────────
+
+    /// CAN-FIRE: each reduction answers, `SUM` agrees BIT-FOR-BIT with the
+    /// symbol it generalises, and the mask genuinely selects (a reduction over
+    /// a subset differs from one over everything).
+    #[test]
+    fn reduce_i32_answers_every_op_and_agrees_with_the_symbol_it_generalises() {
+        let n = 1000u64;
+        let p = open(n, 21);
+        let all = mask(p, LGJ_MASK_INIT_ALL);
+        let some = mask(p, LGJ_MASK_INIT_EMPTY);
+        set_rows(some, &[0, 1, 2, 500, 999]);
+
+        let mut v = 0i64;
+        let mut present = 0u32;
+
+        // SUM through the new symbol == SUM through the old one, on both masks.
+        for m in [all, some] {
+            assert_eq!(
+                call11::reduce_i32(p, LANE_VALUES, LGJ_REDUCE_SUM, m, &mut v, &mut present),
+                LGJ_OK
+            );
+            assert_eq!(present, 1, "a sum is always present");
+            let mut legacy = 0i64;
+            assert_eq!(call::reduce_sum_i32(p, LANE_VALUES, m, &mut legacy), LGJ_OK);
+            assert_eq!(v, legacy, "reduce_op 0 must BE lgj_reduce_sum_i32");
+        }
+
+        // MIN/MAX bracket the sum's population, and the subset's bracket is
+        // inside the full one — so the mask is demonstrably load-bearing.
+        let read = |m: u64, op: u32| {
+            let (mut x, mut pr) = (0i64, 0u32);
+            assert_eq!(
+                call11::reduce_i32(p, LANE_VALUES, op, m, &mut x, &mut pr),
+                LGJ_OK
+            );
+            (x, pr)
+        };
+        let (min_all, p1) = read(all, LGJ_REDUCE_MIN);
+        let (max_all, p2) = read(all, LGJ_REDUCE_MAX);
+        let (min_some, p3) = read(some, LGJ_REDUCE_MIN);
+        let (max_some, p4) = read(some, LGJ_REDUCE_MAX);
+        assert_eq!((p1, p2, p3, p4), (1, 1, 1, 1));
+        assert!(min_all < max_all, "the fixture must not be constant");
+        assert!(min_all <= min_some && max_some <= max_all);
+        assert!(
+            min_all < min_some || max_some < max_all,
+            "a 5-row subset of 1000 must be strictly narrower somewhere"
+        );
+
+        for h in [all, some, p] {
+            assert_eq!(lgj_close(h), LGJ_OK);
+        }
+    }
+
+    /// CAN-STAY-SILENT: an empty population has NO min and NO max, and that is
+    /// reported rather than encoded as a sentinel. The paired half — `SUM` is
+    /// present over the same empty mask — is what stops "always absent" from
+    /// passing.
+    #[test]
+    fn reduce_i32_reports_an_empty_population_instead_of_inventing_an_extremum() {
+        let p = open(256, 4);
+        let empty = mask(p, LGJ_MASK_INIT_EMPTY);
+        let (mut v, mut present) = (-1i64, 9u32);
+
+        for op in [LGJ_REDUCE_MIN, LGJ_REDUCE_MAX] {
+            assert_eq!(
+                call11::reduce_i32(p, LANE_VALUES, op, empty, &mut v, &mut present),
+                LGJ_OK
+            );
+            assert_eq!(present, 0, "no rows selected ⇒ no extremum");
+            assert_eq!(v, 0, "and the value slot carries nothing meaningful");
+        }
+        assert_eq!(
+            call11::reduce_i32(p, LANE_VALUES, LGJ_REDUCE_SUM, empty, &mut v, &mut present),
+            LGJ_OK
+        );
+        assert_eq!((present, v), (1, 0), "the sum of nothing IS zero");
+
+        assert_eq!(lgj_close(empty), LGJ_OK);
+        assert_eq!(lgj_close(p), LGJ_OK);
+    }
+
+    /// Rejections: unknown reduction, wrong lane kind, null outputs, bad
+    /// handles — and NOTHING is written on any of them.
+    #[test]
+    fn reduce_i32_rejects_an_unknown_reduction_rather_than_defaulting_to_sum() {
+        let p = open(128, 6);
+        let m = mask(p, LGJ_MASK_INIT_ALL);
+        let (mut v, mut present) = (0xAAAA_AAAAi64, 0xAAAA_AAAAu32);
+
+        for bogus in [3u32, 4, 99, u32::MAX] {
+            assert_eq!(
+                call11::reduce_i32(p, LANE_VALUES, bogus, m, &mut v, &mut present),
+                LGJ_ERR_UNKNOWN_OPCODE
+            );
+        }
+        // A U32 lane cannot be reduced as I32.
+        assert_eq!(
+            call11::reduce_i32(p, LANE_CLASSES, LGJ_REDUCE_MIN, m, &mut v, &mut present),
+            LGJ_ERR_LANE_KIND_MISMATCH
+        );
+        assert_eq!(
+            call11::reduce_i32(p, LANE_IDS, LGJ_REDUCE_MIN, m, &mut v, &mut present),
+            LGJ_ERR_LANE_KIND_MISMATCH
+        );
+        // Out of range lane.
+        assert_eq!(
+            call11::reduce_i32(p, 99, LGJ_REDUCE_MIN, m, &mut v, &mut present),
+            LGJ_ERR_INVALID_LANE
+        );
+        // Nulls are handled, not UB.
+        assert_eq!(
+            call11::reduce_i32(
+                p,
+                LANE_VALUES,
+                LGJ_REDUCE_MIN,
+                m,
+                std::ptr::null_mut(),
+                &mut present
+            ),
+            LGJ_ERR_NULL_ARGUMENT
+        );
+        assert_eq!(
+            call11::reduce_i32(
+                p,
+                LANE_VALUES,
+                LGJ_REDUCE_MIN,
+                m,
+                &mut v,
+                std::ptr::null_mut()
+            ),
+            LGJ_ERR_NULL_ARGUMENT
+        );
+        for bogus in [0u64, 0xDEAD_BEEF, u64::MAX] {
+            assert_eq!(
+                call11::reduce_i32(bogus, LANE_VALUES, LGJ_REDUCE_MIN, m, &mut v, &mut present),
+                LGJ_ERR_INVALID_HANDLE
+            );
+        }
+        // Not one of those calls wrote either output.
+        assert_eq!((v, present), (0xAAAA_AAAA, 0xAAAA_AAAA), "out_* on failure");
+
+        assert_eq!(lgj_close(m), LGJ_OK);
+        assert_eq!(lgj_close(p), LGJ_OK);
+    }
+
+    // ── the seven op-codes ─────────────────────────────────────────────────
+
+    /// The new predicates through BOTH plan symbols, and the two must agree —
+    /// which is the parity escape hatch's whole reason to exist, extended to
+    /// the ops that were added to it. An op-code with no scalar arm would
+    /// answer `UNKNOWN_OPCODE` here and fail.
+    #[test]
+    fn every_minor_11_opcode_runs_on_both_plan_paths_and_they_agree() {
+        let n = 1000u64;
+        let p = open(n, 33);
+        let (d1, d2) = (mask(p, LGJ_MASK_INIT_EMPTY), mask(p, LGJ_MASK_INIT_EMPTY));
+
+        let cases: [(u32, u32, i64); 7] = [
+            (LGJ_OP_NE_U32, LANE_CLASSES, 7),
+            (LGJ_OP_EQ_I32, LANE_VALUES, 100),
+            (LGJ_OP_NE_I32, LANE_VALUES, 100),
+            (LGJ_OP_LT_I32, LANE_VALUES, 100),
+            (LGJ_OP_LE_I32, LANE_VALUES, 100),
+            (LGJ_OP_GE_I32, LANE_VALUES, 100),
+            // pattern 5, care 0b111 — a genuine TCAM, not an exact compare.
+            (
+                LGJ_OP_TERNARY_MATCH_U32,
+                LANE_CLASSES,
+                tcam_operand(5, 0b111),
+            ),
+        ];
+        for (opcode, lane, operand) in cases {
+            let ops = [op(opcode, lane, operand, LGJ_COMBINE_AND)];
+            let (mut c1, mut c2) = (0u64, 0u64);
+            assert_eq!(
+                call::plan_eval(p, ops.as_ptr(), 1, d1, &mut c1),
+                LGJ_OK,
+                "op {opcode}"
+            );
+            assert_eq!(
+                call::plan_eval_scalar(p, ops.as_ptr(), 1, d2, &mut c2),
+                LGJ_OK,
+                "op {opcode} has no scalar arm — the parity hatch is hollow"
+            );
+            assert_eq!(
+                read_words(d1),
+                read_words(d2),
+                "SIMD/scalar parity, op {opcode}"
+            );
+            assert_eq!(c1, c2);
+            // Anti-vacuity: each predicate must select SOMETHING and not
+            // EVERYTHING, or the parity above compares two empty answers.
+            assert!(
+                c1 > 0 && c1 < n,
+                "op {opcode} selected {c1} of {n} — not discriminating"
+            );
+        }
+
+        // A complementary pair must partition the population exactly. This is
+        // the arm that catches a `lt` lowered as a buggy complement of `ge`.
+        let mut lt = 0u64;
+        let mut ge = 0u64;
+        let a = [op(LGJ_OP_LT_I32, LANE_VALUES, 100, LGJ_COMBINE_AND)];
+        let b = [op(LGJ_OP_GE_I32, LANE_VALUES, 100, LGJ_COMBINE_AND)];
+        assert_eq!(call::plan_eval(p, a.as_ptr(), 1, d1, &mut lt), LGJ_OK);
+        assert_eq!(call::plan_eval(p, b.as_ptr(), 1, d2, &mut ge), LGJ_OK);
+        assert_eq!(lt + ge, n, "< and >= must partition");
+
+        // …and so must eq/ne, on a DIFFERENT lane kind.
+        let mut eq = 0u64;
+        let mut ne = 0u64;
+        let c = [op(LGJ_OP_EQ_U32, LANE_CLASSES, 7, LGJ_COMBINE_AND)];
+        let d = [op(LGJ_OP_NE_U32, LANE_CLASSES, 7, LGJ_COMBINE_AND)];
+        assert_eq!(call::plan_eval(p, c.as_ptr(), 1, d1, &mut eq), LGJ_OK);
+        assert_eq!(call::plan_eval(p, d.as_ptr(), 1, d2, &mut ne), LGJ_OK);
+        assert_eq!(eq + ne, n, "== and != must partition");
+
+        for h in [d1, d2, p] {
+            assert_eq!(lgj_close(h), LGJ_OK);
+        }
+    }
+
+    /// The op-code/lane validator must reject every new op against a lane of
+    /// the wrong kind BEFORE anything is written — the same "validate the whole
+    /// plan first" property the existing ops have.
+    #[test]
+    fn every_minor_11_opcode_rejects_a_lane_of_the_wrong_kind() {
+        let p = open(128, 2);
+        let d = mask(p, LGJ_MASK_INIT_ALL);
+        let before = read_words(d);
+
+        // U32 ops against the I32 lane, and I32 ops against the U32 lane.
+        for (opcode, wrong_lane) in [
+            (LGJ_OP_NE_U32, LANE_VALUES),
+            (LGJ_OP_TERNARY_MATCH_U32, LANE_VALUES),
+            (LGJ_OP_EQ_I32, LANE_CLASSES),
+            (LGJ_OP_NE_I32, LANE_CLASSES),
+            (LGJ_OP_LT_I32, LANE_IDS),
+            (LGJ_OP_LE_I32, LANE_CLASSES),
+            (LGJ_OP_GE_I32, LANE_IDS),
+        ] {
+            let ops = [op(opcode, wrong_lane, 0, LGJ_COMBINE_AND)];
+            let mut c = 0u64;
+            assert_eq!(
+                call::plan_eval(p, ops.as_ptr(), 1, d, &mut c),
+                LGJ_ERR_LANE_KIND_MISMATCH,
+                "op {opcode} on lane {wrong_lane}"
+            );
+        }
+        // An op-code past the known set is still unknown.
+        for bogus in [10u32, 99, u32::MAX] {
+            let ops = [op(bogus, LANE_CLASSES, 0, LGJ_COMBINE_AND)];
+            let mut c = 0u64;
+            assert_eq!(
+                call::plan_eval(p, ops.as_ptr(), 1, d, &mut c),
+                LGJ_ERR_UNKNOWN_OPCODE
+            );
+        }
+        assert_eq!(read_words(d), before, "a rejected plan must write nothing");
+
+        assert_eq!(lgj_close(d), LGJ_OK);
+        assert_eq!(lgj_close(p), LGJ_OK);
+    }
+
+    /// The TCAM op-code's packed operand is the one place this minor gives an
+    /// existing field a new reading, so it gets its own pin: `care` all-ones
+    /// must reproduce `LGJ_OP_EQ_U32` exactly, and `care` all-zero must select
+    /// every row. Between them they prove both halves of the packing land
+    /// where the documentation says.
+    #[test]
+    fn the_tcam_opcodes_packed_operand_decodes_both_halves() {
+        let n = 512u64;
+        let p = open(n, 77);
+        let (d1, d2) = (mask(p, LGJ_MASK_INIT_EMPTY), mask(p, LGJ_MASK_INIT_EMPTY));
+        let (mut c1, mut c2) = (0u64, 0u64);
+
+        // care = u32::MAX (high half) ⇒ exact equality with pattern 7.
+        let exact = tcam_operand(7, u32::MAX);
+        let a = [op(
+            LGJ_OP_TERNARY_MATCH_U32,
+            LANE_CLASSES,
+            exact,
+            LGJ_COMBINE_AND,
+        )];
+        let b = [op(LGJ_OP_EQ_U32, LANE_CLASSES, 7, LGJ_COMBINE_AND)];
+        assert_eq!(call::plan_eval(p, a.as_ptr(), 1, d1, &mut c1), LGJ_OK);
+        assert_eq!(call::plan_eval(p, b.as_ptr(), 1, d2, &mut c2), LGJ_OK);
+        assert_eq!(read_words(d1), read_words(d2), "care=MAX must BE eq_u32");
+        assert!(
+            c1 > 0,
+            "the fixture must contain class 7 or this proves nothing"
+        );
+
+        // care = 0 ⇒ everything matches, whatever the pattern is.
+        let anything = tcam_operand(0xDEAD_BEEF, 0);
+        let c = [op(
+            LGJ_OP_TERNARY_MATCH_U32,
+            LANE_CLASSES,
+            anything,
+            LGJ_COMBINE_AND,
+        )];
+        assert_eq!(call::plan_eval(p, c.as_ptr(), 1, d1, &mut c1), LGJ_OK);
+        assert_eq!(c1, n, "care = 0 is 'don't care about anything'");
+
+        // A partial care mask is strictly between the two — the property that
+        // makes this a TCAM and not a renamed equality.
+        let partial = tcam_operand(0b1000, 0b1000);
+        let e = [op(
+            LGJ_OP_TERNARY_MATCH_U32,
+            LANE_CLASSES,
+            partial,
+            LGJ_COMBINE_AND,
+        )];
+        assert_eq!(call::plan_eval(p, e.as_ptr(), 1, d1, &mut c1), LGJ_OK);
+        assert!(
+            c1 > c2 && c1 < n,
+            "a partial care set must be strictly between"
+        );
+
+        for h in [d1, d2, p] {
+            assert_eq!(lgj_close(h), LGJ_OK);
+        }
     }
 }

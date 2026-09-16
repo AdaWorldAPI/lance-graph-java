@@ -1,5 +1,6 @@
 package com.adaworldapi.lancegraph;
 
+import com.adaworldapi.lancegraph.internal.ffm.Abi;
 import com.adaworldapi.lancegraph.internal.ffm.Engine;
 
 /**
@@ -90,8 +91,81 @@ public final class Mask implements AutoCloseable {
         java.util.Objects.requireNonNull(other, "other");
         requireUsable("minus()");
         other.requireUsable("minus()'s argument");
+        // Same reasoning as ternlog() below: a pure manifest check, no handle touched, run
+        // BEFORE dst is allocated rather than left solely to Engine.maskAndNot's own copy of the
+        // same guard, so a too-old library never leaves an orphaned mask behind.
+        Abi.requireMinor(4);
         long dst = Engine.createMask(resourceHandleOf(parent), false);
-        Engine.maskAndNot(handle, other.handle, dst);
+        try {
+            Engine.maskAndNot(handle, other.handle, dst);
+        } catch (LanceGraphException e) {
+            // The version gate above already passed; a failure here is the actual op
+            // (MASK_LENGTH_MISMATCH if other belongs to a mismatched population). dst was
+            // allocated for a Mask this method never got to construct, so nothing else owns it
+            // -- release it before the failure propagates, or it and its registry slot leak for
+            // the life of the process.
+            closeOnFailure(dst, e);
+            throw e;
+        }
+        return new Mask(parent, dst);
+    }
+
+    /**
+     * A new selection: {@code ternlog::<imm>(this, b, c)}, word-wise — the mask-op family's
+     * general member (docs/abi.md §19.1; {@code lgj_mask_ternlog}). {@code imm} is the 8-bit
+     * VPTERNLOG truth table, index {@code (a<<2)|(b<<1)|c} where {@code a} is {@code this}, result
+     * bit {@code (imm >> index) & 1}; every value {@code 0..255} is legal, so there is no
+     * unknown-immediate rejection path.
+     *
+     * <p>This generalises {@link #minus} and the raw AND/OR/XOR/NOT this facade otherwise omits
+     * (the {@code minus()} javadoc's "public and/or composition stays out of scope" scoped a
+     * DIFFERENT wave's plan, not this symbol — abi.md §19.1's whole argument is that one
+     * parameterised member closes the family a per-truth-table method set never would): common
+     * immediates are {@code 0xC0} = {@code a & b}, {@code 0xFC} = {@code a | b}, {@code 0x3C} =
+     * {@code a ^ b}, {@code 0x0F} = {@code !a} ({@code b}/{@code c} unused), {@code 0x80} =
+     * {@code a & b & c}, {@code 0xE8} = majority of three.
+     *
+     * <p>{@code b}/{@code c} need not share this selection's parent resource; if either does not,
+     * or the row counts differ, the ABI's own {@code MASK_LENGTH_MISMATCH} surfaces as a
+     * {@link NativeCallException} — this method performs no redundant Java-side parent/row-count
+     * check of its own, matching {@link #minus}'s own reading. {@code b} and/or {@code c} may be
+     * {@code this} (or each other) — every operand is read as it stood BEFORE the call, so no
+     * arrangement of aliasing changes the answer.
+     *
+     * @param b   the second operand
+     * @param c   the third operand
+     * @param imm the 8-bit truth table, {@code 0..255}
+     * @throws IllegalArgumentException if {@code imm} is outside {@code 0..255}
+     * @throws ClosedResourceException  if this selection, {@code b}, {@code c}, or its resource,
+     *                                  is closed
+     * @throws AbiMismatchException     if the loaded library reports ABI minor &lt; 11
+     */
+    public Mask ternlog(Mask b, Mask c, int imm) {
+        java.util.Objects.requireNonNull(b, "b");
+        java.util.Objects.requireNonNull(c, "c");
+        if (imm < 0 || imm > 255) {
+            throw new IllegalArgumentException("imm must be in 0..255, was " + imm);
+        }
+        requireUsable("ternlog()");
+        b.requireUsable("ternlog()'s b argument");
+        c.requireUsable("ternlog()'s c argument");
+        // A pure manifest check, no handle touched -- run BEFORE dst is allocated rather than
+        // left solely to Engine.maskTernlog's own copy of the same guard, so a too-old library
+        // never leaves an orphaned mask behind (there is nothing yet to leak). Engine.maskTernlog
+        // still carries its own requireMinor(11) too, for any caller that reaches it directly.
+        Abi.requireMinor(11);
+        long dst = Engine.createMask(resourceHandleOf(parent), false);
+        try {
+            Engine.maskTernlog(handle, b.handle, c.handle, dst, (byte) imm);
+        } catch (LanceGraphException e) {
+            // The version gate above already passed; a failure here is the actual op (e.g.
+            // MASK_LENGTH_MISMATCH if b/c belong to a mismatched population). dst was allocated
+            // for a Mask this method never got to construct, so nothing else owns it -- release
+            // it before the failure propagates, or it and its registry slot leak for the life of
+            // the process.
+            closeOnFailure(dst, e);
+            throw e;
+        }
         return new Mask(parent, dst);
     }
 
@@ -283,6 +357,30 @@ public final class Mask implements AutoCloseable {
         throw new IllegalStateException(
                 "Mask.minus() cannot allocate a result mask over an unknown NativeResource"
                         + " implementation: " + resource.getClass());
+    }
+
+    /**
+     * Release a mask allocated as a would-be result, after the fallible native call meant to
+     * populate it failed before a {@link Mask} could be constructed to own it — the shared
+     * close-on-failure step for every {@code Engine.createMask(...)} + fallible-op pair on this
+     * facade ({@link #ternlog}; {@link RowStore#maskOfFacetTernaryMatch} reaches this too, since
+     * it is package-private "for peers", exactly like {@link #handle()} just above per the
+     * section comment introducing it).
+     *
+     * <p>Without this, {@code handleToClose}'s native allocation and registry slot would leak
+     * silently: there is no {@link Mask} object anywhere for a caller to close, because the
+     * constructor that would have handed one out never ran. The original failure is always what
+     * propagates to the caller — a failure while releasing {@code handleToClose} is attached to
+     * it as a {@linkplain Throwable#addSuppressed suppressed} exception rather than replacing it,
+     * so diagnosing "why did the operation fail" is never hijacked by "why did the cleanup of the
+     * failed operation fail".
+     */
+    static void closeOnFailure(long handleToClose, LanceGraphException primary) {
+        try {
+            Engine.close(handleToClose);
+        } catch (LanceGraphException cleanupFailure) {
+            primary.addSuppressed(cleanupFailure);
+        }
     }
 
     private void requireUsable(String what) {

@@ -62,7 +62,9 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 26 symbols (minor 10's one addition — the
+- It is **small** — currently 29 symbols (minor 11's three additions are argued
+  in §19, and the same section argues the SEVEN capabilities it deliberately did
+  NOT spend a symbol on; 26 at minor 10, whose one addition — the
   columnar constructor — is argued in §18; 25 at minor 9, whose one addition is argued
   in §11: a reduction Java was performing on the wrong side of the membrane,
   moved to where the data is; 24 at minor 8, which adds
@@ -83,7 +85,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 8    // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 11   // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -143,6 +145,20 @@ required — a gate that rejected everything would satisfy a rejection-only test
 
 ### Minor version history
 
+- **Minor 11** (2026-09-14) — the masking-op completion (§19): the ndarray
+  masking facade finished growing, and this minor consumes what it grew.
+  **Three symbols and seven op-codes for fifteen capabilities**, which is the
+  whole argument: `lgj_mask_ternlog` (§19.1) makes every 3-input Boolean
+  function of three masks an IMMEDIATE rather than a symbol, so XOR, NOT and
+  MAJ3 arrive without one each; `lgj_op_ternary_match` (§19.2) is the first
+  bitwise-over-payload predicate this ABI has carried, and the only new
+  capability whose parameter (24 bytes) genuinely does not fit an op-code;
+  `lgj_reduce_i32` (§19.3) is the PARAMETERISED reduction §15 mandated in
+  advance rather than the second and third reduce symbols §1 warns about. The
+  comparison family (`ne_u32`, `eq`/`ne`/`lt`/`le`/`ge_i32`) and the `u32` TCAM
+  cost **no symbol at all** — `LgjOpDesc.op` is the generalisation vehicle this
+  ABI already carries for predicates. No new status; no manifest growth; a
+  minor-10 Java loads and sees none of it.
 - **Minor 10** (2026-08-27) — `lgj_rowstore_open_columnar` (§18): the
   facet-major columnar store. A layout is a SCHEMA over the same 512 bytes
   per row (R11), so it is a CONSTRUCTOR, not a resource kind: every mask,
@@ -411,7 +427,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (24 symbols)
+## 7. The function surface (29 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -453,6 +469,7 @@ i32 lgj_mask_describe(u64 mask, LgjLaneDesc* out)               // MASK_WORD lan
 i32 lgj_mask_and(u64 a, u64 b, u64 dst)
 i32 lgj_mask_or(u64 a, u64 b, u64 dst)
 i32 lgj_mask_andnot(u64 a, u64 b, u64 dst)                      // ABI minor ≥ 4, see §13
+i32 lgj_mask_ternlog(u64 a, u64 b, u64 c, u64 dst, u8 imm)      // ABI minor ≥ 11, see §19.1
 i32 lgj_mask_count(u64 mask, u64* out_count)
 ```
 
@@ -470,6 +487,12 @@ i32 lgj_op_gt_i32(u64 res, u32 lane_id, i32 threshold, u64 dst_mask)
 
 Each *overwrites* `dst_mask` with the predicate's result. Composition is the
 caller's job via `lgj_mask_and`.
+
+**Minor 11 adds no symbol here.** The six further comparisons (`ne_u32`,
+`eq`/`ne`/`lt`/`le`/`ge_i32`) and the `u32` TCAM are `LgjOpDesc` OP-CODES, so
+they are reached through the fused plan below — and `n_ops = 1` is the unfused
+form, because the accumulator starts all-set and `all ∩ op0 = op0`. §19.4 is
+the argument for spending op-codes rather than symbols.
 
 ### Fused plan (N predicates — ONE crossing)
 
@@ -499,6 +522,8 @@ i32 lgj_reduce_facet_sum(u64 res, u32 facet, u32 carving,
                          u64 mask, i64* out_sum)      // ABI minor >= 5, see §14
 i32 lgj_reduce_facet_sum_resolved(u64 res, u32 facet, u64 mask,
                                   i64* out_sum, u32* out_carving)  // minor >= 6, §15
+i32 lgj_reduce_i32(u64 res, u32 lane_id, u32 reduce_op, u64 mask,
+                   i64* out_value, u32* out_present)               // minor >= 11, §19.3
 ```
 
 Sums the `I32` lane over set mask bits into a widened `i64` (no overflow for
@@ -521,6 +546,17 @@ which is where the Java tests live. Not for production use.
 i32 lgj_hop(u64 store, u32 edge_classid, u64 facet_mask, u32 decode_mode,
             u64 src_mask, u64 dst_mask)
 ```
+
+### Row-store register predicate (ABI minor ≥ 11)
+
+```
+i32 lgj_op_ternary_match(u64 res, u32 facet,
+                         const u8* pattern, const u8* care, u64 dst_mask)
+```
+
+TCAM over a facet's 12-byte V3 register: `((register ^ pattern) & care) == 0`,
+one bit per row. `AosRows` only (`UNSUPPORTED_LAYOUT` otherwise). §19.2 is the
+full normative statement.
 
 Overwrites `dst_mask` with the one-hop reachable set from `src_mask` over
 `store`'s `edge_classid`-matching facets, gated by the `lance-graph-contract`
@@ -1309,3 +1345,325 @@ unaligned loads either way. The carvings' own contract is untouched: every
 and `512 = 8 × 64` keeps the row stride cache-line-quantised (both pinned
 in `rowstore.rs`, the substrate half of what R4/R10 measured from the
 Valhalla side).
+
+---
+
+## 19. The masking-op completion (ABI minor ≥ 11)
+
+`ndarray`'s masking facade finished growing (`src/simd_masking_ops.rs`, the
+ergonomic tier of the three-layer SIMD contract). This minor consumes what it
+grew — and the interesting half of the change is what it did **not** spend a
+symbol on.
+
+Fifteen facade capabilities landed in this crate. **Three became symbols**
+(29 total, up from 26); **seven became `LgjOpDesc` op-codes**, which cost
+nothing; **five are substrate-tier kernels with no membrane exposure at all**,
+each with a stated reason and a stated condition for revisiting. §1 makes
+symbol growth "a design smell to be argued for, not a default", so every row
+below is the argument rather than a changelog.
+
+| facade capability | how it lands | why |
+|---|---|---|
+| `mask_ternlog` / `mask_ternlog_assign` | **symbol** `lgj_mask_ternlog` | the family's general member (§19.1) |
+| `mask_xor` / `mask_xor_assign` | immediate `0x3C` to that symbol | a 3-input table subsumes it |
+| `mask_not` / `mask_not_assign` | immediate `0x0F` to that symbol | likewise |
+| `ternary_match_strided_to_mask` | **symbol** `lgj_op_ternary_match` | 24 bytes of parameter; no op-code fits (§19.2) |
+| `masked_min_i32` / `masked_max_i32` | **symbol** `lgj_reduce_i32` | §15 mandated ONE parameterised reduce symbol (§19.3) |
+| `ne_u32_to_mask` | op-code `3` | `LgjOpDesc.op` already generalises predicates (§19.4) |
+| `eq_i32` / `ne_i32` / `lt_i32` / `le_i32` / `ge_i32` | op-codes `4`–`8` | likewise |
+| `ternary_match_u32_to_mask` | op-code `9`, packed operand | two `u32`s are exactly 64 bits |
+| `ternary_match_u64_to_mask` | kernel only | 128 bits of parameter (§19.5) |
+| `mask_any` / `mask_all` | kernel only | exactly derivable from `lgj_mask_count` (§19.5) |
+| `blend_i32` | kernel only | no resource carries two `I32` lanes (§19.5) |
+
+Every one of the fifteen has a kernel wrapper in `kernels.rs` regardless of
+exposure. That is the Missing-capability STOP rule read in its own direction:
+the substrate tier is where a capability lands *first*, and a symbol is a NAME
+for something a backend already does (root `CLAUDE.md`, E5). A capability that
+exists in the kernel and not at the membrane is a decision; one that has to be
+invented at the membrane is the failure the rule prevents.
+
+### 19.1 `lgj_mask_ternlog` — the mask-op family's general member
+
+```
+i32 lgj_mask_ternlog(u64 a, u64 b, u64 c, u64 dst, u8 imm)
+```
+
+`dst = ternlog::<imm>(a, b, c)`, word-wise. `imm` is the 8-bit truth table in
+the VPTERNLOG convention (index `(a<<2)|(b<<1)|c`, result bit
+`(imm >> index) & 1`). **Every value `0..=255` is legal**, so there is no
+unknown-immediate rejection path and no status for one.
+
+| function | `imm` |
+|---|---|
+| `a & b` | `0xC0` |
+| `a \| b` | `0xFC` |
+| `a ^ b` | `0x3C` |
+| `a & !b` | `0x30` |
+| `!a` | `0x0F` |
+| `a & b & c` | `0x80` |
+| majority of three | `0xE8` |
+
+**Why this instead of `lgj_mask_xor` + `lgj_mask_not` + `lgj_mask_maj3` + …**
+Because the alternative has no stopping point. XOR and NOT are the two the
+mask algebra visibly lacked; MAJ3, `(a&b)|c`, `(a|b)&c` and 250 others are
+equally real Boolean functions of three masks, and a membrane that mints a
+symbol per truth table is a membrane that grows without bound. One symbol whose
+parameter IS the truth table closes the family. This is also the op
+`.claude/plans/mask-risc-lowering-v1.md` D-MRL-1a names, consuming
+`ogar_loco::TERNLOG = FnIndex(0x86)`'s semantics — **no mint**, per that plan's
+own v4.1 amendment.
+
+**The immediate is runtime at the membrane and compile-time at the facade**,
+and closing that gap is the implementation's only interesting decision. The
+crate carries a 256-entry table of function pointers, one per monomorphisation
+of `ndarray::simd::mask_ternlog_assign::<IMM>`. The tempting alternative —
+decompose the immediate into its eight minterms and OR them word-wise — is
+wrong on both counts that matter: it evaluates the truth table HERE, in ~24 word
+ops instead of one `VPTERNLOGQ` per 512 bits, and it is a locally-written SIMD
+abstraction, which §8 forbids outright. `ndarray`'s POLYFILL LAW puts
+truth-table specialisation *inside the backend file*; reaching the const generic
+is what keeps it there.
+
+**Aliasing.** `dst` may be any of `a`, `b`, `c`, or none, and every operand is
+read as it was BEFORE the call. The mechanism is `lgj_hop`'s, not
+`lgj_mask_and`'s: each operand is snapshotted under a READ lock that is fully
+RELEASED before the next lock is taken, and only then is the single WRITE lock
+on `dst` acquired. Never more than one lock at a time, so every aliasing case is
+deadlock-free **by construction rather than by case analysis** — which is what
+four handles need, where `lgj_mask_andnot`'s three could be enumerated.
+`registry::lock_masks_ordered` is deliberately not used: it holds at most three
+entries, and more decisively it takes a WRITE guard on every one, which is how a
+mask's memoised carving (§15) is invalidated — reading `a`/`b`/`c` through it
+would silently discard three memos this operation does not touch.
+
+**The snapshots are a real cost, stated rather than hidden:** up to three
+mask-sized copies plus one pass. `lgj_mask_and`/`or`/`andnot` are therefore NOT
+removed and NOT reimplemented on top of this — removal would not be an additive
+minor, and each keeps a two-mask analysis that is cheaper for its own function.
+Call them for AND/OR/ANDNOT; call this for everything else.
+
+**Tail.** Bits at row index `>= n_rows` are zero on return, and here that clear
+is load-bearing rather than defensive. The facade's contract is exact: the
+result's tail is `imm & 1` replicated, because every conforming input's tail is
+zero and index `0` is the all-zero-inputs row of the table. So an **odd** `imm`
+— `NOT_A = 0x0F` among them — sets every tail bit before the clear. A test
+asserts that it does, so the clear is a measured requirement and not a
+precaution that could be removed without anything going red.
+
+**Compatibility.** All four masks must share the same parent and row count, or
+`MASK_LENGTH_MISMATCH` — the same reading `lgj_mask_and` uses, extended from
+three handles to four. The rule is unchanged; only the arity is.
+
+### 19.2 `lgj_op_ternary_match` — TCAM over the V3 register
+
+```
+i32 lgj_op_ternary_match(u64 res, u32 facet,
+                         const u8* pattern, const u8* care, u64 dst_mask)
+```
+
+**Overwrites** `dst_mask` with `((register(row, facet) ^ pattern) & care) == 0`
+over the 12-byte content-blind register that follows each facet's classid.
+
+**This is the first bitwise-over-payload predicate this ABI has ever carried.**
+Every predicate before it compares a whole scalar field — a classid, a value, an
+id — and `.claude/plans/mask-risc-lowering-v1.md` §1 records that absence
+explicitly ("all scalar-valued, none bitwise over the payload"). `care` is what
+makes the difference structural rather than incremental: it selects which BITS
+must agree, so setting the leading bytes and clearing the rest turns the op into
+a PREFIX test, and prefix containment is ancestry (OGAR `CLAUDE.md`'s 3×4 canon;
+`rail_geometry.rs:178`'s `is_ancestor_of`). One call, one mask, the whole
+subtree — which is the vertical axis that plan's mask trie stands on.
+
+`care` all-zero matches every row (a deliberate total, not an error); `care`
+all-ones is exact register equality.
+
+**Why a symbol and not an op-code.** Its parameter is 24 bytes — a 12-byte
+pattern and a 12-byte care mask. `LgjOpDesc.operand` is 64 bits. Widening the
+descriptor would not be an additive change, and packing a pointer into an
+integer operand would put a lifetime across a struct the plan evaluator copies.
+It is the only capability in this minor whose parameter genuinely does not fit.
+
+**Layout.** `AosRows` only. A facet's register is 12 CONTIGUOUS bytes there,
+which is what makes one strided pass possible; `FacetMajor` (§18) deliberately
+splits it into a lo64 region and a hi32 region far apart in the buffer.
+Gathering it back per row would be the serialization this ABI exists to forbid,
+so the answer is `UNSUPPORTED_LAYOUT` (`-18`) — the same deferral-stated-as-a-
+status the register-sweep family already uses. Checked BEFORE the mask is
+resolved, so `dst_mask` is provably untouched on a refusal.
+
+**Mask compatibility is row-count only**, matching `lgj_op_eq_classid` — the
+closest sibling, a predicate that writes a mask — rather than the register
+sweeps' stricter parent-identity check. abi.md names only the row-count
+condition for a predicate's destination (§3), and inventing a second reading for
+one new predicate is exactly the drift this membrane exists to prevent.
+
+**Kernel.** `ndarray::simd::ternary_match_strided_to_mask`, which lowers the
+test to one `ternlog::<XOR_AND>` per 16 records plus a compare-against-zero —
+never an XOR, then an AND, then a compare. The primitive owns bounds checking
+(overflow-safe, up front) and the trailing-bits-zero guarantee, exactly as
+`eq_u32_strided_to_mask` does for `lgj_op_eq_classid`.
+
+### 19.3 `lgj_reduce_i32` — the parameterised reduction §15 mandated in advance
+
+```
+i32 lgj_reduce_i32(u64 res, u32 lane_id, u32 reduce_op, u64 mask,
+                   i64* out_value, u32* out_present)
+```
+
+`reduce_op`: `0 = SUM`, `1 = MIN`, `2 = MAX`. Anything else is
+`UNKNOWN_OPCODE`, never a silent fall back to `SUM` — an unknown reduction must
+not alias a known one, the same argument §14 makes for an unknown carving.
+
+**§15 wrote this shape down before the need arose**, and naming that is the
+point rather than a flourish:
+
+> if a second reduction is ever needed (min/max/count-distinct/histogram), do
+> NOT add a second symbol. That is the point at which the operation should be
+> generalised — an op-code parameter on one reduce symbol, mirroring how
+> `lgj_plan_eval`'s `LgjOpDesc` already generalises predicates — and `sum`
+> becomes op-code 0. Two reduction symbols would be the smell §1 warns about;
+> one parameterised symbol is the shape this ABI already uses elsewhere.
+
+Min and max ARE that second reduction. So this is one symbol, `sum` is op-code
+`0`, and a future `count-distinct` or `histogram` is one more arm rather than
+one more symbol.
+
+**`lgj_reduce_sum_i32` is retained unchanged.** Removing it would not be an
+additive minor and a minor-1 Java is still entitled to it; `reduce_op = 0`
+answers identically, pinned by a test so the two cannot drift. The §15 rule's
+letter ("`sum` becomes op-code 0") is honoured; its one impossible clause
+(retroactively deleting a shipped symbol) is not, and that substitution is
+recorded here rather than left to be noticed.
+
+**`out_present` is not a formality.** Min and max over an EMPTY population have
+no answer, and every in-band sentinel is wrong: `i32::MAX` is a value a real
+population can contain, and `0` is worse. `out_present = 0` means "nothing
+selected; `*out_value` is `0` and means nothing". `SUM` is always present,
+because the sum of an empty population is `0` and that IS the answer — the same
+distinction §15 draws when it refuses to report a zero-fallback carving for an
+empty population.
+
+Both outputs are written on `LGJ_OK` and neither on any failure, matching
+`lgj_reduce_facet_sum_resolved`'s two-output precedent. Widening to `i64` is
+the SUM's contract and exact for an `i32` extremum, so one return type carries
+all three without a lossy case.
+
+**Cost:** `O(mask_words + popcount)` for every op. The mask-word scan is
+unconditional, so an empty mask costs one pass rather than nothing — the cost
+shape §14 already states for the register sweep, and §6's bulk rule holds by
+the same reading.
+
+### 19.4 Seven op-codes that cost no symbol
+
+```
+LGJ_OP_NE_U32           = 3    // U32 lane
+LGJ_OP_EQ_I32           = 4    // I32 lane
+LGJ_OP_NE_I32           = 5
+LGJ_OP_LT_I32           = 6
+LGJ_OP_LE_I32           = 7
+LGJ_OP_GE_I32           = 8
+LGJ_OP_TERNARY_MATCH_U32 = 9   // U32 lane
+```
+
+Each is an `LgjOpDesc.op` value, reached through `lgj_plan_eval` /
+`lgj_plan_eval_scalar`. Two consequences, both wanted:
+
+- **Fused for free.** Six new predicates compose with each other and with the
+  existing two in ONE crossing, which is the property §6 exists to protect. Six
+  new `lgj_op_*` symbols would have given the unfused form only, and a caller
+  chaining them would pay a crossing each.
+- **Unfused for free too.** `n_ops = 1` IS the unfused form: the accumulator
+  starts all-set, so `all ∩ op0 = op0` exactly. Nothing is lost by not minting
+  the symbols.
+
+`LGJ_OP_TERNARY_MATCH_U32` **packs both halves into `operand`**:
+`operand as u64` is `(care << 32) | pattern`. That is exact — two `u32`s are
+exactly 64 bits — and it is a new reading of an existing field for a NEW op-code
+only; every pre-existing op-code's reading of `operand` is untouched.
+
+**Both plan symbols gained scalar arms.** An op-code with no scalar
+implementation would make `lgj_plan_eval_scalar` answer `UNKNOWN_OPCODE` for
+exactly the ops the plan evaluator was extended to cover — an asymmetry between
+two symbols §7 says have "identical semantics", and it would quietly hollow out
+the parity escape hatch. Each scalar arm is written as the predicate's own
+definition (`v <= t`), never as a complement of its neighbour, so a facade that
+lowered `ge` as a buggy complement is caught rather than agreed with.
+
+### 19.5 What is NOT a symbol, and why
+
+Named so their absence is a decision on record rather than an oversight — §10's
+own convention, applied to this minor.
+
+**`mask_any` / `mask_all` — exactly derivable, so they buy nothing.**
+`any` is `lgj_mask_count > 0`; `all` is `lgj_mask_count == n_rows`, and a Java
+`Mask` already holds its row count. Both cost ONE crossing either way, and both
+are `O(mask_words)` either way — the facade's `mask_any` does not short-circuit,
+it ORs every word, exactly as `popcount_batch_u64` sums every word. A symbol
+that is a rename of an existing answer at identical cost is the growth §1 names
+as a smell. The kernels ship (a future fused plan's `EXISTS` terminal will want
+the early-out shape); the membrane does not.
+
+**`blend_i32` — no resource has two `I32` lanes.** A blend needs two of them.
+The pattern fixture has exactly one (`LANE_VALUES`); the row store has none
+(`U8` raw, `U32` classid, `U64` lo64, `U32` hi32). Every legal call would be
+`blend(m, values, values)`, which is `values` — a symbol whose only reachable
+invocation is the identity. **Condition to revisit, stated so it can fire:** a
+resource that carries two `I32` lanes, or a measured need for the
+constant-fallback form (`dst[i] = mask[i] ? lane[i] : k`), which is a different
+primitive and would be named as one.
+
+**`ternary_match_u64_to_mask` — 128 bits of parameter.** Its `pattern` + `care`
+needs twice what `LgjOpDesc.operand` carries, so it cannot be an op-code without
+growing the descriptor, which would not be additive. Nor does it earn the symbol
+`lgj_op_ternary_match` earns: that one answers over the 12-byte V3 register,
+which is where the prefix/ancestry question lives; a `u64` TCAM would answer over
+the `ids` lane, for which no caller exists. **Condition to revisit:** a caller
+with a real care-masked query over a `U64` lane — at which point the honest shape
+is a pointer-taking symbol like §19.2's, not a widened descriptor.
+
+**`mask_xor` / `mask_not` — already reachable.** Immediates `0x3C` and `0x0F` to
+§19.1. A dedicated symbol for each would save one snapshot on the XOR path and
+nothing at all on NOT, against two more symbols forever.
+
+### 19.6 Bulk-rule conformance (§6, applied)
+
+None of the three is lifecycle, and none is fixed-cost. A caller that doubles
+`n_rows` observes roughly double the work in each: `lgj_mask_ternlog` twice the
+mask words (and twice the snapshot bytes); `lgj_op_ternary_match` twice the
+records scanned; `lgj_reduce_i32` twice the mask-word scan and, on average,
+twice the popcount. The seven op-codes inherit `lgj_plan_eval`'s own
+conformance unchanged. Same test every existing symbol passes.
+
+### 19.7 The disable table (red-then-green, or it is not evidence)
+
+Every guard this minor adds was verified by breaking it and watching the named
+test fail, then restoring. Seven runs:
+
+| what was disabled | test that went red | observed |
+|---|---|---|
+| the tail clear in `mask_ternlog_impl` | `an_odd_immediate_leaves_no_tail_bit_behind` | counted **127** of 130 rows instead of **65** — the 62 dead bits of the last word |
+| the 256-table index, transposed (`[imm & 15][imm >> 4]`) | `the_ternlog_dispatch_table_agrees_with_the_truth_table_for_all_256_immediates` | FAILED |
+| the `AosRows` gate in `lgj_op_ternary_match` | `ternary_match_rejects_null_bad_facet_wrong_kind_and_a_facet_major_layout` | FAILED |
+| `out_present` hardcoded to `1` | `reduce_i32_reports_an_empty_population_instead_of_inventing_an_extremum` | FAILED |
+| one op-code's scalar arm (`le_i32` → `UNKNOWN_OPCODE`) | `every_minor_11_opcode_runs_on_both_plan_paths_and_they_agree` | FAILED |
+| the packed TCAM operand's halves, swapped | `the_tcam_opcodes_packed_operand_decodes_both_halves` | FAILED |
+| the `a` seed in `mask_ternlog_impl` (never snapshot `a`) | `mask_ternlog_answers_the_truth_table_in_every_aliasing_shape` | FAILED at `imm=0x01, distinct dst` |
+
+**Two of the seven passed on the first attempt, and both were defects in the
+CHECK rather than evidence about the guard.** Recorded because the repo's own
+rules name this trap and it fired anyway:
+
+1. The tail disable inserted `if false { clear_tail_bits(…) }` *beside* the real
+   call instead of removing it. The `assert count == 1` fired, so the EDIT
+   happened — but the edit did not remove the guard. *"A disable that does not
+   apply is indistinguishable from a guard that is not load-bearing."*
+2. The aliasing disable flipped `if Arc::ptr_eq(&ed, &ea)` to `if false`, which
+   makes the code snapshot `a` ALWAYS — strictly more conservative, so nothing
+   could break. **The knob did not bind.**
+
+Both were corrected to disables that provably apply (each now asserts the guard
+is textually ABSENT from the function body afterwards, not merely that a
+replacement occurred), and both then went red. The lesson is the one already on
+record and worth one more instance: assert what the disable REMOVED, never only
+that an edit landed.

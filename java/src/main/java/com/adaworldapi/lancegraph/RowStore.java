@@ -1,5 +1,6 @@
 package com.adaworldapi.lancegraph;
 
+import com.adaworldapi.lancegraph.internal.ffm.Abi;
 import com.adaworldapi.lancegraph.internal.ffm.Engine;
 import com.adaworldapi.lancegraph.internal.ffm.Layouts;
 
@@ -161,6 +162,63 @@ public final class RowStore implements NativeResource, AutoCloseable {
     }
 
     /**
+     * A selection of the rows whose {@code facet}'s 12-byte content-blind register matches
+     * {@code ((register ^ pattern) & care) == 0} — TCAM over the V3 register (docs/abi.md §19.2;
+     * {@code lgj_op_ternary_match}). {@code care} all-zero matches every row (a deliberate total,
+     * not an error); {@code care} all-ones is exact register equality. Setting the leading bytes
+     * of {@code care} and clearing the rest turns this into a PREFIX test — one call, one mask,
+     * a whole ancestry subtree (OGAR's 3×4 canon; prefix containment is ancestry).
+     *
+     * <p>{@code pattern} and {@code care} are each the 12-byte register split as low 64 / high 32
+     * bits, matching {@link #payloadLow64At}/{@link #payloadHi32At}'s own convention.
+     *
+     * <p>{@code AosRows} layout only: a store opened with {@link #openColumnar} splits the
+     * register into per-field regions no strided pass can gather without the serialization this
+     * ABI exists to forbid, and this method's {@code UNSUPPORTED_LAYOUT} surfaces as a
+     * {@link NativeCallException} there — checked before the mask is even resolved, matching the
+     * refusal {@link #facetSumAs} already gives a facet-major store.
+     *
+     * <p>One native crossing ({@code lgj_mask_create} then {@code lgj_op_ternary_match} — two,
+     * matching {@link #maskOfFacetClass}'s own accounting), a flat, per-call cost proportional to
+     * the row count, never to any prior result.
+     *
+     * @param facet       which of the 32 facet lanes to read — a facet index, not a lane id
+     * @param patternLo64 the low 64 bits of the 12-byte pattern to match
+     * @param patternHi32 the high 32 bits of the 12-byte pattern to match
+     * @param careLo64    the low 64 bits of the 12-byte care mask
+     * @param careHi32    the high 32 bits of the 12-byte care mask
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 11
+     */
+    public Mask maskOfFacetTernaryMatch(FacetId facet, long patternLo64, int patternHi32,
+            long careLo64, int careHi32) {
+        java.util.Objects.requireNonNull(facet, "facet");
+        requireOpen("maskOfFacetTernaryMatch()");
+        // A pure manifest check, no handle touched -- run BEFORE mask is allocated rather than
+        // left solely to Engine.ternaryMatch's own copy of the same guard, so a too-old library
+        // never leaves an orphaned mask behind (there is nothing yet to leak). Engine.ternaryMatch
+        // still carries its own requireMinor(11) too, for any caller that reaches it directly.
+        // Mirrors Mask.ternlog's own reasoning (see that method).
+        Abi.requireMinor(11);
+        long mask = Engine.createMask(handle, false);
+        try {
+            Engine.ternaryMatch(handle, facet.index(), patternLo64, patternHi32, careLo64,
+                    careHi32, mask);
+        } catch (LanceGraphException e) {
+            // The version gate above already passed; a failure here is the actual op --
+            // UNSUPPORTED_LAYOUT on a columnar store (see this method's own javadoc), or a
+            // MASK_LENGTH_MISMATCH. mask was allocated for a Mask this method never got to
+            // construct, so nothing else owns it -- release it before the failure propagates, or
+            // it and its registry slot leak for the life of the process. Mask.closeOnFailure is
+            // package-private "for peers" (the same standing Mask.handle() already grants
+            // RowStore) precisely so this site does not need to reinvent the same
+            // close-then-suppress shape.
+            Mask.closeOnFailure(mask, e);
+            throw e;
+        }
+        return new Mask(this, mask);
+    }
+
+    /**
      * For every facet, which register grouping this selection's rows carry (abi.md §16) — the
      * whole-row alignment answer, in ONE crossing.
      *
@@ -306,8 +364,21 @@ public final class RowStore implements NativeResource, AutoCloseable {
         java.util.Objects.requireNonNull(facets, "facets");
         java.util.Objects.requireNonNull(src, "src");
         requireOpen("hop()");
+        // Same reasoning as maskOfFacetTernaryMatch() above: a pure manifest check, no handle
+        // touched, run BEFORE dst is allocated rather than left solely to Engine.hop's own copy
+        // of the same guard, so a too-old library never leaves an orphaned mask behind.
+        Abi.requireMinor(4);
         long dst = Engine.createMask(handle, false);
-        Engine.hop(handle, edgeClassid, facets.bits(), 0, src.handle(), dst);
+        try {
+            Engine.hop(handle, edgeClassid, facets.bits(), 0, src.handle(), dst);
+        } catch (LanceGraphException e) {
+            // The version gate above already passed; a failure here is the actual op. dst was
+            // allocated for a Mask this method never got to construct, so nothing else owns it
+            // -- release it before the failure propagates, or it and its registry slot leak for
+            // the life of the process. Reuses Mask.closeOnFailure rather than a second helper.
+            Mask.closeOnFailure(dst, e);
+            throw e;
+        }
         return new Mask(this, dst);
     }
 
