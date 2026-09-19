@@ -20,7 +20,7 @@ package com.adaworldapi.lancegraph;
  *
  * @param token the opaque registry token
  */
-public record MaskId(long token) {
+public value record MaskId(long token) {
 
     /** Which registry slot. Diagnostic only. */
     public int slot() {

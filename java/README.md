@@ -27,9 +27,12 @@ become one native lane set, one packed mask, a few tiny schema descriptors, and 
 There is no Maven, no Gradle, no downloaded dependency, and no C toolchain. `javac` and `java` are
 the entire Java toolchain, exactly as `cargo` is the entire Rust one.
 
-- **JDK 26** (`/opt/jdks/jdk-26.0.2`). FFM is **final** in JDK 26, so `--enable-preview` is neither
-  needed nor accepted. Do **not** use a JDK 21 `java` on the path — there FFM is preview-gated and
-  these commands will not work.
+- **JDK 28** (`/opt/jdks/jdk-28+16`). Two features, two reasons: **Panama FFM is final** here, so
+  it needs no flag; **Valhalla (JEP 401) is preview-gated**, and production deliberately uses it —
+  the six vocabulary types (`LaneId`, `MaskId`, `Ordinal`, `FacetId`, `RowRange`, `WideFieldMask`)
+  are `value record`s. So `--release 28 --enable-preview` is required to COMPILE and `--enable-preview`
+  to RUN. The flag is Valhalla's, never FFM's. Do **not** use a JDK 21 `java` on the path — there FFM
+  is preview-gated too and these commands will not work.
 - No JNI, no `jextract`, no `cbindgen`, no `.h` file anywhere in the project. See `../docs/abi.md`
   §0 for why those are absent by construction rather than by preference.
 
@@ -37,7 +40,7 @@ the entire Java toolchain, exactly as `cargo` is the entire Rust one.
 
 ```sh
 cd java
-/opt/jdks/jdk-26.0.2/bin/javac -d out $(find src/main/java src/test/java -name '*.java')
+/opt/jdks/jdk-28+16/bin/javac --release 28 --enable-preview -d out $(find src/main/java src/test/java -name '*.java')
 ```
 
 Compilation emits **seven** `[restricted]` warnings with `-Xlint:all`: six in
@@ -56,11 +59,11 @@ exercise the restriction itself.
 
 ```sh
 # everything
-/opt/jdks/jdk-26.0.2/bin/java --enable-native-access=ALL-UNNAMED -cp out \
+/opt/jdks/jdk-28+16/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -cp out \
     com.adaworldapi.lancegraph.AllTests
 
 # or one suite at a time — each has its own main
-/opt/jdks/jdk-26.0.2/bin/java --enable-native-access=ALL-UNNAMED -cp out \
+/opt/jdks/jdk-28+16/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -cp out \
     com.adaworldapi.lancegraph.SmokeTest
 ```
 
@@ -69,7 +72,7 @@ exercise the restriction itself.
 | Flag | Needed? | Why |
 |---|---|---|
 | `--enable-native-access=ALL-UNNAMED` | **yes** | FFM's restricted methods (`libraryLookup`, `downcallHandle`, `reinterpret`) refuse to run without it. Omitting it does not fail the build — it fails at load, which is worse. |
-| `--enable-preview` | **no** | FFM is final in JDK 26. Passing it is an error. |
+| `--enable-preview` | **yes** | NOT for FFM — FFM is final on JDK 28. It is required because the production vocabulary types are Valhalla `value record`s (JEP 401, preview on this build). |
 | `-Djava.library.path=…` | **no** | Not used. That is the JNI mechanism; this project resolves the artifact itself (below). |
 
 ### Where the native library is found

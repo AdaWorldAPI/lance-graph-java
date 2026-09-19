@@ -19,6 +19,59 @@ FieldMask / WideFieldMask); the full lance-graph ENGINE is never a
 dependency — blast-radius containment is the point of the contract
 split, and it does not make the contract optional.
 
+## P0 — JDK 28, Valhalla AND Panama (operator-ruled, 2026-09-19)
+
+**LGJ MUST use JDK 28 and MUST use Valhalla and Panama.** Not a preference,
+not a lab arm, not "when it finalizes" — the target toolchain of this repo.
+
+⊘ **This SUPERSEDES the "production targets a shipped GA JDK, no preview
+flags" decision** recorded in `.claude/knowledge/jdk-toolchain-facts.md`
+(struck there in place, not deleted). That decision framed a release
+constraint as an architectural virtue, and the framing was the drift: it let
+a session write *"production lgj does not depend on Valhalla at all"* — which
+is false about the design and now false about the mandate. Production has
+always been Valhalla-SHAPED (the four vocabulary types are written
+identity-free so the same source is a `value record` with one word changed,
+proven in `valhalla-lab/docs/three-truths.md`); the ruling makes that
+dependency real instead of aspirational.
+
+**The two membranes, both required, neither optional:**
+
+| membrane | carries | what it is here |
+|---|---|---|
+| **Panama** (FFM) | the VERB — operations across the boundary, `MemorySegment` reach into lance-graph's canonical bytes | the computation membrane |
+| **Valhalla** (JEP 401 value classes) | the NOUN — `LaneId` / `MaskId` / `Ordinal` / `FacetId` / `RowRange` / `WideFieldMask` as flattened, identity-free semantic addresses | the storage membrane |
+
+Neither owns storage: **lance-graph owns the only canonical copy.** Valhalla
+is the storage membrane, never the storage owner. Together they are what lets
+zero-copy be a first-class programming model in Java rather than a trick
+hidden behind an FFI call — a view cheap enough to be ergonomically
+indistinguishable from owning the thing.
+
+**What does NOT change under this ruling:**
+
+- **E4 still holds — the Vector API is not a production backend.** JDK 28
+  finalizing it does not give Java a backend; Java has no backends. Numeric
+  kernels stay in `ndarray::simd` behind the ABI (`E1`, `E2`, `E6`). A
+  finalized Vector API makes the *lab* faster, not `src/main` wider.
+- **`--enable-preview` is still classfile-poisoning**, so while JEP 401 is
+  preview on the target JDK the flag is set repo-wide and deliberately, never
+  leaked selectively — one toolchain, one flag posture, no mixed classfiles.
+- **Every mask-native, zero-copy and membrane rule below is unaffected.**
+  Value classes change how cheaply a descriptor is carried; they never make a
+  population crossable.
+
+**Status: IMPLEMENTED 2026-09-19, gates green.** `/opt/jdks/jdk-28+16`
+(Temurin `28+16-ea`). The six vocabulary types — `LaneId`, `MaskId`,
+`Ordinal`, `FacetId`, `RowRange`, `WideFieldMask` — are `public value record`,
+all report `isValue() == true` at runtime, and the full suite is **409 checks,
+0 failures** under `--release 28 --enable-preview` against a freshly built
+`liblgj_abi.so` (abi 0.11, `ndarray::simd avx512`) — byte-for-byte the same
+409 as the unflipped baseline on the same JDK. `bench/run.sh` carries the pin
+and the flag. Measured facts and the obtain route (most JDK hosts are
+egress-blocked here; GitHub release *download* paths are not) live in
+`.claude/knowledge/jdk-toolchain-facts.md`.
+
 ## The mask-native invariant (operator-ruled, 2026-08-18)
 
 **WHERE MAY LOOK LIKE WHERE. IT MUST EXECUTE LIKE MASK.**

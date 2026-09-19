@@ -30,7 +30,15 @@ final class Platform {
     }
 
     static String arrayFlatness(Object array) {
-        return ValueClass.isFlatArray(array) ? "FLAT" : "NOT-FLAT";
+        // JDK 28 narrowed `ValueClass.isFlatArray` from `Object` to `Object[]` (it was `Object`
+        // on the 27-jep401ea3 build this lab was written against). Keeping the parameter as
+        // `Object` here is deliberate — callers pass arbitrary arrays, including primitive ones,
+        // and a primitive array is never flat in the value-class sense, so it answers without
+        // reaching the internal API at all.
+        if (!(array instanceof Object[] refs)) {
+            return "NOT-FLAT";
+        }
+        return ValueClass.isFlatArray(refs) ? "FLAT" : "NOT-FLAT";
     }
 
     /**

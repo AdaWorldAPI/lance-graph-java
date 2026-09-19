@@ -63,9 +63,12 @@ on both sides.
    Java side actually implements its half.
 7. **`--enable-native-access` is required and documented** in
    `java/README.md`'s exact command lines — verify the commands there
-   actually run against `/opt/jdks/jdk-26.0.2` (see
-   `.claude/knowledge/jdk-toolchain-facts.md`) without additional flags
-   beyond that one.
+   actually run against `/opt/jdks/jdk-28+16` (see
+   `.claude/knowledge/jdk-toolchain-facts.md`). **Two flags, two owners:**
+   `--enable-native-access=ALL-UNNAMED` is FFM's and the only one Panama
+   needs; `--enable-preview` is VALHALLA's, required because the production
+   vocabulary types are `value record`s. Never attribute the preview flag to
+   FFM — on JDK 28 FFM is final.
 
 ## What you are not
 

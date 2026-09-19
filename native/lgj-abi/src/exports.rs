@@ -1720,9 +1720,10 @@ fn validate_plan(pattern: &ResourceEntry, ops: &[LgjOpDesc]) -> Result<(), i32> 
 /// more than implying otherwise. `validate_plan` runs first and rejects an
 /// unknown opcode, a bad combine, an out-of-range lane and a kind mismatch
 /// before the lowering is even built; the lowering names no input plane
-/// (`Planes::masks` is `&[]`), no sum terminal and no blend. What is left —
-/// the scratch-sizing family, `ScratchReadBeforeWrite`, `GateAliasesDst` —
-/// would be a bug in THIS file, not in a caller's plan.
+/// (`Planes::masks` is `&[]`), no sum terminal, no blend and no `Pred::Range`.
+/// What is left — the scratch-sizing family, `ScratchReadBeforeWrite`,
+/// `GateAliasesDst`, `RangeOutOfBounds` — would be a bug in THIS file, not in
+/// a caller's plan.
 ///
 /// So the map exists to turn such a bug into a status a caller can see
 /// instead of a panic, and its arms are deliberately NOT claimed to be
@@ -1742,7 +1743,8 @@ fn exec_error_to_status(e: ExecError) -> i32 {
         | ExecError::ScratchReadBeforeWrite { .. }
         | ExecError::ScratchWords { .. }
         | ExecError::BlendNeedsOut
-        | ExecError::GateAliasesDst { .. } => LGJ_ERR_ALLOCATION_FAILED,
+        | ExecError::GateAliasesDst { .. }
+        | ExecError::RangeOutOfBounds { .. } => LGJ_ERR_ALLOCATION_FAILED,
     }
 }
 

@@ -1,3 +1,187 @@
+## E-PANAMA-TIMES-VALHALLA-IS-ONE-MEMBRANE-AND-THE-LAB-FINALLY-HAS-ONE-VARIABLE-1 (2026-09-19)
+
+**Operator reframing, and it is the correct one:** this was never a JDK 26→28
+migration. It is **Panama-only production + Valhalla-lab arm → one production
+Panama × Valhalla membrane.** JDK 28 is the enabling toolchain, not the point.
+Panama answers *where are the bytes and how does Java reach them without
+copying*; Valhalla answers *how does Java name and carry semantic values over
+those bytes without identity-heavy heap objects*. lance-graph / T0 remains the
+only owner of canonical storage.
+
+### Measured on JDK 28 (`/opt/jdks/jdk-28+16`), production value-shaped
+
+| gate | result |
+|---|---|
+| native `lgj-abi` | **183 tests** green (182 + the new Range falsifier) |
+| Java `AllTests`, production as `value record` | **ALL PASSED (409 checks)** — identical to the unflipped baseline on the same JDK |
+| all six vocabulary types | `isValue() == true`; substitutability holds |
+
+### The flattening cliff is UNCHANGED on JDK 28 — and it bites one of our six
+
+Measured by the lab, both arms on one JDK:
+
+| type | payload | array |
+|---|---|---|
+| `LaneId` (1 int) | 4 B | **FLAT** |
+| `Ordinal` (1 int) | 4 B | **FLAT** |
+| `MaskId` (1 long) | 8 B | **FLAT** |
+| `RowRange` (2 long) | 16 B | **NOT-FLAT** |
+| `Row` (1 long + 2 int) | 16 B | **NOT-FLAT** |
+
+The ≤8-byte cliff measured on the 27-jep401ea3 build **reproduces on JDK 28**.
+So `value semantics` and `flattening` remain two different claims, and
+**`RowRange` is a real production type on the wrong side of the cliff.** No
+performance claim may be made for it from `isValue() == true`.
+
+### Allocation deltas, record arm → value arm (1M ops, same JDK)
+
+| measurement | record | value | delta |
+|---|---|---|---|
+| construct N `LaneId` into an array | 15.26 MiB | **1.87 MiB** | **8.2× less** (16 B → 1.96 B each) |
+| allocate+fill `LaneId[N]` | 19.07 MiB | **5.65 MiB** | 3.4× less |
+| construct N `Descriptor` (2 wrappers) | 45.78 MiB | **27.89 MiB** | 1.6× less |
+| construct N `LaneId`, never escaping | 4.73 MiB | **5.75 MiB** | ⊘ **value arm allocates MORE** — escape analysis already erased the record case |
+| hydrate 65,536 `Row` | 1.50 MiB | **2.00 MiB** | ⊘ **worse** — `Row` is 16 B, NOT-FLAT |
+
+**Two of the five went the wrong way, and both are honest.** Where EA already
+won, value classes add nothing; where the shape does not flatten, hydration
+costs more. Production does not hydrate rows, so the second is a warning about
+a path we do not take — not a regression we shipped.
+
+### The Panama path is byte-identical across the object model
+
+| FFM measurement | record arm | value arm |
+|---|---|---|
+| Java bytes allocated per query (warm) | 712 B | **712 B** |
+| Java objects per row | 0 | **0** |
+| native lane bytes / mask bytes | 1.00 MiB / 8.0 KiB | **identical** |
+
+**That is the integration's central invariant, measured rather than asserted:**
+Valhalla changes what the *vocabulary* costs; it does not touch the membrane.
+No second graph representation appeared, and no row hydration was introduced
+to "use Valhalla".
+
+### The lab's re-scope removed a confound it had carried since it was built
+
+The old A/B was `(record, JDK 26)` vs `(value record, JDK 27 EA)` — **two
+variables**. Both arms now run on JDK 28, so the object model is the only
+difference and the diff is attributable. The lab stops being
+present-vs-future and becomes a VM/representation probe suite over the real
+production vocabulary.
+
+Two things the re-scope forced, both real:
+- **Preview marking is transitive.** Production classfiles are preview-marked,
+  so the `record` arm *also* runs `--enable-preview`. It is a record arm on a
+  preview-enabled JVM, not a preview-free arm; the "stable" label survives only
+  as a path.
+- **A JDK 28 internal-API change.** `jdk.internal.value.ValueClass.isFlatArray`
+  narrowed from `Object` to `Object[]` since 27-jep401ea3; the flattening probe
+  was adapted (a non-`Object[]` argument answers `NOT-FLAT` without reaching
+  the internal API).
+
+### The `RangeOutOfBounds` fix is compatibility plumbing, with a falsifier
+
+`mask_risc::ExecError` gained `RangeOutOfBounds` with lance-graph's
+`Pred::Range` work and `exec_error_to_status` matches exhaustively, so
+`lgj-abi` **did not compile against lance-graph `main`**. Mapped into the
+documented *"bug in THIS file"* family — no new public status, no ABI bump —
+and backed by `plan_lower::range_falsifier::no_opcode_lowers_to_pred_range`,
+which sweeps every opcode through the real `lower_plan` and reads every
+emitted predicate. **Disable-verified red-then-green:** pointing `LGJ_OP_EQ_U32`
+at `Pred::Range` fails it with the intended message; restoring passes. When LGJ
+gains a Range lowering this goes red and forces a deliberate caller-visible
+mapping instead of inheriting `LGJ_ERR_ALLOCATION_FAILED`, which would then be
+a lie.
+
+### What could not be measured here, stated rather than implied
+
+`bench/` cannot run in this container — `bench/lib` does not exist, so the JMH
+jars are absent. The crossing-count and per-call allocation figures in
+`bench/RESULTS.md` are **historical JDK 26 measurements, correct when taken**,
+and are deliberately left untouched; they have NOT been re-taken on JDK 28.
+`gate-run.sh` carries the new pin and flags so the re-run is one command once
+the jars are present.
+
+## E-THE-VALHALLA-FLIP-COST-ONE-WORD-SIX-TIMES-AND-THE-GATES-DID-NOT-MOVE-1 (2026-09-19)
+
+**Finding, measured end to end today.** The P0 mandate (JDK 28 + Valhalla +
+Panama) is implemented. `/opt/jdks/jdk-28+16`, Temurin `28+16-ea`.
+
+| arm | result |
+|---|---|
+| JDK 28, sources unchanged, no preview | compiles; **409 checks, 0 failed** |
+| JDK 28, six types `public value record`, `--enable-preview` | compiles; **409 checks, 0 failed** |
+| `isValue()` on all six at runtime | **true**; `new LaneId(7) == new LaneId(7)` → true |
+| FFM without any preview flag | final; `SysVx64Linker`; `MemorySegment` round-trip clean |
+
+**The lab's central claim is now demonstrated on production sources:** the
+migration is one word, six times, and the gate suite does not move. It was
+previously proven only on `valhalla-lab`'s parallel vocabulary.
+
+**A cross-repo break found on the way, and it was blocking everything.**
+`lgj-abi` did not compile against current lance-graph `main`:
+`mask_risc::ExecError` gained `RangeOutOfBounds { lo, hi, n_rows }` with the
+`Pred::Range` work, and `exports.rs`'s `exec_error_to_status` maps `ExecError`
+**exhaustively**. Fixed by joining the documented *"would be a bug in THIS
+file, not in a caller's plan"* family (`LGJ_ERR_ALLOCATION_FAILED`) — the ABI
+lowering emits no `Pred::Range`, exactly as it emits no sum terminal and no
+blend — and the doc comment's enumeration was extended so the list stays
+exhaustive in prose too. **An exhaustive match across a repo boundary is a
+tripwire, not a safety net:** it converts an upstream additive change into a
+downstream build failure, and nothing in either repo's CI noticed, because no
+CI job here compiles the native crate.
+
+**Two false failures I nearly reported, both mine, both caught by reading.**
+The flipped suite showed `1 FAILED` twice. Both times it was
+`DoctrineFenceTest` refusing to run — it requires `java/src/main/java` AND
+`native/lgj-abi/src` relative to CWD, and I had run the flipped build from a
+scratch directory that had neither. The fence is *correct*: its first check is
+*"a fence that cannot find its corpus must fail, not skip."* Running the flip
+in the real tree (committed first, restored with `git checkout`) gave the true
+result. **A harness artifact and a regression look identical in a summary
+line** — this is the ruff trap "a disable that does not apply is
+indistinguishable from a guard that is not load-bearing", met from the other
+direction.
+
+## E-VALHALLA-IS-THE-STORAGE-MEMBRANE-AND-IT-IS-MANDATORY-1 (2026-09-19)
+
+**Operator ruling.** *LGJ MUST use JDK 28 and MUST use Valhalla and Panama.*
+Recorded as canon in `CLAUDE.md` § P0; the superseded decision is struck in
+place in `.claude/knowledge/jdk-toolchain-facts.md`.
+
+**The violation it corrects, in my own words this session:** *"Production lgj
+does not depend on Valhalla at all."* That sentence is wrong twice. It is
+wrong about the design — the vocabulary types are written identity-free
+precisely so the same source compiles as `value record` with one word changed,
+which is a dependency in shape that `valhalla-lab/docs/three-truths.md`
+already measured (every behaviour the API uses is identical across both object
+models; the rows that differ — `==`, identity hash, `synchronized`,
+null-restricted arrays — are exactly the ones the API never touches). And it
+is wrong about the architecture: **Panama carries the verb, Valhalla carries
+the noun, lance-graph owns the reality.** Valhalla is the STORAGE MEMBRANE,
+never the storage owner. Drop it and Java can still reach the bytes, but it
+reaches them as offset/stride/segment/handle — it has not adopted the
+substrate's storage vocabulary, and zero-copy stops being a programming model
+and goes back to being an FFI trick.
+
+**How the error got in, which is the transferable part.** The knowledge doc
+called the GA-JDK target *"a real, deliberate strength of the design."* A
+release constraint dressed as a virtue is an architectural claim, and a later
+session (this one) read it back as one. A toolchain doc may record what a
+toolchain CAN do; the moment it says what the design SHOULD therefore be, it
+has started legislating outside its evidence.
+
+**Unaffected by the ruling, stated so the next session does not over-apply
+it:** E4 — the Vector API remains a lab arm; JDK 28 finalizing it gives Java
+no backend, because Java has no backends (kernels stay in `ndarray::simd`).
+`--enable-preview` remains classfile-poisoning, so the flag posture is
+repo-wide and uniform, never mixed. Value classes make a DESCRIPTOR cheap;
+they never make a population crossable.
+
+**Status: MANDATED, NOT IMPLEMENTED.** No JDK 28 in this container
+(`/opt/jdks` absent, system `java` 21.0.10) and `jdk.java.net` is proxy-blocked,
+so the migration is filed, not done: `ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA`.
+
 ## E-THE-PIN-THAT-CLAIMED-ONE-PLACE-CREATED-A-SECOND-1 (2026-09-05)
 
 **Finding.** The first CI gate this repo ever had went red on its first

@@ -70,11 +70,13 @@ no `cbindgen`, no `jextract`, no JNI. See `docs/abi.md` §1 and
 ## Toolchains
 
 - Rust: **1.97.1** stable, matching `ndarray`/`lance-graph`'s pin.
-- Production JDK: a GA build with `java.lang.foreign` final (no preview
-  flag needed) — verified against JDK 26 GA.
-- Valhalla lab JDK: the official JEP 401 early-access binary from
-  `jdk.java.net/valhalla/` — a value-classes preview build, kept physically
-  separate from the production path.
+- Production JDK: **JDK 28** (`/opt/jdks/jdk-28+16`). Panama FFM is final
+  there and needs no flag; Valhalla (JEP 401) is preview-gated and production
+  uses it, so `--enable-preview` is required — for the value classes, never
+  for FFM.
+- There is no separate "Valhalla JDK" any more. Production **is** the Valhalla
+  arm; `valhalla-lab/` is now a VM/representation probe suite over the real
+  production vocabulary rather than a parallel future-vs-present A/B.
 
 See `.claude/knowledge/jdk-toolchain-facts.md` for exact verified paths and
 flags in the reference development environment.

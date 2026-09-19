@@ -158,3 +158,62 @@ fn pred_of(op: &LgjOpDesc) -> Option<Pred> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod range_falsifier {
+    use super::*;
+    use crate::abi::LGJ_COMBINE_OR;
+
+    /// **The falsifier behind `exec_error_to_status`'s `RangeOutOfBounds` arm.**
+    ///
+    /// That arm maps a `mask_risc` error into the documented *"would be a bug
+    /// in THIS file, not in a caller's plan"* family, and the justification is
+    /// one sentence: **this lowering emits no `Pred::Range`**, exactly as it
+    /// emits no sum terminal and no blend. A sentence is not a fence, so this
+    /// sweeps every opcode a caller can put in an `LgjOpDesc` — the nine
+    /// defined ones and a band of undefined ones either side — through the
+    /// real `lower_plan` and reads every emitted predicate.
+    ///
+    /// **When LGJ gains a Range lowering this test goes RED**, and that is its
+    /// whole purpose: it forces the author to decide, deliberately and
+    /// visibly, what a caller should see when a range leaves the lane — rather
+    /// than inheriting `LGJ_ERR_ALLOCATION_FAILED`, which would then be a lie.
+    #[test]
+    fn no_opcode_lowers_to_pred_range() {
+        let mut lowered_count = 0usize;
+        for op in 0u32..=32 {
+            for combine in [LGJ_COMBINE_AND, LGJ_COMBINE_OR] {
+                let desc = LgjOpDesc {
+                    op,
+                    lane_id: 0,
+                    operand: -1,
+                    combine,
+                    _reserved: 0,
+                };
+                let Some(lowered) = lower_plan(&[desc]) else {
+                    continue;
+                };
+                let Lowered::Program(program) = lowered else {
+                    continue; // AllRows: no predicate at all.
+                };
+                lowered_count += 1;
+                for mask_op in &program.ops {
+                    if let MaskOp::Pred { pred, .. } = mask_op {
+                        assert!(
+                            !matches!(pred, Pred::Range { .. }),
+                            "opcode {op} lowered to Pred::Range — `exec_error_to_status` maps \
+                             `RangeOutOfBounds` as an internal bug, which is now false: give it \
+                             a caller-visible status before shipping the Range lowering"
+                        );
+                    }
+                }
+            }
+        }
+        // Anti-vacuity: a sweep that lowers nothing proves nothing. Nine
+        // opcodes are defined and each lowers under `LGJ_COMBINE_AND`.
+        assert!(
+            lowered_count >= 9,
+            "the sweep lowered only {lowered_count} programs — it is not exercising the lowering"
+        );
+    }
+}

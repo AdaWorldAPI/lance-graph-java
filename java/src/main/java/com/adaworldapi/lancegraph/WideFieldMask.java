@@ -31,7 +31,7 @@ package com.adaworldapi.lancegraph;
  * when their bits are equal, never because they are the same object — nothing here relies on
  * reference equality, so flattening changes no observable behaviour.
  */
-public record WideFieldMask(long value) {
+public value record WideFieldMask(long value) {
 
     private static final int FACET_COUNT = 32;
 

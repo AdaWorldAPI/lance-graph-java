@@ -62,6 +62,7 @@ dependencies = [
 name = "lance-graph-quack"
 version = "0.1.0"
 dependencies = [
+ "lance-graph-contract",
  "lance-graph-mask-risc",
 ]
 

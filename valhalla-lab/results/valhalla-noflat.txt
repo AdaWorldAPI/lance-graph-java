@@ -1,9 +1,9 @@
 Picked up JAVA_TOOL_OPTIONS: 
 lance-graph-java :: valhalla lab
 platform                                     valhalla
-java.vm.version                              27-jep401ea3+1-1
-java.vendor.version                          -
-jvm args                                     [--enable-native-access=ALL-UNNAMED, -Dstdout.encoding=UTF-8, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, --enable-preview, --add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED, --add-exports=java.base/jdk.internal.value=ALL-UNNAMED, -XX:+UnlockDiagnosticVMOptions, -XX:-UseArrayFlattening, -XX:-UseFieldFlattening]
+java.vm.version                              28-beta+16-ea
+java.vendor.version                          Temurin-28+16-202609171655
+jvm args                                     [--enable-preview, --enable-native-access=ALL-UNNAMED, -Dstdout.encoding=UTF-8, -Dlgj.library=/home/user/lance-graph-java/target/release/liblgj_abi.so, --enable-preview, --add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED, --add-exports=java.base/jdk.internal.value=ALL-UNNAMED, -XX:+UnlockDiagnosticVMOptions, -XX:-UseArrayFlattening, -XX:-UseFieldFlattening]
 
 == (a) SEMANTIC TRUTH — is identity observable? ==============================
 platform                                     valhalla — value-record vocabulary; null-restricted non-atomic arrays; @NullRestricted fields
@@ -39,8 +39,8 @@ allocation instrument baseline               0 B
 N (operations per measurement)               1000000
 construct N LaneId, store into array         15.26 MiB
   ... per LaneId                             16.00 B
-construct N LaneId, never escaping           4.70 MiB
-  ... per LaneId                             4.93 B
+construct N LaneId, never escaping           5.03 MiB
+  ... per LaneId                             5.28 B
 LaneId[1024] flatness                        NOT-FLAT
 allocate+fill LaneId[N] (array + elements)   19.07 MiB
   ... per element                            20.00 B
@@ -48,21 +48,21 @@ bare LaneId[N] with no elements stored       3.81 MiB
   ... per slot                               4.00 B
 Descriptor kind                              value class with two @NullRestricted value fields
 Descriptor fields null-restricted            true
-construct N Descriptor (2 wrappers each)     53.41 MiB
-  ... per Descriptor                         56.00 B
-pass 2 wrappers through 3 call levels        9.41 MiB
-  ... per call                               9.86 B
-read 65,536 LaneId from array                  median=   41431.0 ns  [min    41208.0 .. max    59606.0]  n=51
-native runtime                               lance-graph native runtime: abi 0.1, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
+construct N Descriptor (2 wrappers each)     45.78 MiB
+  ... per Descriptor                         48.00 B
+pass 2 wrappers through 3 call levels        9.45 MiB
+  ... per call                               9.91 B
+read 65,536 LaneId from array                  median=   30317.0 ns  [min    29856.0 .. max    81985.0]  n=51
+native runtime                               lance-graph native runtime: abi 0.11, simd ndarray::simd avx512, profile release, library /home/user/lance-graph-java/target/release/liblgj_abi.so
 
 == FFM ADDRESSING — is the wrapper free where it touches native memory? ======
 platform                                     valhalla
 sum (identical across all three)             6929623
-bare long index                                median=   59150.0 ns  [min    59081.0 .. max   122825.0]  n=51
-RowRange bounds (wrapper hoisted)              median=   56919.0 ns  [min    56634.0 .. max    79142.0]  n=51
+bare long index                                median=   42843.0 ns  [min    42812.0 .. max   105187.0]  n=51
+RowRange bounds (wrapper hoisted)              median=   36818.0 ns  [min    36618.0 .. max    53803.0]  n=51
 per-element wrapper: bytes allocated         1.00 MiB
   ... per element                            16.00 B
-Ordinal built per element                      median=   49921.0 ns  [min    49739.0 .. max    69259.0]  n=51
+Ordinal built per element                      median=   39449.0 ns  [min    38264.0 .. max    71650.0]  n=51
 
 == THE THESIS — 65,536 entities, three representations =======================
 platform                                     valhalla
@@ -72,20 +72,20 @@ answer (identical across all paths)          2173 rows, sum 499246
 selectivity                                  3.32%
 
 ==   heap cost ===============================================================
-(1) native — Java bytes allocated (warm)     816 B  per query, for the fluent chain itself
+(1) native — Java bytes allocated (warm)     680 B  per query, for the fluent chain itself
 (1) native — Java objects per row            0
 (1) native — native lane bytes               1.00 MiB  (u64 id + u32 class + i32 value)
 (1) native — mask bytes                      8.0 KiB  (1 bit per row, packed)
-(2)/(3) hydrate 65536 Row — allocated        2.00 MiB
-        ... per row                          32.01 B
+(2)/(3) hydrate 65536 Row — allocated        1.50 MiB
+        ... per row                          24.01 B
         array flatness                       NOT-FLAT
-        ratio vs native lane bytes           2.00x
-        retained heap (APPROX, gc-delta)     2.25 MiB
+        ratio vs native lane bytes           1.50x
+        retained heap (APPROX, gc-delta)     1.75 MiB
 
 ==   time to answer the question =============================================
-(1) native  one crossing, fused plan           median=   16049.0 ns  [min    15609.0 .. max    32010.0]  n=51
-(2/3) hydrate 65536 Row objects                median=  578187.0 ns  [min   543201.0 .. max  1011453.0]  n=51
-(2/3) scan the materialised objects            median=  119838.0 ns  [min   111905.0 .. max   211651.0]  n=51
-(2/3) hydrate THEN scan (honest total)         median= 1635251.0 ns  [min   709125.0 .. max  6428085.0]  n=51
+(1) native  one crossing, fused plan           median=   19267.0 ns  [min    19042.0 .. max    32788.0]  n=51
+(2/3) hydrate 65536 Row objects                median=  693393.0 ns  [min   562611.0 .. max  4519417.0]  n=51
+(2/3) scan the materialised objects            median=   70114.0 ns  [min    67521.0 .. max   132648.0]  n=51
+(2/3) hydrate THEN scan (honest total)         median= 1241729.0 ns  [min  1142249.0 .. max  1628911.0]  n=51
 
 lab complete.
