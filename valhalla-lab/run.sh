@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# The A/B. One experiment source, two object models, two JDKs, one diff.
+# The A/B. One experiment source, two object models, ONE JDK, one diff.
+#
+# RE-SCOPED 2026-09-19. Production is now the Valhalla arm (the six vocabulary types are
+# `value record`s on JDK 28), so this lab no longer answers "present vs future". It answers
+# a narrower and better-posed question: on ONE JDK, what does the object model alone change?
+# Previously the two arms differed by object model AND by JDK (26 vs 27 EA) — two variables.
+# Now the JDK is held fixed and the modifier is the only difference, so the diff is attributable.
+#
+# Second consequence, and it is not cosmetic: the production API classfiles are now
+# preview-marked, and that marking is transitive to every consumer. The `record` arm therefore
+# also runs with --enable-preview. It is a RECORD arm on a preview-enabled JVM, not a
+# "preview-free" arm; the label "stable" below is kept only for path compatibility.
 #
 # Every measurement this lab reports is produced by this script. Nothing is quoted from memory.
 set -uo pipefail
@@ -7,8 +18,8 @@ set -uo pipefail
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$LAB/.." && pwd)"
 
-STABLE_JDK="${STABLE_JDK:-/opt/jdks/jdk-26.0.2}"
-VALHALLA_JDK="${VALHALLA_JDK:-/opt/jdks/jdk-27}"
+STABLE_JDK="${STABLE_JDK:-/opt/jdks/jdk-28+16}"     # the `record` arm  — same JDK, by design
+VALHALLA_JDK="${VALHALLA_JDK:-/opt/jdks/jdk-28+16}" # the `value record` arm
 LIB_DIR="${LIB_DIR:-$ROOT/target/release}"
 
 OUT="$LAB/results"
@@ -44,8 +55,10 @@ compile () {                 # $1=tag  $2=jdk  $3=vocab-root  shift 3 -> extra j
   local api="$OUT/$tag-api" lab="$OUT/$tag-lab"
   rm -rf "$api" "$lab"; mkdir -p "$api" "$lab"
 
-  # the production API, compiled by THIS jdk, with no preview features anywhere
-  "$jdk/bin/javac" -d "$api" $(find "$ROOT/java/src/main/java" -name '*.java') \
+  # The production API. It is Valhalla-shaped now, so it needs the preview flag in BOTH arms —
+  # that is the point of the re-scope, not a leak: the lab measures the lab vocabulary's object
+  # model against a production API that is value-shaped either way.
+  "$jdk/bin/javac" --release 28 --enable-preview -d "$api" $(find "$ROOT/java/src/main/java" -name '*.java') \
       2> "$OUT/$tag-api-javac.log" || { cat "$OUT/$tag-api-javac.log"; fail "$tag: API compile"; }
 
   "$jdk/bin/javac" "$@" -cp "$api" -d "$lab" \
@@ -55,9 +68,12 @@ compile () {                 # $1=tag  $2=jdk  $3=vocab-root  shift 3 -> extra j
 }
 
 banner "1. compiling"
-compile stable   "$STABLE_JDK"   "$LAB/src/stable"
+# the `record` arm still needs --enable-preview: it LOADS preview-marked production classes
+compile stable   "$STABLE_JDK"   "$LAB/src/stable" -source 28 -target 28 --enable-preview
+# NOTE: no --release here. `--release` forbids --add-exports into java.base, and the lab's
+# layout probes need jdk.internal.value. The JDK is 28, so the default target is already 28.
 compile valhalla "$VALHALLA_JDK" "$LAB/src/valhalla" \
-        --enable-preview -source 27 -target 27 "${VAL_EXPORTS[@]}"
+        -source 28 -target 28 --enable-preview "${VAL_EXPORTS[@]}"
 
 # ── 2. run ────────────────────────────────────────────────────────────────────────────────────
 run () {                     # $1=tag $2=jdk $3=label  shift 3 -> extra jvm args
@@ -65,6 +81,7 @@ run () {                     # $1=tag $2=jdk $3=label  shift 3 -> extra jvm args
   local f="$OUT/$tag-$label.txt"
   echo "--> $tag/$label"
   ( JAVA_TOOL_OPTIONS= "$jdk/bin/java" \
+      --enable-preview \
       --enable-native-access=ALL-UNNAMED \
       -Dstdout.encoding=UTF-8 \
       -Dlgj.library="$LIB_DIR/liblgj_abi.so" \

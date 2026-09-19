@@ -1,3 +1,107 @@
+## E-PANAMA-TIMES-VALHALLA-IS-ONE-MEMBRANE-AND-THE-LAB-FINALLY-HAS-ONE-VARIABLE-1 (2026-09-19)
+
+**Operator reframing, and it is the correct one:** this was never a JDK 26→28
+migration. It is **Panama-only production + Valhalla-lab arm → one production
+Panama × Valhalla membrane.** JDK 28 is the enabling toolchain, not the point.
+Panama answers *where are the bytes and how does Java reach them without
+copying*; Valhalla answers *how does Java name and carry semantic values over
+those bytes without identity-heavy heap objects*. lance-graph / T0 remains the
+only owner of canonical storage.
+
+### Measured on JDK 28 (`/opt/jdks/jdk-28+16`), production value-shaped
+
+| gate | result |
+|---|---|
+| native `lgj-abi` | **183 tests** green (182 + the new Range falsifier) |
+| Java `AllTests`, production as `value record` | **ALL PASSED (409 checks)** — identical to the unflipped baseline on the same JDK |
+| all six vocabulary types | `isValue() == true`; substitutability holds |
+
+### The flattening cliff is UNCHANGED on JDK 28 — and it bites one of our six
+
+Measured by the lab, both arms on one JDK:
+
+| type | payload | array |
+|---|---|---|
+| `LaneId` (1 int) | 4 B | **FLAT** |
+| `Ordinal` (1 int) | 4 B | **FLAT** |
+| `MaskId` (1 long) | 8 B | **FLAT** |
+| `RowRange` (2 long) | 16 B | **NOT-FLAT** |
+| `Row` (1 long + 2 int) | 16 B | **NOT-FLAT** |
+
+The ≤8-byte cliff measured on the 27-jep401ea3 build **reproduces on JDK 28**.
+So `value semantics` and `flattening` remain two different claims, and
+**`RowRange` is a real production type on the wrong side of the cliff.** No
+performance claim may be made for it from `isValue() == true`.
+
+### Allocation deltas, record arm → value arm (1M ops, same JDK)
+
+| measurement | record | value | delta |
+|---|---|---|---|
+| construct N `LaneId` into an array | 15.26 MiB | **1.87 MiB** | **8.2× less** (16 B → 1.96 B each) |
+| allocate+fill `LaneId[N]` | 19.07 MiB | **5.65 MiB** | 3.4× less |
+| construct N `Descriptor` (2 wrappers) | 45.78 MiB | **27.89 MiB** | 1.6× less |
+| construct N `LaneId`, never escaping | 4.73 MiB | **5.75 MiB** | ⊘ **value arm allocates MORE** — escape analysis already erased the record case |
+| hydrate 65,536 `Row` | 1.50 MiB | **2.00 MiB** | ⊘ **worse** — `Row` is 16 B, NOT-FLAT |
+
+**Two of the five went the wrong way, and both are honest.** Where EA already
+won, value classes add nothing; where the shape does not flatten, hydration
+costs more. Production does not hydrate rows, so the second is a warning about
+a path we do not take — not a regression we shipped.
+
+### The Panama path is byte-identical across the object model
+
+| FFM measurement | record arm | value arm |
+|---|---|---|
+| Java bytes allocated per query (warm) | 712 B | **712 B** |
+| Java objects per row | 0 | **0** |
+| native lane bytes / mask bytes | 1.00 MiB / 8.0 KiB | **identical** |
+
+**That is the integration's central invariant, measured rather than asserted:**
+Valhalla changes what the *vocabulary* costs; it does not touch the membrane.
+No second graph representation appeared, and no row hydration was introduced
+to "use Valhalla".
+
+### The lab's re-scope removed a confound it had carried since it was built
+
+The old A/B was `(record, JDK 26)` vs `(value record, JDK 27 EA)` — **two
+variables**. Both arms now run on JDK 28, so the object model is the only
+difference and the diff is attributable. The lab stops being
+present-vs-future and becomes a VM/representation probe suite over the real
+production vocabulary.
+
+Two things the re-scope forced, both real:
+- **Preview marking is transitive.** Production classfiles are preview-marked,
+  so the `record` arm *also* runs `--enable-preview`. It is a record arm on a
+  preview-enabled JVM, not a preview-free arm; the "stable" label survives only
+  as a path.
+- **A JDK 28 internal-API change.** `jdk.internal.value.ValueClass.isFlatArray`
+  narrowed from `Object` to `Object[]` since 27-jep401ea3; the flattening probe
+  was adapted (a non-`Object[]` argument answers `NOT-FLAT` without reaching
+  the internal API).
+
+### The `RangeOutOfBounds` fix is compatibility plumbing, with a falsifier
+
+`mask_risc::ExecError` gained `RangeOutOfBounds` with lance-graph's
+`Pred::Range` work and `exec_error_to_status` matches exhaustively, so
+`lgj-abi` **did not compile against lance-graph `main`**. Mapped into the
+documented *"bug in THIS file"* family — no new public status, no ABI bump —
+and backed by `plan_lower::range_falsifier::no_opcode_lowers_to_pred_range`,
+which sweeps every opcode through the real `lower_plan` and reads every
+emitted predicate. **Disable-verified red-then-green:** pointing `LGJ_OP_EQ_U32`
+at `Pred::Range` fails it with the intended message; restoring passes. When LGJ
+gains a Range lowering this goes red and forces a deliberate caller-visible
+mapping instead of inheriting `LGJ_ERR_ALLOCATION_FAILED`, which would then be
+a lie.
+
+### What could not be measured here, stated rather than implied
+
+`bench/` cannot run in this container — `bench/lib` does not exist, so the JMH
+jars are absent. The crossing-count and per-call allocation figures in
+`bench/RESULTS.md` are **historical JDK 26 measurements, correct when taken**,
+and are deliberately left untouched; they have NOT been re-taken on JDK 28.
+`gate-run.sh` carries the new pin and flags so the re-run is one command once
+the jars are present.
+
 ## E-THE-VALHALLA-FLIP-COST-ONE-WORD-SIX-TIMES-AND-THE-GATES-DID-NOT-MOVE-1 (2026-09-19)
 
 **Finding, measured end to end today.** The P0 mandate (JDK 28 + Valhalla +

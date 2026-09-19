@@ -10,7 +10,7 @@ set -euo pipefail
 
 BENCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$BENCH/.." && pwd)"
-JDK="${JDK:-/opt/jdks/jdk-26.0.2}"
+JDK="${JDK:-/opt/jdks/jdk-28+16}"   # P0: JDK 28 + Valhalla (JEP 401, preview) + Panama FFM
 LIB_DIR="${LIB_DIR:-$ROOT/target/release}"
 OUT="$BENCH/out-gate"
 CP_LIBS="$(find "$BENCH/lib" -name '*.jar' | sort | tr '\n' ':')"
@@ -27,10 +27,10 @@ cmp -s "$PROBE" "$VARIANT" && { echo "FAIL: variant is identical to the shipped 
 rm -rf "$OUT"; mkdir -p "$OUT/before" "$OUT/after" "$OUT/bench" "$BENCH/results"
 
 echo "== build BEFORE: java/src/main as shipped"
-"$JDK/bin/javac" -d "$OUT/before" $(find "$API" -name '*.java')
+"$JDK/bin/javac" --release 28 --enable-preview -d "$OUT/before" $(find "$API" -name '*.java')
 
 echo "== build AFTER: same tree, LaneProbe.java swapped for bench/variants/probed"
-"$JDK/bin/javac" -d "$OUT/after" $(find "$API" -name '*.java' ! -path "$PROBE") "$VARIANT"
+"$JDK/bin/javac" --release 28 --enable-preview -d "$OUT/after" $(find "$API" -name '*.java' ! -path "$PROBE") "$VARIANT"
 
 # One compiled bench, run against each API build (the bench class is identical by construction).
 echo "== build the bench once"
@@ -41,6 +41,7 @@ run_arm() {
   local arm="$1"
   echo "== run $arm"
   ( cd "$BENCH" && JAVA_TOOL_OPTIONS= "$JDK/bin/java" \
+      --enable-preview \
       --enable-native-access=ALL-UNNAMED --add-modules jdk.incubator.vector \
       -Dstdout.encoding=UTF-8 -Dlgj.library="$LIB_DIR/liblgj_abi.so" \
       -Dlgj.bench.result="results/gate-$arm.csv" \

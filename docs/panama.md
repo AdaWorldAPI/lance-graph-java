@@ -70,11 +70,17 @@ correctly (`bench/README.md` rule 4). Measured: a bare downcall costs
 ~22 ns over a plain Java call (`bench/RESULTS.md`, Component A) — the
 floor every native-side operation in this project sits on top of.
 
-## `--enable-preview` never reaches the shipped path
+## `--enable-preview` is Valhalla's flag, never FFM's
 
-The production Java tree (`java/`) targets `/opt/jdks/jdk-26.0.2`, where
-FFM is **final** — the only flag needed anywhere is
-`--enable-native-access=ALL-UNNAMED`. The Valhalla lab
+⊘ This section formerly read *"`--enable-preview` never reaches the shipped
+path"*, which was true only while production and Valhalla were split arms.
+The production Java tree (`java/`) now targets `/opt/jdks/jdk-28+16`, where
+**FFM is final and still needs no flag** — `--enable-native-access=ALL-UNNAMED`
+remains the only thing Panama asks for. What changed is that production
+deliberately uses Valhalla value classes (JEP 401, preview on this build), so
+`--release 28 --enable-preview` is now part of the shipped build contract.
+Read every "no preview" claim below as scoped to FFM: **Panama needs no
+preview; the vocabulary types do.** The Valhalla lab
 (`valhalla-lab/src/valhalla`) is compiled *separately*, with its own
 `-source 27 --enable-preview`, into its own output directory
 (`results/valhalla-lab/`), and is never on the classpath the production

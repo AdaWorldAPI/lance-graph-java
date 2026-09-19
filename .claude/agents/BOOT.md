@@ -24,9 +24,11 @@ matched to the actual size of the problem.
    `jextract`/`cbindgen` out of habit).
 5. **`.claude/knowledge/jdk-toolchain-facts.md`** — which JDK path to
    use for which purpose. Getting this wrong (e.g. using `/usr/bin/java`
-   instead of `/opt/jdks/jdk-26.0.2`) produces confusing preview-flag
+   instead of `/opt/jdks/jdk-28+16`) produces confusing preview-flag
    errors that look like a design problem but are a toolchain-selection
-   mistake.
+   mistake. On JDK 28 the production build carries `--release 28
+   --enable-preview` for the Valhalla value types — FFM itself needs no
+   preview flag.
 6. **`.claude/knowledge/agent-cargo-hygiene.md`** — operator directive:
    spawned agents do NOT run `cargo` in any form (build/check/test/
    clippy), ever. Only the orchestrating main thread compiles. This
