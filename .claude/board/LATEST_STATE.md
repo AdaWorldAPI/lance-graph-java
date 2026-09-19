@@ -1,7 +1,7 @@
 ## 2026-09-19 — PR #81 merged (`07aa441`): production IS the Valhalla arm; Panama × Valhalla is one membrane
 
 **The frame, because it is easy to file this wrong:** this was not a JDK
-26→28 upgrade. Production was Panama-only and Valhalla lived in the lab; they
+26→28 upgrade. Production WAS Panama-only with Valhalla in a lab arm; they
 are now **one production membrane**, with JDK 28 as the enabling toolchain.
 Panama = the verb, Valhalla = the noun, **lance-graph / T0 owns storage**.
 

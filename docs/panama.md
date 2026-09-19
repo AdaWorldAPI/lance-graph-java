@@ -80,16 +80,20 @@ remains the only thing Panama asks for. What changed is that production
 deliberately uses Valhalla value classes (JEP 401, preview on this build), so
 `--release 28 --enable-preview` is now part of the shipped build contract.
 Read every "no preview" claim below as scoped to FFM: **Panama needs no
-preview; the vocabulary types do.** The Valhalla lab
-(`valhalla-lab/src/valhalla`) is compiled *separately*, with its own
-`-source 27 --enable-preview`, into its own output directory
-(`results/valhalla-lab/`), and is never on the classpath the production
-tests or the bench harness run against. `--enable-preview`-compiled
-classfiles carry a preview marker that poisons every consumer that loads
-them; keeping the two trees physically separate (rather than, say,
-compiling once and gating features at runtime) is what makes this a
-structural guarantee rather than a discipline someone could accidentally
-violate. See `.claude/knowledge/jdk-toolchain-facts.md` for the exact
+preview; the vocabulary types do.** ⊘ **The paragraph that stood here is doubly stale and is replaced.** It said
+the lab compiles *separately* with `-source 27 --enable-preview` and is
+*"never on the classpath the production tests run against"*, and it argued
+that physical separation kept preview marking out of production. All three
+are now false: both probe arms run **JDK 28** with `-source 28 -target 28`,
+both **compile and load the production API**, and that API is itself
+preview-marked — so there is nothing to quarantine production *from*. The
+separation argument was load-bearing only while production was preview-free,
+and it stopped being that when production adopted JEP 401.
+
+The isolation that remains is ordinary and smaller: the probe harness builds
+into its own output directory and is not on the classpath of the shipped
+artifact. It is not a structural guarantee against preview poisoning, because
+preview marking is now a property of production itself. See `.claude/knowledge/jdk-toolchain-facts.md` for the exact
 verified flag matrix across all three JDKs this project touches.
 
 ## What Panama did NOT need to solve here

@@ -1,4 +1,15 @@
-# The Valhalla lab — synthesis
+# Representation probes — synthesis
+
+> ⊘ **Legacy name.** The directory is still `valhalla-lab/` and this file is
+> still `valhalla-lab.md`, because renaming paths buys churn rather than
+> clarity. **The name no longer describes the experiment.** Valhalla is
+> production infrastructure — the six vocabulary types are `value record`s on
+> JDK 28 (PR #81) — so it is not what is being tested. What this harness
+> measures is the CONSEQUENCE of object-model and layout realizations:
+> `record` vs `value record` **on the same JDK, against the same
+> Valhalla-enabled production API**, with flattening and escape analysis
+> toggled. Read every "Valhalla arm" below as "value-record arm", and never as
+> evidence that production is fundamentally Panama with Valhalla bolted on.
 
 > Companion to `valhalla-lab/README.md` and `valhalla-lab/docs/three-truths.md`
 > (the raw findings and numbers) and `.claude/knowledge/valhalla-three-truths-method.md`

@@ -59,10 +59,15 @@
   on the wrong side of the cliff and no performance claim may be read off its
   `isValue()`. Valhalla changes what the VOCABULARY costs; it does not touch
   the membrane. No second graph representation, no row hydration introduced.
-- **Lab re-scoped, and the re-scope removed a confound it always carried:** the
-  old A/B was `(record, JDK 26)` vs `(value record, JDK 27 EA)` — two
-  variables. Both arms now run JDK 28, so the object model is the only
-  difference. Two things it forced: **preview marking is transitive** (the
+- **The harness is now a REPRESENTATION probe suite, not a "Valhalla lab" —
+  Valhalla graduated to production infrastructure and is no longer the thing
+  under test.** `valhalla-lab/` keeps its directory name for path
+  compatibility only; a doc banner says so. What it measures is object-model
+  and layout consequence: `record` vs `value record` **on one JDK, against the
+  same Valhalla-enabled production API**, with flattening and EA toggled.
+  **The re-scope also removed a confound the harness always carried:** the old
+  A/B was `(record, JDK 26)` vs `(value record, JDK 27 EA)` — two variables.
+  Both arms now run JDK 28, so the object model is the only difference. Two things it forced: **preview marking is transitive** (the
   `record` arm also runs `--enable-preview`; it is a record arm on a preview
   JVM, not a preview-free one), and **`ValueClass.isFlatArray` narrowed from
   `Object` to `Object[]`** since 27-jep401ea3, which broke the flattening probe
