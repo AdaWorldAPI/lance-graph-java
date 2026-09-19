@@ -61,13 +61,16 @@ indistinguishable from owning the thing.
   Value classes change how cheaply a descriptor is carried; they never make a
   population crossable.
 
-**Status: MANDATED, NOT YET IMPLEMENTED.** No JDK 28 is installed in the
-current container (`/opt/jdks` does not exist; system `java` is 21.0.10) and
-`jdk.java.net` is blocked by the egress proxy, so the migration cannot be
-executed from here. Tracked with its concrete steps in
-`.claude/board/ISSUES.md` `ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA`.
-A session that finds a JDK 28 available does the migration; a session that
-does not must not restate the superseded JDK-26 framing as current.
+**Status: IMPLEMENTED 2026-09-19, gates green.** `/opt/jdks/jdk-28+16`
+(Temurin `28+16-ea`). The six vocabulary types — `LaneId`, `MaskId`,
+`Ordinal`, `FacetId`, `RowRange`, `WideFieldMask` — are `public value record`,
+all report `isValue() == true` at runtime, and the full suite is **409 checks,
+0 failures** under `--release 28 --enable-preview` against a freshly built
+`liblgj_abi.so` (abi 0.11, `ndarray::simd avx512`) — byte-for-byte the same
+409 as the unflipped baseline on the same JDK. `bench/run.sh` carries the pin
+and the flag. Measured facts and the obtain route (most JDK hosts are
+egress-blocked here; GitHub release *download* paths are not) live in
+`.claude/knowledge/jdk-toolchain-facts.md`.
 
 ## The mask-native invariant (operator-ruled, 2026-08-18)
 

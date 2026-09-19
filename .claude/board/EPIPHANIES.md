@@ -1,3 +1,44 @@
+## E-THE-VALHALLA-FLIP-COST-ONE-WORD-SIX-TIMES-AND-THE-GATES-DID-NOT-MOVE-1 (2026-09-19)
+
+**Finding, measured end to end today.** The P0 mandate (JDK 28 + Valhalla +
+Panama) is implemented. `/opt/jdks/jdk-28+16`, Temurin `28+16-ea`.
+
+| arm | result |
+|---|---|
+| JDK 28, sources unchanged, no preview | compiles; **409 checks, 0 failed** |
+| JDK 28, six types `public value record`, `--enable-preview` | compiles; **409 checks, 0 failed** |
+| `isValue()` on all six at runtime | **true**; `new LaneId(7) == new LaneId(7)` → true |
+| FFM without any preview flag | final; `SysVx64Linker`; `MemorySegment` round-trip clean |
+
+**The lab's central claim is now demonstrated on production sources:** the
+migration is one word, six times, and the gate suite does not move. It was
+previously proven only on `valhalla-lab`'s parallel vocabulary.
+
+**A cross-repo break found on the way, and it was blocking everything.**
+`lgj-abi` did not compile against current lance-graph `main`:
+`mask_risc::ExecError` gained `RangeOutOfBounds { lo, hi, n_rows }` with the
+`Pred::Range` work, and `exports.rs`'s `exec_error_to_status` maps `ExecError`
+**exhaustively**. Fixed by joining the documented *"would be a bug in THIS
+file, not in a caller's plan"* family (`LGJ_ERR_ALLOCATION_FAILED`) — the ABI
+lowering emits no `Pred::Range`, exactly as it emits no sum terminal and no
+blend — and the doc comment's enumeration was extended so the list stays
+exhaustive in prose too. **An exhaustive match across a repo boundary is a
+tripwire, not a safety net:** it converts an upstream additive change into a
+downstream build failure, and nothing in either repo's CI noticed, because no
+CI job here compiles the native crate.
+
+**Two false failures I nearly reported, both mine, both caught by reading.**
+The flipped suite showed `1 FAILED` twice. Both times it was
+`DoctrineFenceTest` refusing to run — it requires `java/src/main/java` AND
+`native/lgj-abi/src` relative to CWD, and I had run the flipped build from a
+scratch directory that had neither. The fence is *correct*: its first check is
+*"a fence that cannot find its corpus must fail, not skip."* Running the flip
+in the real tree (committed first, restored with `git checkout`) gave the true
+result. **A harness artifact and a regression look identical in a summary
+line** — this is the ruff trap "a disable that does not apply is
+indistinguishable from a guard that is not load-bearing", met from the other
+direction.
+
 ## E-VALHALLA-IS-THE-STORAGE-MEMBRANE-AND-IT-IS-MANDATORY-1 (2026-09-19)
 
 **Operator ruling.** *LGJ MUST use JDK 28 and MUST use Valhalla and Panama.*

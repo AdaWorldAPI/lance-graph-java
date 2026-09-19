@@ -18,7 +18,7 @@ package com.adaworldapi.lancegraph;
  *
  * @param index zero-based facet index, {@code 0..32} exclusive (a row has exactly 32 facets)
  */
-public record FacetId(int index) {
+public value record FacetId(int index) {
 
     /** Facets per row — 32, the canonical `32 × 16 B = 512 B` row (abi.md §11). */
     public static final int COUNT = 32;

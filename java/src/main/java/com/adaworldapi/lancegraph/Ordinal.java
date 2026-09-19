@@ -16,7 +16,7 @@ package com.adaworldapi.lancegraph;
  *
  * @param value zero-based position
  */
-public record Ordinal(int value) {
+public value record Ordinal(int value) {
 
     public Ordinal {
         if (value < 0) {

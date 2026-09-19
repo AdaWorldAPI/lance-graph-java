@@ -28,7 +28,7 @@ package com.adaworldapi.lancegraph;
  *
  * @param index zero-based lane index within its resource
  */
-public record LaneId(int index) {
+public value record LaneId(int index) {
 
     public LaneId {
         if (index < 0) {

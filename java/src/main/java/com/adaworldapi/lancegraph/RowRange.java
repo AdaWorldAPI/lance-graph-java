@@ -16,7 +16,7 @@ package com.adaworldapi.lancegraph;
  * @param start        first row, inclusive
  * @param endExclusive one past the last row
  */
-public record RowRange(long start, long endExclusive) {
+public value record RowRange(long start, long endExclusive) {
 
     public RowRange {
         if (start < 0) {
