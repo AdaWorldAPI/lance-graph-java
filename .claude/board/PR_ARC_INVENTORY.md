@@ -30,10 +30,19 @@
   `Pred::Range` work and `exec_error_to_status` matches exhaustively. Mapped
   into the documented *"bug in THIS file"* family — no new public status, no
   ABI bump — and fenced by the falsifier above, **disable-verified
-  red-then-green**. *Standing hazard worth the sentence: an exhaustive match
-  across a repo boundary turns an upstream ADDITIVE change into a downstream
-  build failure, and no CI job here compiles the native crate, so nothing saw
-  it.*
+  red-then-green**. *Standing hazard, corrected before merge (Codex P2 on #82,
+  verified against `.github/workflows/lint.yml`): an exhaustive match across a
+  repo boundary turns an upstream ADDITIVE change into a downstream build
+  failure. ⊘ The first draft blamed the wrong thing — it said "no CI job here
+  compiles the native crate", which is FALSE: the `clippy` and `rust-test`
+  jobs check out sibling `AdaWorldAPI/lance-graph` and run
+  `cargo clippy --all-targets` / `cargo test` from `native/lgj-abi`, so CI
+  compiles it on every push and PR **to this repo**. The real gap is the
+  TRIGGER, not the coverage: `on: {pull_request, push}` fires on this
+  repository only, so an upstream-only merge in lance-graph cannot start this
+  workflow and the break stays invisible until someone pushes here. Naming it
+  as missing coverage would have sent the next session to add a job that
+  already exists.*
 - **Measured** (Temurin `28+16-ea`, fresh `liblgj_abi.so` abi 0.11 avx512):
   **183 native tests**; **`ALL PASSED (409 checks)`** — byte-for-byte the same
   409 as the unflipped baseline **on the same JDK**, which is the comparison

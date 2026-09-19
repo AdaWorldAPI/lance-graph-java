@@ -1,3 +1,25 @@
+## E-THE-CI-GAP-WAS-THE-TRIGGER-NOT-THE-COVERAGE-1 (2026-09-19)
+
+⊘ **Corrects `E-THE-VALHALLA-FLIP-COST-ONE-WORD-SIX-TIMES-…-1` below**, which
+says the `RangeOutOfBounds` break went unseen *"because no CI job here compiles
+the native crate."* **That is false, and checkable in one file.**
+`.github/workflows/lint.yml` runs `clippy` and `rust-test` jobs that check out
+sibling `AdaWorldAPI/lance-graph` (and `ndarray`, and `OGAR`) and then run
+`cargo clippy --all-targets -- -D warnings` and `cargo test` from
+`native/lgj-abi`. The native crate is compiled against the real sibling on
+every push and PR **to this repository**.
+
+**The actual hazard is the TRIGGER.** The workflow is `on: {pull_request,
+push}`, which fires for events in *this* repo only. An upstream-only merge in
+lance-graph — exactly what added `ExecError::RangeOutOfBounds` — cannot start
+it, so the break stayed invisible until the next push here. Coverage was never
+missing; the *event* was.
+
+**Why the wrong diagnosis was worse than no diagnosis:** it would have sent the
+next session to add a CI job that already exists, and left the real gap — no
+upstream-change notification — untouched. Found by Codex P2 on #82; I verified
+it against the workflow rather than accepting or dismissing the finding.
+
 ## E-PANAMA-TIMES-VALHALLA-IS-ONE-MEMBRANE-AND-THE-LAB-FINALLY-HAS-ONE-VARIABLE-1 (2026-09-19)
 
 **Operator reframing, and it is the correct one:** this was never a JDK 26→28
