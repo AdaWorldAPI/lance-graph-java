@@ -58,7 +58,11 @@
 - **Locked:** `value semantics ≠ flattening` — `RowRange` is a production type
   on the wrong side of the cliff and no performance claim may be read off its
   `isValue()`. Valhalla changes what the VOCABULARY costs; it does not touch
-  the membrane. No second graph representation, no row hydration introduced.
+  the membrane. No second graph representation, and **no PRODUCTION row
+  hydration** introduced — scoped deliberately, because this entry reports a
+  `hydrate 65,536 Row` number two bullets up and an unqualified claim would
+  contradict its own measurement. That number is a LAB probe of what hydration
+  would cost; production takes no such path.
 - **The harness is now a REPRESENTATION probe suite, not a "Valhalla lab" —
   Valhalla graduated to production infrastructure and is no longer the thing
   under test.** `valhalla-lab/` keeps its directory name for path
