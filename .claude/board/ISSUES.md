@@ -1,3 +1,26 @@
+## ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA — UNBLOCKED; JDK 28 installed and the flip proven (2026-09-19)
+
+⊘ The entry below says the migration is blocked because no JDK 28 can be
+fetched in this container. **That was true of apt and of every JDK
+distribution host — and wrong as a conclusion.** GitHub release *download*
+paths pass the gateway (`releases.atom` and the API do not), so
+`git ls-remote` gave the tag and a direct download gave the tarball:
+**`/opt/jdks/jdk-28+16`** (Temurin `28+16-ea`). Route, asset name and every
+probe are recorded in `.claude/knowledge/jdk-toolchain-facts.md` § "JDK 28 —
+INSTALLED AND MEASURED". Steps 1 and 2 of the plan below are **done and
+green**: JEP 401 is preview-gated on this build, FFM is final and flag-free,
+and all six vocabulary types flip with one word and report
+`isValue() == true` at runtime **on the production sources**, which compile
+clean under JDK 28 both as-is and flipped.
+
+**What remains, and it is only this:** the flip is proven in a scratch copy,
+not committed — landing it needs the gate suite (`ApiSurfaceTest`,
+`GraphHopTest` allowlist + G2, `AbiContractTest`, `g11_contract_import_fence`,
+the allocation gates) run against a freshly built `liblgj_abi.so` with
+re-pinned allocation numbers, plus the build scripts carrying
+`--enable-preview` repo-wide, plus `valhalla-lab`'s A/B re-scoped in the same
+PR. Nothing architectural is open.
+
 ## ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA
 
 **Status:** OPEN. **Filed:** 2026-09-19. **Severity:** high — the repo's

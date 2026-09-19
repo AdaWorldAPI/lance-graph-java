@@ -19,6 +19,56 @@
   build baseline (SIGILL trap if omitted downstream — see `abi.md` §"SIGILL
   trap"). Any crate depending on `ndarray`'s AVX2 backend must mirror this.
 
+## JDK 28 — INSTALLED AND MEASURED (2026-09-19)
+
+**`/opt/jdks/jdk-28+16`** — Temurin `28+16-ea`, `openjdk version "28-beta"`,
+GA date 2027-03-23, build `Temurin-28+16-202609171655`. Verified by execution
+in this container, not by reading a release note:
+
+| probe | result |
+|---|---|
+| `value record LaneId(int)` / `value class` compiled with **no** flag | **rejected** — *"value classes are a preview feature and are disabled by default"* |
+| same source with `--release 28 --enable-preview` | compiles |
+| `LaneId.class.isValue()` / `MaskId.class.isValue()` | **true** |
+| `new LaneId(7) == new LaneId(7)` | **true** (substitutability) |
+| `Arena.ofConfined()` + `MemorySegment` get/set, **no** preview flag | works, `0xdeadbeef` round-tripped |
+| `Linker.nativeLinker()` | `SysVx64Linker` |
+
+**So on JDK 28: Panama FFM is FINAL and flag-free; JEP 401 is PRESENT and
+preview-gated.** `--enable-preview` is therefore repo-wide under the P0
+mandate, not optional.
+
+### The production flip is PROVEN, not projected
+
+Measured the same day, on a scratch copy of `java/src/main` (37 files):
+
+- **As-is under JDK 28, no preview, no source change: compiles clean.**
+- **All six vocabulary types flip with one word** — `public record X` →
+  `public value record X` for `LaneId`, `MaskId`, `Ordinal`, `FacetId`,
+  `RowRange`, `WideFieldMask` — and the whole tree compiles under
+  `--release 28 --enable-preview`.
+- At runtime **all six report `isValue() == true`**, and substitutability
+  holds. This is the lab's one-word claim, now demonstrated on the
+  PRODUCTION sources rather than on the lab's parallel vocabulary.
+
+### How it was obtained (the route matters — most are blocked)
+
+The egress gateway answers **403 to CONNECT** for `api.adoptium.net`,
+`packages.adoptium.net`, `repos.azul.com`, `apt.corretto.aws`,
+`jdk.java.net` and the launchpad PPAs, so **apt sources and the Adoptium API
+cannot reach a JDK here**; Ubuntu noble's own repos stop at `openjdk-25-jdk`
+and pypi `jdk4py` at 25.0.2.1. What DOES pass: **anonymous `git ls-remote`**
+(gave the tag list, newest `jdk-28+16-ea-beta`) and **GitHub release
+DOWNLOAD paths** (`github.com/.../releases/download/...` → 404 for a wrong
+name, i.e. passed through; `releases.atom` and `expanded_assets` → 403).
+The EA asset name **drops the `28U`**:
+
+```
+https://github.com/adoptium/temurin28-binaries/releases/download/jdk-28%2B16-ea-beta/OpenJDK-jdk_x64_linux_hotspot_28_16-ea.tar.gz
+```
+
+A future session that needs a JDK here uses that route, not apt.
+
 ## JDKs available locally
 
 | Path | Version | FFM (`java.lang.foreign`) | JEP 401 value classes | Vector API |
