@@ -1,3 +1,42 @@
+## E-VALHALLA-IS-THE-STORAGE-MEMBRANE-AND-IT-IS-MANDATORY-1 (2026-09-19)
+
+**Operator ruling.** *LGJ MUST use JDK 28 and MUST use Valhalla and Panama.*
+Recorded as canon in `CLAUDE.md` § P0; the superseded decision is struck in
+place in `.claude/knowledge/jdk-toolchain-facts.md`.
+
+**The violation it corrects, in my own words this session:** *"Production lgj
+does not depend on Valhalla at all."* That sentence is wrong twice. It is
+wrong about the design — the vocabulary types are written identity-free
+precisely so the same source compiles as `value record` with one word changed,
+which is a dependency in shape that `valhalla-lab/docs/three-truths.md`
+already measured (every behaviour the API uses is identical across both object
+models; the rows that differ — `==`, identity hash, `synchronized`,
+null-restricted arrays — are exactly the ones the API never touches). And it
+is wrong about the architecture: **Panama carries the verb, Valhalla carries
+the noun, lance-graph owns the reality.** Valhalla is the STORAGE MEMBRANE,
+never the storage owner. Drop it and Java can still reach the bytes, but it
+reaches them as offset/stride/segment/handle — it has not adopted the
+substrate's storage vocabulary, and zero-copy stops being a programming model
+and goes back to being an FFI trick.
+
+**How the error got in, which is the transferable part.** The knowledge doc
+called the GA-JDK target *"a real, deliberate strength of the design."* A
+release constraint dressed as a virtue is an architectural claim, and a later
+session (this one) read it back as one. A toolchain doc may record what a
+toolchain CAN do; the moment it says what the design SHOULD therefore be, it
+has started legislating outside its evidence.
+
+**Unaffected by the ruling, stated so the next session does not over-apply
+it:** E4 — the Vector API remains a lab arm; JDK 28 finalizing it gives Java
+no backend, because Java has no backends (kernels stay in `ndarray::simd`).
+`--enable-preview` remains classfile-poisoning, so the flag posture is
+repo-wide and uniform, never mixed. Value classes make a DESCRIPTOR cheap;
+they never make a population crossable.
+
+**Status: MANDATED, NOT IMPLEMENTED.** No JDK 28 in this container
+(`/opt/jdks` absent, system `java` 21.0.10) and `jdk.java.net` is proxy-blocked,
+so the migration is filed, not done: `ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA`.
+
 ## E-THE-PIN-THAT-CLAIMED-ONE-PLACE-CREATED-A-SECOND-1 (2026-09-05)
 
 **Finding.** The first CI gate this repo ever had went red on its first

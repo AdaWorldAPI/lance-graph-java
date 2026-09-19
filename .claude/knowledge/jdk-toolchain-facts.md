@@ -36,10 +36,22 @@ and ran on `/opt/jdks/jdk-27` with `--enable-preview`, and
 
 ## Decision this locks in
 
-- **Production path (`java/`) targets `/opt/jdks/jdk-26.0.2`.** No preview
-  flags in the shipped build. This is a real, deliberate strength of the
-  design: the FFM membrane runs on a *shipped GA JDK*, not an experimental
-  one.
+> ⊘ **SUPERSEDED 2026-09-19 by operator ruling — see `CLAUDE.md` § P0 "JDK 28,
+> Valhalla AND Panama".** *LGJ MUST use JDK 28 and MUST use Valhalla and
+> Panama.* The first bullet below is struck: targeting a GA JDK without
+> preview is a release constraint, and calling it "a real, deliberate
+> strength" turned it into an architectural claim that later licensed the
+> false sentence *"production lgj does not depend on Valhalla at all."* The
+> MEASUREMENTS above are untouched and still valid (they are what this doc is
+> for); only the decision they were used to justify is replaced. The paths
+> below are also container-specific: `/opt/jdks` does not exist in every
+> environment — re-verify before trusting, as this doc's own header says.
+
+- ⊘ **STRUCK — Production path (`java/`) targets `/opt/jdks/jdk-26.0.2`.** No
+  preview flags in the shipped build. This is a real, deliberate strength of
+  the design: the FFM membrane runs on a *shipped GA JDK*, not an
+  experimental one. **Replaced by: the production path targets JDK 28 with
+  Valhalla value classes and Panama FFM, both mandatory.**
 - **Valhalla lab (`valhalla-lab/`) targets `/opt/jdks/jdk-27`.** Same source
   shape, compiled twice (once as `record`, once as `value record`), so the
   A/B is genuinely apples-to-apples.

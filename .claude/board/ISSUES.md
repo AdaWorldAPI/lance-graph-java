@@ -1,3 +1,44 @@
+## ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA
+
+**Status:** OPEN. **Filed:** 2026-09-19. **Severity:** high — the repo's
+mandated toolchain and its actual toolchain differ.
+
+**Mandate** (operator, `CLAUDE.md` § P0): LGJ MUST use JDK 28 and MUST use
+Valhalla and Panama. **Blocked in the filing container, not by the work:**
+`/opt/jdks` does not exist here (the JDK 26/27 paths in
+`.claude/knowledge/jdk-toolchain-facts.md` were pinned in a different
+environment), system `java` is 21.0.10, and `jdk.java.net` is refused by the
+egress proxy (`connect_rejected`, organization policy), so no JDK 28 can be
+fetched or verified from this session.
+
+**Steps, in order, for a session that has a JDK 28:**
+
+1. **Verify by execution, never by doc** (this repo's standing rule): does
+   JEP 401 require `--enable-preview` on that build? Record `Class::isValue()`
+   on a `value record` and the exact build string in
+   `jdk-toolchain-facts.md`. If the answer is preview, the flag is repo-wide.
+2. **Flip the vocabulary types to `value`** — `LaneId`, `MaskId`, `Ordinal`,
+   `FacetId`, `RowRange`, `WideFieldMask`. The lab proved this is a one-word
+   change per type; `run.sh` step 0 already enforces that the two sources
+   differ by exactly that word.
+3. **Re-run the whole gate suite** — `ApiSurfaceTest` (no FFM type in a public
+   signature), `GraphHopTest` reflective allowlist + G2 no-per-row-engine,
+   `AbiContractTest` layout parity, `g11_contract_import_fence`, and the
+   allocation gates. The allocation numbers are the ones expected to MOVE;
+   re-pin them from measurement, never predict them (measure-then-pin).
+4. **Re-measure the 8-byte flattening cliff** from `three-truths.md` on the
+   new build before quoting the old number anywhere.
+5. **`valhalla-lab/` loses its reason to exist as an A/B** once production IS
+   the Valhalla arm. Retire or re-scope it deliberately, in the same PR, with
+   its measurements preserved on the board — do not leave a lab whose stable
+   arm is the thing production no longer is.
+6. **E4 stays**: no Vector API in `src/main`, whatever JDK 28 finalizes.
+
+**Falsifier for "done":** the production build runs on JDK 28, every
+vocabulary type reports `isValue() == true` at runtime in a test, all gates
+are green with re-pinned allocation numbers, and no doc still states the
+JDK-26 framing as current.
+
 # Issues Log — Open + Resolved (double-entry, append-only)
 
 ## ISS-LGJ-CROSS-REPO-CITATION-GOES-STALE-SILENTLY (2026-09-03) — OPEN
