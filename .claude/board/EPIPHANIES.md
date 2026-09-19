@@ -1,3 +1,25 @@
+## E-THE-CI-GAP-WAS-THE-TRIGGER-NOT-THE-COVERAGE-1 (2026-09-19)
+
+⊘ **Corrects `E-THE-VALHALLA-FLIP-COST-ONE-WORD-SIX-TIMES-…-1` below**, which
+says the `RangeOutOfBounds` break went unseen *"because no CI job here compiles
+the native crate."* **That is false, and checkable in one file.**
+`.github/workflows/lint.yml` runs `clippy` and `rust-test` jobs that check out
+sibling `AdaWorldAPI/lance-graph` (and `ndarray`, and `OGAR`) and then run
+`cargo clippy --all-targets -- -D warnings` and `cargo test` from
+`native/lgj-abi`. The native crate is compiled against the real sibling on
+every push and PR **to this repository**.
+
+**The actual hazard is the TRIGGER.** The workflow is `on: {pull_request,
+push}`, which fires for events in *this* repo only. An upstream-only merge in
+lance-graph — exactly what added `ExecError::RangeOutOfBounds` — cannot start
+it, so the break stayed invisible until the next push here. Coverage was never
+missing; the *event* was.
+
+**Consequence for the next session:** do not add a CI job for this — one
+exists. The open gap is upstream-change notification, and nothing in this
+repository's triggers can close it. Raised by Codex P2 on #82, verified
+against the workflow.
+
 ## E-PANAMA-TIMES-VALHALLA-IS-ONE-MEMBRANE-AND-THE-LAB-FINALLY-HAS-ONE-VARIABLE-1 (2026-09-19)
 
 **Operator reframing, and it is the correct one:** this was never a JDK 26→28
@@ -131,14 +153,13 @@ tripwire, not a safety net:** it converts an upstream additive change into a
 downstream build failure, and nothing in either repo's CI noticed, because no
 CI job here compiles the native crate.
 
-**Two false failures I nearly reported, both mine, both caught by reading.**
-The flipped suite showed `1 FAILED` twice. Both times it was
-`DoctrineFenceTest` refusing to run — it requires `java/src/main/java` AND
-`native/lgj-abi/src` relative to CWD, and I had run the flipped build from a
-scratch directory that had neither. The fence is *correct*: its first check is
-*"a fence that cannot find its corpus must fail, not skip."* Running the flip
-in the real tree (committed first, restored with `git checkout`) gave the true
-result. **A harness artifact and a regression look identical in a summary
+**Harness note, so the next run is not misread.** The flipped suite reports
+`1 FAILED` when run from a directory lacking `java/src/main/java` AND
+`native/lgj-abi/src` — `DoctrineFenceTest` resolves both relative to CWD and
+refuses to run without them. The fence is behaving correctly: its first check
+is *"a fence that cannot find its corpus must fail, not skip."* **Run the flip
+in the real tree** (commit first; restore with `git checkout`) or the result is
+not the suite's. **A harness artifact and a regression look identical in a summary
 line** — this is the ruff trap "a disable that does not apply is
 indistinguishable from a guard that is not load-bearing", met from the other
 direction.

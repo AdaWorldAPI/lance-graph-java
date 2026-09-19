@@ -1,3 +1,25 @@
+## 2026-09-19 — PR #81 merged (`07aa441`): production IS the Valhalla arm; Panama × Valhalla is one membrane
+
+**The frame, because it is easy to file this wrong:** this was not a JDK
+26→28 upgrade. Production WAS Panama-only with Valhalla in a lab arm; they
+are now **one production membrane**, with JDK 28 as the enabling toolchain.
+Panama = the verb, Valhalla = the noun, **lance-graph / T0 owns storage**.
+
+- **Toolchain:** `/opt/jdks/jdk-28+16` (Temurin `28+16-ea`). FFM final and
+  flag-free; JEP 401 preview-gated, so `--release 28 --enable-preview` is part
+  of the shipped build contract — **the flag is Valhalla's, never FFM's.**
+- **Production vocabulary:** the six types are `public value record`,
+  `isValue() == true`. Gates: **183 native tests**, **409 Java checks**,
+  identical to the unflipped baseline on the same JDK.
+- **Carry this forward:** the **8-byte flattening cliff reproduces on JDK 28**,
+  and `RowRange` / `Row` (16 B) are on the wrong side of it. Two allocation
+  measurements got WORSE under value semantics (non-escaping construction,
+  `Row` hydration) — both honest, neither on a production path. The FFM path is
+  byte-identical across the object model.
+- **Still owed:** `bench/` JMH numbers have NOT been re-taken on JDK 28
+  (`bench/lib` absent here); `bench/RESULTS.md` is JDK 26 historical.
+- Full record: `PR_ARC_INVENTORY.md` PR #81.
+
 ## 2026-09-16 — `hop_cached_vs_gather`: the M1b tile pays off on the second hop; the scatter walk is the access-shape question
 
 **PR #79**, `native/lgj-abi/examples/hop_cached_vs_gather.rs` only — no ABI

@@ -28,9 +28,11 @@ Rust, SoA layout, SIMD, FFM, or graph-engine internals.
                         |
              View / Mask / Lens DSL          <- lazy, monotonic-narrowing
                         |
-             stable-JDK implementation
-                        |
-               Valhalla laboratory            <- the tiny vocabulary only
+          JDK 28: Panama FFM + JEP 401         <- value-typed vocabulary,
+                        |                          production, not a lab arm
+            representation probes              <- object-model / layout
+                                                  measurements (historical
+                                                  directory: valhalla-lab/)
 
 ====================== PANAMA FFM ======================
 
