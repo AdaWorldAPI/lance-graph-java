@@ -8,6 +8,69 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR #81 — Panama × Valhalla as ONE production membrane (merged `07aa441`, branch `claude/great-pascal-k96kok`, head `1c66091`, 3 commits)
+
+**Entry written at merge**, not backfilled.
+
+- **Frame, and it is the point:** NOT a JDK 26→28 migration. The two halves
+  that were split — Panama FFM in production, Valhalla in the lab — became one
+  production membrane. JDK 28 is the enabling toolchain, nothing more. Panama
+  carries the VERB (reach into canonical bytes); Valhalla carries the NOUN
+  (identity-free semantic addresses over them); **lance-graph / T0 still owns
+  the only canonical copy.**
+- **Added:** `CLAUDE.md` § P0 (the operator mandate); the six vocabulary types
+  as `public value record` (`LaneId`, `MaskId`, `Ordinal`, `FacetId`,
+  `RowRange`, `WideFieldMask`); `plan_lower::range_falsifier::
+  no_opcode_lowers_to_pred_range`; JDK 28 + preview across `bench/run.sh`,
+  `bench/gate-run.sh`, `java/README.md`, `README.md`, `docs/panama.md`,
+  `panama-bridge-engineer.md`, `BOOT.md`; `jdk-toolchain-facts.md` § "JDK 28 —
+  INSTALLED AND MEASURED" with the obtain route.
+- **Fixed (this blocked everything):** `lgj-abi` did not compile against
+  lance-graph `main`. `mask_risc::ExecError` gained `RangeOutOfBounds` with the
+  `Pred::Range` work and `exec_error_to_status` matches exhaustively. Mapped
+  into the documented *"bug in THIS file"* family — no new public status, no
+  ABI bump — and fenced by the falsifier above, **disable-verified
+  red-then-green**. *Standing hazard worth the sentence: an exhaustive match
+  across a repo boundary turns an upstream ADDITIVE change into a downstream
+  build failure, and no CI job here compiles the native crate, so nothing saw
+  it.*
+- **Measured** (Temurin `28+16-ea`, fresh `liblgj_abi.so` abi 0.11 avx512):
+  **183 native tests**; **`ALL PASSED (409 checks)`** — byte-for-byte the same
+  409 as the unflipped baseline **on the same JDK**, which is the comparison
+  that matters. All six types `isValue() == true`; substitutability holds.
+  **The 8-byte flattening cliff REPRODUCES on JDK 28:** `LaneId`/`Ordinal`
+  (4 B) and `MaskId` (8 B) FLAT; **`RowRange` (2 long, 16 B) and `Row` (16 B)
+  NOT-FLAT.** Allocation, record → value, 1M ops: construct-into-array
+  15.26 → **1.87 MiB** (8.2×); allocate+fill 19.07 → 5.65 MiB; `Descriptor`
+  45.78 → 27.89 MiB; ⊘ **never-escaping 4.73 → 5.75 MiB (WORSE** — EA already
+  erased the record case**)**; ⊘ **hydrate 65,536 `Row` 1.50 → 2.00 MiB
+  (WORSE** — `Row` does not flatten**)**. **FFM path byte-identical across
+  arms:** 712 B/query, 0 Java objects per row, same native bytes.
+- **Locked:** `value semantics ≠ flattening` — `RowRange` is a production type
+  on the wrong side of the cliff and no performance claim may be read off its
+  `isValue()`. Valhalla changes what the VOCABULARY costs; it does not touch
+  the membrane. No second graph representation, no row hydration introduced.
+- **Lab re-scoped, and the re-scope removed a confound it always carried:** the
+  old A/B was `(record, JDK 26)` vs `(value record, JDK 27 EA)` — two
+  variables. Both arms now run JDK 28, so the object model is the only
+  difference. Two things it forced: **preview marking is transitive** (the
+  `record` arm also runs `--enable-preview`; it is a record arm on a preview
+  JVM, not a preview-free one), and **`ValueClass.isFlatArray` narrowed from
+  `Object` to `Object[]`** since 27-jep401ea3, which broke the flattening probe
+  until adapted.
+- **Struck:** the *"production targets a shipped GA JDK, no preview flags — a
+  real, deliberate strength"* decision, in place in `jdk-toolchain-facts.md`.
+  It dressed a release constraint as an architectural virtue and had already
+  licensed the false claim *"production lgj does not depend on Valhalla at
+  all."*
+- **Deferred, stated rather than implied:** `bench/` cannot run here —
+  `bench/lib` does not exist, so the JMH jars are absent. `bench/RESULTS.md`
+  numbers remain **JDK 26 historicals, correct when taken**, deliberately
+  untouched and **NOT re-taken on JDK 28**. `gate-run.sh` carries the new pin
+  and flags, so the re-run is one command once the jars are present.
+- **Confidence:** high on everything measured in-container; the JMH
+  crossing/allocation figures are unverified on JDK 28 and are labelled so.
+
 ## PR #79 — `hop_cached_vs_gather`: the M1b tile pays off on hop two; the scatter walk is the access-shape question (opened 2026-09-16, merged `9cb63e9`, head `c10029b`)
 
 > **Post-merge backfill, owned (2026-09-16):** this entry was NOT written at
