@@ -1734,7 +1734,11 @@ fn exec_error_to_status(e: ExecError) -> i32 {
         ExecError::LaneOutOfRange(_) => LGJ_ERR_INVALID_LANE,
         ExecError::LaneKind { .. } => LGJ_ERR_LANE_KIND_MISMATCH,
         ExecError::LenMismatch { .. } => LGJ_ERR_MASK_LENGTH_MISMATCH,
-        ExecError::PlaneOutOfRange(_) | ExecError::PlaneTail(_) => LGJ_ERR_INVALID_HANDLE,
+        ExecError::PlaneOutOfRange(_)
+        | ExecError::PlaneTail(_)
+        | ExecError::ForeignOutOfRange(_) => LGJ_ERR_INVALID_HANDLE,
+        ExecError::ForeignLaneOutOfRange(_) => LGJ_ERR_INVALID_LANE,
+        ExecError::ForeignLaneKind { .. } => LGJ_ERR_LANE_KIND_MISMATCH,
         ExecError::SumRowBound { .. } => LGJ_ERR_SUM_OVERFLOW,
         ExecError::ScratchTooSmall { .. }
         | ExecError::ScratchBufferTooSmall { .. }
@@ -1743,6 +1747,7 @@ fn exec_error_to_status(e: ExecError) -> i32 {
         | ExecError::ScratchReadBeforeWrite { .. }
         | ExecError::ScratchWords { .. }
         | ExecError::BlendNeedsOut
+        | ExecError::TerminalNeedsOut { .. }
         | ExecError::GateAliasesDst { .. }
         | ExecError::RangeOutOfBounds { .. } => LGJ_ERR_ALLOCATION_FAILED,
     }
