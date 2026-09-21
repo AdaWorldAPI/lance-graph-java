@@ -1733,6 +1733,9 @@ fn exec_error_to_status(e: ExecError) -> i32 {
     match e {
         ExecError::LaneOutOfRange(_) => LGJ_ERR_INVALID_LANE,
         ExecError::LaneKind { .. } => LGJ_ERR_LANE_KIND_MISMATCH,
+        // The lane is the right width but not in key order: a lane-shape
+        // precondition of the fold, reported as the same class of mismatch.
+        ExecError::LaneNotOrdered { .. } => LGJ_ERR_LANE_KIND_MISMATCH,
         ExecError::LenMismatch { .. } => LGJ_ERR_MASK_LENGTH_MISMATCH,
         ExecError::PlaneOutOfRange(_)
         | ExecError::PlaneTail(_)
