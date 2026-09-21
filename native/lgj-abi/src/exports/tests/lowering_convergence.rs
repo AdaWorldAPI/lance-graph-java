@@ -156,12 +156,22 @@ fn cmp_of(o: &LgjOpDesc) -> Cmp {
 /// function on both sides is the whole point of comparing LOWERINGS rather
 /// than comparing EXECUTIONS.
 fn run(p: &Program, planes: &Planes) -> usize {
-    let words = planes.n_rows.div_ceil(64);
-    let slots = p.scratch_slots as usize;
-    let mut buf = vec![0u64; scratch_words_for(words, slots).expect("sized")];
-    let mut scratch = Scratch::over(&mut buf, words, slots).expect("carves");
-    match execute(p, planes, &mut scratch, None).expect("runs") {
+    // The tiled default scratch. This crate's own lowering ends in `Keep`
+    // (the destination mask is the demanded sink; the count is its
+    // popcount), the quack lowering in `Count` — both are read here.
+    let mut scratch = Scratch::for_program(p, planes.n_rows).expect("addressable");
+    let mut kept = vec![0u64; planes.n_rows.div_ceil(64)];
+    match execute_into(
+        p,
+        planes,
+        &Foreign::NONE,
+        &mut scratch,
+        Out::Mask(&mut kept),
+    )
+    .expect("runs")
+    {
         Value::Count(c) => c,
+        Value::Mask(_) => ndarray::simd::popcount_batch_u64(&kept) as usize,
         other => panic!("not a count: {other:?}"),
     }
 }

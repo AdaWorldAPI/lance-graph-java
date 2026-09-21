@@ -26,8 +26,8 @@ use std::cell::RefCell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use lance_graph_mask_risc::{
-    execute, reference_execute, reference_scratch, scratch_words_for, ExecError, LaneRef, Planes,
-    Scratch, Value,
+    execute_into, reference_execute_into, scratch_words_for, tile_words_for, ExecError, Foreign,
+    LaneRef, Out, Planes, Scratch, Value,
 };
 
 use crate::abi::*;
@@ -1869,33 +1869,53 @@ fn plan_eval_impl(
 
     match path {
         Path::Simd => {
-            let need = match scratch_words_for(n_words, plan_lower::SLOTS as usize) {
+            // TILED: the scratch is `SLOTS × tile_words_for(rows)` words
+            // however many rows the resource holds, and the kept mask is
+            // written tile by tile into the destination resource's own words
+            // — the demanded sink, and the only population-sized write.
+            // Validation is total before the first tile, so an error leaves
+            // `dst_mask` byte-for-byte as it was, exactly as before.
+            let tile = tile_words_for(rows);
+            let need = match scratch_words_for(tile, plan_lower::SLOTS as usize) {
                 Some(n) => n,
                 None => return LGJ_ERR_LENGTH_OVERFLOW,
             };
+            let mut g = match mask.write_mask() {
+                Some(g) => g,
+                None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+            };
+            if g.words.len() != n_words {
+                return LGJ_ERR_MASK_LENGTH_MISMATCH;
+            }
             PLAN_SCRATCH.with(|cell| {
                 let mut buf = cell.borrow_mut();
                 if buf.len() < need {
                     buf.resize(need, 0);
                 }
                 let mut scratch =
-                    match Scratch::over(&mut buf[..need], n_words, plan_lower::SLOTS as usize) {
+                    match Scratch::over(&mut buf[..need], tile, plan_lower::SLOTS as usize) {
                         Ok(s) => s,
                         Err(e) => return exec_error_to_status(e),
                     };
-                let count = match execute(&program, &planes, &mut scratch, None) {
-                    Ok(Value::Count(c)) => c as u64,
+                match execute_into(
+                    &program,
+                    &planes,
+                    &Foreign::NONE,
+                    &mut scratch,
+                    Out::Mask(&mut g.words),
+                ) {
+                    Ok(Value::Mask(_)) => {}
                     // The lowering emits exactly one terminal and it is
-                    // `Count`; any other value means this file built a
+                    // `Keep`; any other value means this file built a
                     // program it did not intend to.
                     Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
                     Err(e) => return exec_error_to_status(e),
-                };
-                let words = match scratch.slot(plan_lower::ACC_SLOT) {
-                    Some(w) => w,
-                    None => return LGJ_ERR_ALLOCATION_FAILED,
-                };
-                publish(&mask, words, count, out_count)
+                }
+                let count = kernels::simd_popcount(&g.words);
+                drop(g);
+                // SAFETY: non-null (checked by the caller); written only on success.
+                unsafe { *out_count = count };
+                LGJ_OK
             })
         }
         // Fork A: the scalar symbol runs mask-risc's row-at-a-time oracle, so
@@ -1905,20 +1925,14 @@ fn plan_eval_impl(
         // bit-packing bug — which is why the allocation gate names
         // `lgj_plan_eval` and only it.
         Path::Scalar => {
-            let count = match reference_execute(&program, &planes, None) {
-                Ok(Value::Count(c)) => c as u64,
+            let mut kept = vec![0u64; n_words];
+            match reference_execute_into(&program, &planes, &Foreign::NONE, Out::Mask(&mut kept)) {
+                Ok(Value::Mask(_)) => {}
                 Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
                 Err(e) => return exec_error_to_status(e),
-            };
-            let slots = match reference_scratch(&program, &planes) {
-                Ok(s) => s,
-                Err(e) => return exec_error_to_status(e),
-            };
-            let words = match slots.get(plan_lower::ACC_SLOT as usize) {
-                Some(w) => w.as_slice(),
-                None => return LGJ_ERR_ALLOCATION_FAILED,
-            };
-            publish(&mask, words, count, out_count)
+            }
+            let count = kernels::simd_popcount(&kept);
+            publish(&mask, &kept, count, out_count)
         }
     }
 }
