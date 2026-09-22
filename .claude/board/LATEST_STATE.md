@@ -1,3 +1,76 @@
+## 2026-09-22 — D-LGJ-FOLD-5: the consumer stops asking sixteen times, and a red pin on `main` gets root-caused
+
+The consumer half of minor 12. `BricksQuery.sumBy()` was sixteen queries —
+one `sumOf` over `where(REGION.eq(v))` per region, each paying plan evaluation
+into a selection mask plus the reduction over it — and is now one fused
+`sumByGroup`. No selection mask is built at any point.
+
+- **Measured through the consumer, not inherited from the core suite:** 1
+  crossing at 1,000 and 64,000 rows, and — new — at 1, 16 and 64 groups.
+  The old path was already invariant in ROWS, which is why its literal was
+  asserted at both row counts; this one is invariant in GROUPS as well, a
+  strictly stronger claim, so it gets its own arm instead of riding on the
+  row-count one.
+- **The group-count arm needed a seam, and the seam is the honest kind.** The
+  public `sumBy()` always asks for exactly `Orders.REGIONS` groups, so nothing
+  the test could previously reach varied the group count and *"one crossing
+  whatever the group count"* was a doc comment no input could falsify. A
+  package-private `sumByGroupCount` serves that arm alone; `getMethods()` does
+  not see it, so the aggregate-only-egress guard still audits exactly the
+  public surface the guarantee is about.
+- **Disable arm A recovered the old cost formula exactly:** reverting to the
+  per-group loop measured **2 / 32 / 128 at 1 / 16 / 64 groups**, identical at
+  both row counts — `2 × groups` — with **parity GREEN throughout**. The two
+  paths agree on the answer and differ only in cost, which is what makes this a
+  migration rather than a behaviour change. Note even the degenerate case
+  discriminates: 1 group costs 2 on the old path, 1 on the new.
+- **`Orders.REGIONS` is a mirror, so it is pinned to the fixture and not to a
+  copied number.** It replaces three literal 16s with one named source for the
+  native generator's classid cardinality, which the ABI manifest does not
+  report. A comparison against a second Java literal would drift in lockstep
+  with whatever edited it and prove nothing; instead every id below REGIONS
+  must carry rows and id REGIONS itself must carry none. Two-sided for a
+  reason: arm B (REGIONS = 20) fires the first half only, arm C (REGIONS = 8)
+  the second only — at 3,960 rows on id 8 — so neither half alone catches
+  both directions.
+- **Return type stays `Map<Integer, Long>`:** sized by the question, one entry
+  per group, never by the data. Handing back `GroupTotals` would leak a facade
+  type into a consumer's public surface for nothing.
+
+**And a separate finding, which is the part worth remembering:
+`GraphHopTest` was RED on `main`.** 1 FAILED / 65 passed at `bb81d80`,
+established by running it from a clean worktree rather than inferred from the
+diff's shape. Consumers have **no CI line** — the only workflow gates
+`lgj-abi` (fmt, clippy, test) — so nothing reported it, the same
+no-CI-line shape that hid the r2il probe step upstream. Filed as
+`ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE`.
+
+Root cause, and it is the design rather than a regression: `Mask.words()` no
+longer returns its cached window directly — it re-describes through
+`lgj_mask_describe` and compares the returned epoch against its stamp, so a
+cached address is never read after the substrate moved under it. Root
+`CLAUDE.md` names that as shipped. The pin asserting a second
+`materializeRows()` costs **zero** was written against the pure-cache
+behaviour that preceded it, so the test moved, not the code; reverting the
+number would mean deleting the re-validation. The plan's §3.5 *"describe
+cached per Mask; zero crossings steady-state"* is superseded for `Mask`: the
+words are still not re-fetched and the population is still never re-scanned,
+but the describe is no longer free. Steady-state is **constant per call**.
+
+The re-pin asserts that rather than flipping a literal: a THIRD call is
+measured and required to equal the second. A one-off extra describe would
+satisfy a bare `== 1` on the second call; only a per-call cost satisfies
+second == third. **Disable arm D proves the two arms are independent** —
+restoring the pure cache kills the magnitude arm (expected 1, was 0) and
+leaves the constancy arm GREEN at 0, because it tests a different property.
+
+- **Gates:** core **612/612**, bricks **70/70** (was 62; the six group-count
+  arms and two cardinality checks are the +8), graph **68/68** (was 65 + 1
+  failed; the third-call cost and its content check are the +2), trades
+  **12/12 + 3/3** — **765 checks**, JDK 28 `--release 28 --enable-preview`
+  against a freshly built `abi 0.12, ndarray::simd avx512, release`. Four
+  disable arms, each red-then-green.
+
 ## 2026-09-22 — minor 12: `lgj_plan_group_sum_i32`, the grouped sum that never builds a selection (fold-distillation wave 4)
 
 Upstream first (lance-graph #1256 merged `99cdca38`: the tiled executor,
@@ -26,9 +99,12 @@ selection exists at any point.
 - **The eighth named materialisation site:** `Engine.groupSumI32`'s
   `toArray`, sized by `groups` (the question), pinned in `DoctrineFenceTest`
   and listed in root `CLAUDE.md`. `GroupTotals` exposes no array.
-- **Still owed:** the `bricks` consumer's `sumBy()` still runs the 32-crossing
-  path; migrating it to `sumByGroup` is a consumer-wave change, not this
-  one. `lgj_hop` still holds mask-sized Vecs (pre-existing, unrelated).
+- **Still owed:** ⊘ the first clause is DISCHARGED (2026-09-22, D-LGJ-FOLD-5,
+  see the section above) — struck in place, not deleted: it was true when
+  written. It read *"the `bricks` consumer's `sumBy()` still runs the
+  32-crossing path; migrating it to `sumByGroup` is a consumer-wave change,
+  not this one."* That consumer wave has now run. `lgj_hop` still holds
+  mask-sized Vecs (pre-existing, unrelated) and remains owed.
 
 ## 2026-09-19 — PR #81 merged (`07aa441`): production IS the Valhalla arm; Panama × Valhalla is one membrane
 

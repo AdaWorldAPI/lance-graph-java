@@ -66,8 +66,24 @@ public final class Orders {
             new I32Field("revenue", LaneId.of(2), Ordinal.of(1));
 
     /**
+     * How many distinct {@link #REGION} values the fixture produces: ids {@code 0..15}.
+     *
+     * <p>This is a fixture fact, not a schema choice — the generator derives the lane-1 tag as
+     * {@code (a >> 33) & (ROWSTORE_CLASS_CARDINALITY - 1)}, so the cardinality is the native
+     * generator's, mirrored here because the ABI manifest does not report it. A mirror can drift,
+     * so it is pinned empirically rather than by comparison: {@code BricksAuthTest}'s
+     * region-cardinality check counts rows for every id in {@code 0..REGIONS} and requires the
+     * first {@code REGIONS} to be populated and id {@code REGIONS} itself to be empty. Raise this
+     * constant without the generator changing and that check goes red.
+     *
+     * <p>It is also the {@code groups} argument {@link BricksQuery#sumBy} passes, which is why
+     * there is one named source for it instead of a literal at each site.
+     */
+    public static final int REGIONS = 16;
+
+    /**
      * The region id used by {@link Role#EU_ONLY} to build its authorization mask. One of the
-     * fixture's 16 distinct {@link #REGION} values.
+     * fixture's {@link #REGIONS} distinct {@link #REGION} values.
      */
     public static final int EU = 7;
 

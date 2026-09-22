@@ -215,8 +215,11 @@ public final class Graph implements AutoCloseable {
     /**
      * The current frontier's row indices — the ONE named materialising terminal on this class (root
      * {@code CLAUDE.md}'s "named exceptions": row ids out). {@code O(n)} in the frontier's
-     * population; see {@link Mask#materializeRows()} for the exact cost shape (a one-time describe,
-     * then zero further crossings for repeated calls against the same underlying {@link Mask}).
+     * population; see {@link Mask#materializeRows()} for the exact cost shape — one lifecycle
+     * crossing per call, repeated calls included, because the cached window is re-validated
+     * against the registry every time rather than read on trust. Corrected 2026-09-22: this
+     * read *"a one-time describe, then zero further crossings for repeated calls"*, which was
+     * the pure-cache behaviour that preceded the re-validation.
      */
     public long[] materializeRows() {
         return frontier == null ? new long[0] : frontier.materializeRows();
