@@ -104,7 +104,8 @@ public final class BricksQuery {
      * selection mask, then the reduction), measured here at <strong>32</strong>. That path was
      * invariant in the number of rows but proportional to the number of groups; this one is
      * invariant in both, which is the stronger claim and is asserted as such — {@code
-     * BricksAuthTest} pins the cost at 1 across two row counts <em>and</em> two group counts.
+     * BricksAuthTest} pins the cost at 1 across two row counts <em>and</em> three group
+     * counts: 1, {@link Orders#REGIONS}, and four times {@code REGIONS}.
      *
      * <p>Groups come from {@link Orders#REGIONS}, the fixture's region cardinality. Every id in
      * {@code 0..REGIONS-1} appears as a key in the returned map, including ids no selected row

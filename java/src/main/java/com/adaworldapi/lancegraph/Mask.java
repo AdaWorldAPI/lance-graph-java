@@ -40,12 +40,25 @@ public final class Mask implements AutoCloseable {
     private boolean closed;
 
     /**
-     * The mask's own packed-bit word window, resolved once via {@code lgj_mask_describe} (a
-     * lifecycle crossing, per abi.md §6, not a bulk one) and cached: mask storage is allocated
-     * once and never reallocated, resized, or moved while the resource is alive (a hard ABI
-     * guarantee), the same invariant {@link RowStore#rawLane()} relies on for its own caching.
-     * Every read or write through {@link #materializeRows()} after the first call is an
-     * in-process segment access with no further crossing at all.
+     * The mask's own packed-bit word window, obtained via {@code lgj_mask_describe} (a lifecycle
+     * crossing, per abi.md §6, never a bulk one) and cached: mask storage is allocated once and
+     * never reallocated, resized, or moved while the resource is alive (a hard ABI guarantee),
+     * the same invariant {@link RowStore#rawLane()} relies on for its own caching.
+     *
+     * <p><strong>The cache is re-validated, not trusted, so every facade call pays one lifecycle
+     * crossing — including calls after the first.</strong> {@link #words()} re-describes and
+     * compares the returned epoch against the stamp it holds, so a cached address can never be
+     * read after the substrate has moved under it. What the cache still buys is what matters:
+     * the words are never re-fetched and the population is never re-scanned, because
+     * {@code lgj_mask_describe} fills a descriptor and does no work over the rows. The cost is
+     * therefore CONSTANT PER CALL, not zero after the first.
+     *
+     * <p>⊘ This paragraph replaces *"resolved once … and cached: every read or write through
+     * {@link #materializeRows()} after the first call is an in-process segment access with no
+     * further crossing at all"*, which described the pure-cache behaviour that preceded the
+     * re-validation and was false once it landed. Corrected 2026-09-22 alongside the
+     * {@code GraphHopTest} pin that measured it; found by review, not by a test, because a
+     * javadoc contract has none.
      */
     private Engine.LaneWindow words;
 
