@@ -185,3 +185,121 @@ jobs:
       # because nothing ran the test that enforces it; this job is what runs it.
       - name: Test lgj-abi
         run: cargo test --all-targets
+
+  # THE JAVA GATE. Until this job existed, `main` could be RED and nothing said
+  # so: `GraphHopTest` reported 1 FAILED / 65 passed at bb81d80 and survived a
+  # merge, because the three jobs above compile Rust only and nothing in
+  # `.github/` compiled a single line of Java. The 612-check core suite and the
+  # four consumer mains were LOCAL gates — run by whoever remembered. A gate that
+  # exists and is never dispatched is indistinguishable from no gate.
+  # Tracked as ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE.
+  #
+  # There is no build tool in this repo — no Maven, no Gradle, no wrapper — by
+  # design (`java/README.md`: "`javac` and `java` are the entire Java
+  # toolchain"). So this job shells out to raw javac/java with exactly the
+  # commands that README documents, which is what keeps the two from drifting:
+  # a contributor's local command and CI's command are the same string.
+  java-suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lance-graph-java
+      # Same three siblings as `rust-test`, for the same reason: cargo resolves
+      # the whole graph including the inactive optional path dep, so all three
+      # must exist on disk before the artifact this job needs can be built.
+      - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
+      - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/lance-graph
+          path: lance-graph
+      - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/OGAR
+          path: OGAR
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rust-src-dir: lance-graph-java/native/lgj-abi
+          # x86-64-v3, matching the jobs above: `.cargo/config.toml` pins AVX-512
+          # for the one known production host and GitHub-hosted runners do not
+          # guarantee it. No Java test pins a backend name — `AbiContractTest`
+          # asserts only that one was reported, `FusionParityTest` merely notes
+          # it, and `DoctrineFenceTest` counts source lines — so the suite is
+          # backend-agnostic by construction and an AVX2 artifact gates the same
+          # behaviour. That is the `simdBackend()` "diagnostic only" rule holding.
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lance-graph-java/native/lgj-abi
+      # The suite needs the real artifact. `AllTests` exits 2 when it is absent
+      # rather than reporting a failure — deliberately, so a missing library does
+      # not read as a broken test. In CI that distinction is moot: any non-zero
+      # exit fails the step, and here an absent artifact IS a defect.
+      - name: Build liblgj_abi.so (release)
+        working-directory: lance-graph-java/native/lgj-abi
+        run: cargo build --release
+      # `28-ea`, not `28`. JDK 28 is not GA: Adoptium's own
+      # /v3/info/available_releases lists it as most_recent_feature_version and
+      # NOT in available_releases. The `-ea` suffix is what makes setup-java ask
+      # for it — `normalizeVersion` sets `stable = false` on that suffix, and the
+      # temurin installer then queries `release_type=ea`, which serves
+      # jdk-28+16-ea-beta: the same build the development container runs.
+      #
+      # The version is deliberately NOT pinned to +16. This repo forbids internal
+      # head pins, and an upstream EA build is an external dependency whose whole
+      # purpose is to move; pinning it would mean a checksum bump per EA drop with
+      # nothing verified in exchange. What the suite actually requires is JEP 401
+      # value classes under preview, and every 28 EA build carries those.
+      - name: Set up JDK 28 (early access)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '28-ea'
+      # --enable-preview is for JEP 401 (value classes), NOT for Panama, which is
+      # final since 22. The flag is repo-wide and deliberate: mixing previewed and
+      # non-previewed classfiles is what poisons a build.
+      - name: Compile the core suite (main + test)
+        working-directory: lance-graph-java/java
+        run: |
+          javac --release 28 --enable-preview -d out \
+            $(find src/main/java src/test/java -name '*.java')
+      # -Dlgj.library is an EXPLICIT request, and `Abi.locateLibrary` refuses to
+      # fall back to a search path when it cannot be honoured. That is what stops
+      # this job from silently measuring some other artifact than the one the step
+      # above just built.
+      - name: Run the core suite (AllTests)
+        working-directory: lance-graph-java/java
+        run: |
+          java --enable-preview --enable-native-access=ALL-UNNAMED \
+            -Dlgj.library="$GITHUB_WORKSPACE/lance-graph-java/native/lgj-abi/target/release/liblgj_abi.so" \
+            -cp out com.adaworldapi.lancegraph.AllTests
+      - name: Compile the consumer suites
+        working-directory: lance-graph-java
+        run: |
+          javac --release 28 --enable-preview -cp java/out -d consumers/out \
+            $(find consumers -name '*.java')
+      # FOUR mains, not three. `trades` carries two — an allocation floor and a
+      # parity suite — and running only one of them would be the
+      # no-gate-with-extra-steps outcome: compiling a consumer proves it builds,
+      # never that its assertions hold.
+      - name: Run the consumer suites
+        working-directory: lance-graph-java
+        run: |
+          for main in com.adaworldapi.bricks.BricksAuthTest \
+                      com.adaworldapi.graph.GraphHopTest \
+                      com.adaworldapi.trades.TradesAllocationTest \
+                      com.adaworldapi.trades.TradesParityTest ; do
+            echo "::group::$main"
+            java --enable-preview --enable-native-access=ALL-UNNAMED \
+              -Dlgj.library="$GITHUB_WORKSPACE/lance-graph-java/native/lgj-abi/target/release/liblgj_abi.so" \
+              -cp "java/out:consumers/out" "$main"
+            echo "::endgroup::"
+          done

@@ -68,7 +68,21 @@ all report `isValue() == true` at runtime, and the full suite is **409 checks,
 0 failures** under `--release 28 --enable-preview` against a freshly built
 `liblgj_abi.so` (abi 0.11, `ndarray::simd avx512`) — byte-for-byte the same
 409 as the unflipped baseline on the same JDK. `bench/run.sh` carries the pin
-and the flag. Measured facts and the obtain route (most JDK hosts are
+and the flag.
+
+**THE CURRENT FIGURE LIVES HERE, AND ONLY HERE.** Measured 2026-09-22 on
+`origin/main` (`aef2382`): the core suite is **612 checks across 17 suites,
+0 failures**, against `abi 0.12, ndarray::simd avx512, profile release`; the
+four consumer mains add **153** (bricks 70, graph 68, trades 3 + 12). The 409 /
+16-suite / abi-0.11 figures above and below are the 2026-09-19 and 2026-09-16
+measurements, true on their dates and kept as the dated evidence they are — the
+Valhalla-flip comparison in particular is only meaningful against the baseline
+it was taken against, so it must NOT be restated forward. ⊘ Every OTHER site in
+this file that carried a live count has had the number REMOVED rather than
+re-pinned: one measurement restated in eight places goes stale in eight places,
+which is exactly what happened here (the count had drifted 409 -> 612 and the
+file still briefed every session with 409). A session that needs the current
+number runs the suite; the command is four minutes and is written out below. Measured facts and the obtain route (most JDK hosts are
 egress-blocked here; GitHub release *download* paths are not) live in
 `.claude/knowledge/jdk-toolchain-facts.md`.
 
@@ -597,7 +611,7 @@ to PR on that basis.
 
 > ⊘ **The first version of this section, written earlier the same day, led with
 > the apt route and was itself misleading.** Re-checked: **`/opt/jdks/jdk-26.0.2`
-> was present the whole time** (26.0.2.1), the suite runs `ALL PASSED (409
+> was present the whole time** (26.0.2.1), the suite ran `ALL PASSED (409
 > checks)` on it, and `.claude/knowledge/jdk-toolchain-facts.md` had already
 > named that exact path. Nothing needed installing. The session looked at
 > `java -version` and `/usr/lib/jvm` — **neither of which sees `/opt/jdks`** —
@@ -664,7 +678,7 @@ hunting a bug that is not there). So: build the `.so`, `javac`, `java`.
 # 1. the native artifact
 cd native/lgj-abi && cargo build --release          # -> target/release/liblgj_abi.so
 
-# 2. compile main + test together (56 files)
+# 2. compile main + test together (58 files)
 J=/usr/lib/jvm/temurin-26-jdk-amd64/bin      # or java-25-openjdk-amd64
 find java/src/main java/src/test -name '*.java' > /tmp/srcs.txt
 $J/javac -d /tmp/jout @/tmp/srcs.txt
@@ -689,7 +703,7 @@ the artifact you meant.
 | need | reachable here? | source |
 |---|---|---|
 | **Panama FFM** (`java.lang.foreign`, the whole `internal/ffm` membrane) | **YES** — final since 22 | Ubuntu `openjdk-25-jdk-headless`, or Adoptium `temurin-26-jdk` |
-| the 16-suite `AllTests` run (409 checks) | **YES**, verified on 25 AND 26 | either of the above |
+| the full `AllTests` run | **YES**, verified on 25 AND 26 | either of the above |
 | `valhalla-lab/src/stable` (records, JDK 26) | **YES** | Adoptium `temurin-26-jdk` |
 | `valhalla-lab/src/valhalla` (**value** records, JDK 27 EA) | not via apt | `https://jdk.java.net/valhalla/` — reachable, `HTTP 200` |
 
@@ -700,12 +714,15 @@ is a Valhalla EA feature, not a mainline one. `https://jdk.java.net/valhalla/`
 **is reachable through this environment's proxy** (verified `HTTP 200`), so
 that build is a download away rather than a blocker. `bench/` and
 `valhalla-lab/` are measurement arms, NOT gates; the merge gate is the Rust
-suite plus the 409-check Java run, and both are reachable here.
+suite, the full `AllTests` run, and the four consumer mains — all three
+dispatched by the `java-suites` job in `.github/workflows/lint.yml`, and all
+three reachable here. (Before that job existed they were LOCAL gates and `main`
+could be red unnoticed, which it was; see `ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE`.)
 
 **Consequence for every future session:** "the Java side could not be verified"
 is no longer an acceptable status line for this repo. The Rust half
-(`cargo test` in `native/lgj-abi`) and the Java half (409 checks) are BOTH
-runnable in this container, and a PR that claims the Java surface is unverified
+(`cargo test` in `native/lgj-abi`) and the Java half (`AllTests`, plus the four
+consumer mains) are BOTH runnable in this container, and a PR that claims the Java surface is unverified
 is claiming something that takes about four minutes to falsify.
 
 ## Missing-capability STOP rule
