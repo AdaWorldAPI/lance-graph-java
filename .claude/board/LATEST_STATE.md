@@ -1,3 +1,44 @@
+## 2026-09-22 — the Java gate is DISPATCHED, and one measurement stops being restated in eight places
+
+`ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE` is RESOLVED. `java-suites` in
+`.github/workflows/lint.yml` builds `liblgj_abi.so`, then runs the four
+`javac`/`java` command strings `java/README.md` documents, verbatim — no build
+tool was introduced, there still is none by design.
+
+- **The issue's first task was acquisition, not the job**, and it resolves by a
+  mechanism this container does not use — which is why the entry was right to
+  refuse to generalise from the local ladder. Read from primary sources:
+  setup-java's `normalizeVersion` sets `stable = false` on an `-ea` suffix, its
+  temurin installer then asks `release_type=ea`, and Adoptium's API (queried
+  live) serves `jdk-28+16-ea-beta` — the same build this container runs. The
+  container's blocker was gateway-blocked distribution hosts; a runner never had
+  that constraint. NOT pinned to `+16`: internal head pins are forbidden, and
+  what the suite needs is JEP 401 under preview, which every 28 EA build carries.
+- **Measured on `origin/main` (`aef2382`), every command verbatim:** core **612
+  checks / 17 suites / 0 failures** (abi 0.12, avx512, release), bricks **70**,
+  graph **68**, trades **3** and **12** — **765 checks across 5 entry points**,
+  all exit 0. All of it was gating nothing.
+- **Two counts were wrong on the way in.** FOUR consumer mains, not three
+  (`trades` carries two; running one of two would have been the
+  no-gate-with-extra-steps outcome the issue names). And root `CLAUDE.md`
+  briefed every session with `409 / 16 suites / abi 0.11`. Fixed
+  **structurally**, not re-pinned: the live count now exists in exactly ONE
+  dated place and every other site had its number REMOVED. One measurement
+  restated in eight places goes stale in eight places — which is what had
+  happened. The three surviving 409s are dated historical measurements kept as
+  evidence; the Valhalla-flip comparison is only meaningful against its own
+  baseline and must not be restated forward.
+- **Falsifier run, red-then-green, on the step body extracted from the
+  committed YAML rather than retyped.** Stale `0` pin: all four mains reached,
+  `::error::` named the culprit, exit 1. Restored: exit 0. Not fail-fast
+  deliberately — a bare `java` under `bash -e` aborts at the first red main, so
+  one broken consumer would mask three others and each round would reveal one.
+
+**OPEN:** dispatch itself is unproven locally and cannot be — whether a runner
+starts the job and resolves `28-ea` is proven only by this PR's own first run,
+which is the right falsifier because it is self-executing. If `28-ea` does not
+resolve there, the job goes red on the step that resolves it and says so.
+
 ## 2026-09-22 — D-LGJ-FOLD-5: the consumer stops asking sixteen times, and a red pin on `main` gets root-caused
 
 The consumer half of minor 12. `BricksQuery.sumBy()` was sixteen queries —
