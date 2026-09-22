@@ -492,6 +492,21 @@ public final class Downcalls {
     }
 
     /**
+     * ABI minor 12 symbol (docs/abi.md §20): the fused plan run straight into a grouped-sum
+     * terminal — one crossing returns one {@code i64} per group and no selection ever exists.
+     * Lazy per the minor-2..11 rule.
+     */
+    private static final class Minor12 {
+        static final MethodHandle PLAN_GROUP_SUM_I32 = mh("lgj_plan_group_sum_i32",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+
+        private Minor12() {}
+    }
+
+    /**
      * Sum one facet's 12-byte register, under {@code carving}, over the rows a mask selects.
      *
      * <p>Work is proportional to the mask's popcount, not the row count — this is a bulk op in
@@ -637,6 +652,29 @@ public final class Downcalls {
         }
         Status.check("lgj_reduce_i32", st);
         return outValue.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
+     * {@code GROUP BY groupLane SUM(valLane)} over the rows the plan selects, in ONE crossing
+     * (docs/abi.md §20, minor 12). {@code outSums} receives {@code nGroups} widened totals; a
+     * selected row whose key is past {@code nGroups} is dropped, never an error. With
+     * {@code viaRes != 0} the key is read THROUGH {@code groupLane} into {@code viaRes}'s
+     * {@code viaLane} (the fk-keyed form). {@code nOps == 0} is legal and means every row.
+     *
+     * <p>Bulk in the §6 sense: one pass over the predicate lanes, one read of the key and value
+     * lanes for the selected rows, no per-row and no per-group crossing.
+     */
+    public static void planGroupSumI32(long res, MemorySegment ops, int nOps, int groupLane,
+            int valLane, long viaRes, int viaLane, MemorySegment outSums, long nGroups) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor12.PLAN_GROUP_SUM_I32.invokeExact(res, ops, nOps, groupLane, valLane,
+                    viaRes, viaLane, outSums, nGroups);
+        } catch (Throwable t) {
+            throw wrap("lgj_plan_group_sum_i32", t);
+        }
+        Status.check("lgj_plan_group_sum_i32", st);
     }
 
     // ── row store (docs/abi.md §11, ABI minor 2) ─────────────────────────────────────────────

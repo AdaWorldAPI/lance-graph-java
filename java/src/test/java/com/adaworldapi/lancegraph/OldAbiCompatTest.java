@@ -108,6 +108,19 @@ public final class OldAbiCompatTest {
             }
         });
 
+        // Minor 12 — the grouped sum that never builds a selection. Like the minor-11 reduce
+        // above it is built entirely on NativePattern, so it is gated unconditionally here rather
+        // than inside the minor-2 block: against a genuinely minor-1 library it must name minor
+        // 12, never die on a missing symbol.
+        gate(c, loaded, 12, "View.sumByGroup", () -> {
+            try (NativePattern p = NativePattern.open(64, 0x1234L)) {
+                GroupTotals t = p.view().sumByGroup(Pattern.CLASS, Pattern.VALUE, 16);
+                if (t.groups() != 16) {
+                    throw new IllegalStateException("asked for 16 groups, got " + t.groups());
+                }
+            }
+        });
+
         // Minor 4 — mask complement. Needs a minor-2 store to build masks on, so it is only
         // meaningful once the library has minor 2 as well.
         if (loaded >= 2) {

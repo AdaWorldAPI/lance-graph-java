@@ -115,6 +115,64 @@ public final class View {
     }
 
     /**
+     * {@code SELECT key, SUM(value) FROM … WHERE <this view> GROUP BY key}, for keys
+     * {@code 0..groups}.
+     *
+     * <p><strong>One crossing</strong>, whatever the number of conditions, groups or rows. The
+     * chain and the grouped sum are one fused native program; nothing is selected first and
+     * nothing per group is asked separately. Before this existed the same question cost two
+     * crossings per group — a {@code sumOf} over {@code where(key.eq(g))} for each {@code g} —
+     * which the {@code bricks} consumer measured at 32 for 16 groups; it is now 1 for any number.
+     *
+     * <p>A key no selected row carries totals {@code 0}. A selected row whose key is
+     * {@code >= groups} belongs to no requested group and is dropped, as a {@code WHERE key < n}
+     * would drop it; ask for more groups to see it.
+     *
+     * @param key an unsigned 32-bit column whose values are the group keys
+     * @param value the signed 32-bit column to sum, widened to 64 bits
+     * @param groups how many keys to answer for, {@code > 0}
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 12
+     */
+    public GroupTotals sumByGroup(U32Field key, I32Field value, int groups) {
+        java.util.Objects.requireNonNull(key, "key");
+        java.util.Objects.requireNonNull(value, "value");
+        requirePositiveGroups(groups);
+        return owner.sumByGroup(predicates, key, value, groups);
+    }
+
+    /**
+     * {@code SELECT via.viaKey, SUM(value) FROM this JOIN via ON via.row = this.key … GROUP BY
+     * via.viaKey} — the grouped sum keyed through a second resource, still <strong>one
+     * crossing</strong>.
+     *
+     * <p>{@code key} holds, for each row here, the row index in {@code via} it refers to; the
+     * group of that row is the {@code viaKey} value found there. The lookup is fused into the
+     * native fold — no selection on either resource, no remapped key column. A {@code key} that
+     * names no row of {@code via} drops the row, as an inner join would.
+     *
+     * @param via the resource whose {@code viaKey} column supplies the group; may be this view's
+     *     own resource
+     * @throws AbiMismatchException if the loaded library reports ABI minor &lt; 12
+     */
+    public GroupTotals sumByGroupVia(U32Field key, NativePattern via, U32Field viaKey,
+            I32Field value, int groups) {
+        java.util.Objects.requireNonNull(key, "key");
+        java.util.Objects.requireNonNull(via, "via");
+        java.util.Objects.requireNonNull(viaKey, "viaKey");
+        java.util.Objects.requireNonNull(value, "value");
+        requirePositiveGroups(groups);
+        return owner.sumByGroupVia(predicates, key, via, viaKey, value, groups);
+    }
+
+    private static void requirePositiveGroups(int groups) {
+        if (groups <= 0) {
+            throw new IllegalArgumentException(
+                    "groups must be positive (the number of key values to answer for), was "
+                            + groups);
+        }
+    }
+
+    /**
      * A projection of one column through this view.
      *
      * <p>See {@link Lens} for what this concept is and what it is deliberately not yet.

@@ -379,6 +379,37 @@ public final class Engine {
         return new ReduceOutcome(value, present);
     }
 
+    /**
+     * The grouped sum that never builds a selection (docs/abi.md §20, ABI minor 12):
+     * {@code GROUP BY groupLane SUM(valLane)} over the rows {@code plan} selects, evaluated as
+     * ONE native program and returned as one widened total per group. Unlike every reduce
+     * above, no mask handle is involved at any point — the plan is not evaluated INTO anything;
+     * the fold reads it tile by tile and lands only the group totals.
+     *
+     * <p>{@code viaResource != 0} selects the fk-keyed form: the group of a row is
+     * {@code viaLane[groupLane[row]]}, read on {@code viaResource}, with no partner-side
+     * selection and no remapped key lane (the indirection is fused inside the native terminal).
+     *
+     * <p>An empty {@code plan} is legal here and means every row — the ABI has no destination
+     * mask for Java to fill on its own, so the whole-lane case crosses as a plan of zero ops
+     * rather than being answered locally. Requires ABI minor &gt;= 12.
+     *
+     * <p>The returned array is sized by {@code groups} — the shape of the QUESTION the caller
+     * typed, never by the row count — which is what keeps it on the right side of the
+     * materialization rule (the eighth named site; see the repo's zero-copy section).
+     */
+    public static long[] groupSumI32(long resource, List<PlanOp> plan, int groupLane, int valLane,
+            long viaResource, int viaLane, int groups) {
+        Abi.requireMinor(12);
+        MemorySegment ops = plan.isEmpty() ? MemorySegment.NULL : marshal(plan);
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG, groups);
+            Downcalls.planGroupSumI32(resource, ops, plan.size(), groupLane, valLane, viaResource,
+                    viaLane, out, groups);
+            return out.toArray(ValueLayout.JAVA_LONG);
+        }
+    }
+
     // ── mask complement + hop (docs/abi.md §13, ABI minor ≥ 4) ─────────────────────────────
     //
     // Same requireMinor-before-any-downcall discipline as the row store section above: a Java

@@ -42,6 +42,19 @@ use crate::abi::{
 };
 use lance_graph_mask_risc::{MaskOp, Operand, Pred, Program, Terminal};
 
+/// Which lane a grouped sum groups by — this table's own `u32` lane, or a
+/// `u32` lane of ANOTHER table read through a `u32` key lane of this one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GroupKey {
+    /// `GROUP BY key` where `key` is a `U32` lane of the executing table.
+    Local(u16),
+    /// `GROUP BY other.key` read as `foreign.lanes[key][fk[i]]` — `fk` is a
+    /// `U32` lane of the executing table, `key` indexes the `Foreign::lanes`
+    /// the caller supplies. The indirection is fused inside the terminal; no
+    /// remapped key lane and no partner-side mask ever exist.
+    Via { fk: u16, key: u16 },
+}
+
 /// Scratch slots the lowering ever names: slot 0 is the accumulator (the old
 /// `acc`, now living in the caller's arena rather than in a per-call `vec!`),
 /// slot 1 the per-op predicate destination (the old `scratch`).
@@ -106,6 +119,53 @@ pub(crate) fn lower_plan(ops: &[LgjOpDesc]) -> Option<Lowered> {
             mask: Operand::Scratch(ACC_SLOT),
         },
     )))
+}
+
+/// Lower a validated plan STRAIGHT INTO a grouped sum — the same prefix
+/// rewrite and survivor skip as [`lower_plan`], ending in
+/// [`Terminal::GroupSumI32`] / [`Terminal::GroupSumViaI32`] over the
+/// accumulator instead of [`Terminal::Keep`].
+///
+/// This is the shape that lets a `GROUP BY … SUM` cross the membrane once
+/// and return only group totals: no `Keep` lands a population anywhere, the
+/// accumulator lives in tile-local scratch, and the terminal folds `val` into
+/// the caller's `i64` buffer tile by tile.
+///
+/// # The all-rows arm
+///
+/// [`lower_plan`] answers `AllRows` without a program because its caller can
+/// fill the destination mask itself. A grouped sum has no destination mask
+/// to fill, so the all-rows case — an empty plan, or one whose every combine
+/// is OR — needs an accumulator that IS every row. That is
+/// [`Pred::Range`]`{ lo: 0, hi: n_rows }`: a three-pass fill over the tile's
+/// words (`mask_set_range`), reading no lane. It is the ONLY `Range` this
+/// crate ever emits, and with `hi == n_rows` exactly it can never leave the
+/// lane, which is what keeps `exec_error_to_status`'s `RangeOutOfBounds` arm
+/// an internal-bug mapping — pinned by
+/// `range_falsifier::the_group_sum_range_is_the_whole_lane_and_nothing_else`.
+///
+/// `n_rows` is `u32` because [`Pred::Range`] is; a caller with more rows than
+/// that cannot take the all-rows arm and must say so before lowering.
+pub(crate) fn lower_group_sum(
+    ops: &[LgjOpDesc],
+    n_rows: u32,
+    group: GroupKey,
+    val: u16,
+) -> Option<Program> {
+    let mask = Operand::Scratch(ACC_SLOT);
+    let terminal = match group {
+        GroupKey::Local(key) => Terminal::GroupSumI32 { mask, key, val },
+        GroupKey::Via { fk, key } => Terminal::GroupSumViaI32 { mask, fk, key, val },
+    };
+    let program_ops = match lower_plan(ops)? {
+        Lowered::AllRows => vec![MaskOp::Pred {
+            pred: Pred::Range { lo: 0, hi: n_rows },
+            under: None,
+            dst: ACC_SLOT,
+        }],
+        Lowered::Program(p) => p.ops,
+    };
+    Some(Program::new(program_ops, terminal))
 }
 
 /// One `LgjOpDesc` opcode + operand → one `Pred`.
@@ -182,6 +242,12 @@ mod range_falsifier {
     /// whole purpose: it forces the author to decide, deliberately and
     /// visibly, what a caller should see when a range leaves the lane — rather
     /// than inheriting `LGJ_ERR_ALLOCATION_FAILED`, which would then be a lie.
+    ///
+    /// Minor 12 did gain ONE `Range` — [`lower_group_sum`]'s all-rows arm — and
+    /// decided it deliberately: that range is always `0..n_rows`, so it cannot
+    /// leave the lane and the internal-bug mapping stays true. It is pinned by
+    /// the sibling test below; this sweep still holds for every opcode through
+    /// `lower_plan`, which is the path a caller's operand reaches.
     #[test]
     fn no_opcode_lowers_to_pred_range() {
         let mut lowered_count = 0usize;
@@ -218,6 +284,70 @@ mod range_falsifier {
         assert!(
             lowered_count >= 9,
             "the sweep lowered only {lowered_count} programs — it is not exercising the lowering"
+        );
+    }
+
+    /// The one `Range` this crate emits is the whole lane, in the all-rows arm
+    /// only. An empty plan and an all-OR plan both take it; a plan with an AND
+    /// emits none. Any other `Range` would make `exec_error_to_status`'s
+    /// `RangeOutOfBounds` arm reachable through the ABI, and this is the test
+    /// that would say so.
+    #[test]
+    fn the_group_sum_range_is_the_whole_lane_and_nothing_else() {
+        let or_op = LgjOpDesc {
+            op: LGJ_OP_EQ_U32,
+            lane_id: 1,
+            operand: 7,
+            combine: LGJ_COMBINE_OR,
+            _reserved: 0,
+        };
+        let and_op = LgjOpDesc {
+            combine: LGJ_COMBINE_AND,
+            ..or_op
+        };
+        let ranges = |ops: &[LgjOpDesc]| -> Vec<(u32, u32)> {
+            let p = lower_group_sum(ops, 1000, GroupKey::Local(1), 2).expect("lowers");
+            p.ops
+                .iter()
+                .filter_map(|op| match op {
+                    MaskOp::Pred {
+                        pred: Pred::Range { lo, hi },
+                        ..
+                    } => Some((*lo, *hi)),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(ranges(&[]), vec![(0, 1000)], "an empty plan is every row");
+        assert_eq!(
+            ranges(&[or_op, or_op]),
+            vec![(0, 1000)],
+            "an all-OR plan is every row"
+        );
+        assert!(
+            ranges(&[and_op]).is_empty(),
+            "a plan with an AND needs no range"
+        );
+        assert!(ranges(&[or_op, and_op, or_op]).is_empty());
+        // And the terminal is the grouped sum over the accumulator, both shapes.
+        let local = lower_group_sum(&[and_op], 1000, GroupKey::Local(1), 2).unwrap();
+        assert_eq!(
+            local.terminal,
+            Terminal::GroupSumI32 {
+                mask: Operand::Scratch(ACC_SLOT),
+                key: 1,
+                val: 2
+            }
+        );
+        let via = lower_group_sum(&[], 1000, GroupKey::Via { fk: 1, key: 0 }, 2).unwrap();
+        assert_eq!(
+            via.terminal,
+            Terminal::GroupSumViaI32 {
+                mask: Operand::Scratch(ACC_SLOT),
+                fk: 1,
+                key: 0,
+                val: 2
+            }
         );
     }
 }

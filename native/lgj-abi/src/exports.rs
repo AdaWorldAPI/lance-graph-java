@@ -1719,11 +1719,15 @@ fn validate_plan(pattern: &ResourceEntry, ops: &[LgjOpDesc]) -> Result<(), i32> 
 /// **Every arm here is unreachable through the ABI**, and saying so is worth
 /// more than implying otherwise. `validate_plan` runs first and rejects an
 /// unknown opcode, a bad combine, an out-of-range lane and a kind mismatch
-/// before the lowering is even built; the lowering names no input plane
-/// (`Planes::masks` is `&[]`), no sum terminal, no blend and no `Pred::Range`.
-/// What is left — the scratch-sizing family, `ScratchReadBeforeWrite`,
-/// `GateAliasesDst`, `RangeOutOfBounds` — would be a bug in THIS file, not in
-/// a caller's plan.
+/// before the lowering is even built; the `Keep` lowering names no input
+/// plane (`Planes::masks` is `&[]`), no sum terminal, no blend and no
+/// `Pred::Range`. The grouped-sum lowering (minor 12) names a sum terminal
+/// and ONE `Range` — always `0..n_rows`, so `RangeOutOfBounds` stays a bug in
+/// this file; its `SumRowBound` needs more than `2^32` rows, which no pattern
+/// this crate can open reaches; and its foreign-lane checks are done here,
+/// before lowering, against the resolved `via` resource. What is left — the
+/// scratch-sizing family, `ScratchReadBeforeWrite`, `GateAliasesDst`,
+/// `RangeOutOfBounds` — would be a bug in THIS file, not in a caller's plan.
 ///
 /// So the map exists to turn such a bug into a status a caller can see
 /// instead of a panic, and its arms are deliberately NOT claimed to be
@@ -2138,6 +2142,295 @@ pub unsafe extern "C" fn lgj_reduce_i32(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Grouped reduction (ABI minor ≥ 12) — the fused plan run STRAIGHT INTO a
+// grouped-sum terminal (docs/abi.md §20).
+// ───────────────────────────────────────────────────────────────────────────
+
+// Nine arguments because the ABI symbol has nine; a struct would be a
+// second spelling of the same signature with nothing to check it against.
+#[allow(clippy::too_many_arguments)]
+fn plan_group_sum_impl(
+    res: u64,
+    ops: *const LgjOpDesc,
+    n_ops: u32,
+    group_lane: u32,
+    val_lane: u32,
+    via_res: u64,
+    via_lane: u32,
+    out_sums: *mut i64,
+    n_groups: u64,
+) -> i32 {
+    // An empty plan is LEGAL here, unlike `lgj_plan_eval`: there is no
+    // destination mask a caller could fill on its own, so "every row" has to
+    // be a program (the whole-lane `Range`, `plan_lower::lower_group_sum`).
+    // `ops` may therefore be null exactly when `n_ops == 0`.
+    if out_sums.is_null() || (n_ops > 0 && ops.is_null()) {
+        return LGJ_ERR_NULL_ARGUMENT;
+    }
+    // A zero-length `out_sums` is no output buffer: no group can land
+    // anywhere, and `mask_risc` would refuse it as a missing sink. Reported
+    // as the argument defect it is rather than as the executor's refusal.
+    if n_groups == 0 {
+        return LGJ_ERR_NULL_ARGUMENT;
+    }
+    let groups = match usize::try_from(n_groups) {
+        Ok(g) if g <= isize::MAX as usize / std::mem::size_of::<i64>() => g,
+        _ => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    let pattern = match registry::resolve_kind(res, LGJ_RESOURCE_PATTERN) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    // SAFETY: when `n_ops > 0`, `ops` is non-null (checked) and the caller
+    // states it points at `n_ops` contiguous `LgjOpDesc` — the same contract
+    // as `lgj_plan_eval`. When `n_ops == 0` no pointer is read at all.
+    let ops: &[LgjOpDesc] = if n_ops == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(ops, n_ops as usize) }
+    };
+    if !ops.is_empty() {
+        if let Err(e) = validate_plan(&pattern, ops) {
+            return e;
+        }
+    }
+
+    // The group lane is a `U32` lane of THIS table (the key, or the foreign
+    // key when `via_res` is given); the value lane is an `I32` lane of this
+    // table. Both are checked before anything is lowered or written.
+    let group_lane16 = match u16::try_from(group_lane) {
+        Ok(l) => l,
+        Err(_) => return LGJ_ERR_INVALID_LANE,
+    };
+    let val_lane16 = match u16::try_from(val_lane) {
+        Ok(l) => l,
+        Err(_) => return LGJ_ERR_INVALID_LANE,
+    };
+    match lane_view(&pattern, group_lane) {
+        Ok(LaneView::U32(_)) => {}
+        Ok(_) => return LGJ_ERR_LANE_KIND_MISMATCH,
+        Err(e) => return e,
+    }
+    match lane_view(&pattern, val_lane) {
+        Ok(LaneView::I32(_)) => {}
+        Ok(_) => return LGJ_ERR_LANE_KIND_MISMATCH,
+        Err(e) => return e,
+    }
+    // `via_res == 0` is "no second table" — 0 is never a live handle (the
+    // registry's generation is never zero), so it cannot alias a resource.
+    let via = if via_res == 0 {
+        None
+    } else {
+        let entry = match registry::resolve_kind(via_res, LGJ_RESOURCE_PATTERN) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        match lane_view(&entry, via_lane) {
+            Ok(LaneView::U32(_)) => {}
+            Ok(_) => return LGJ_ERR_LANE_KIND_MISMATCH,
+            Err(e) => return e,
+        }
+        Some(entry)
+    };
+
+    let n_rows = pattern.n_rows;
+    let rows = match usize::try_from(n_rows) {
+        Ok(r) => r,
+        Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    // `Pred::Range` is `u32`-bounded, and so (via `MASKED_SUM_I32_MAX_ROWS`)
+    // is the sum terminal's carry: a pattern past `2^32 - 1` rows cannot be
+    // grouped by this symbol at all, and says so before lowering.
+    let rows32 = match u32::try_from(n_rows) {
+        Ok(r) => r,
+        Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    let group = if via.is_some() {
+        // The one foreign lane this call supplies sits at index 0 of
+        // `Foreign::lanes`; the program's own lane ids are untouched.
+        plan_lower::GroupKey::Via {
+            fk: group_lane16,
+            key: 0,
+        }
+    } else {
+        plan_lower::GroupKey::Local(group_lane16)
+    };
+    let program = match plan_lower::lower_group_sum(ops, rows32, group, val_lane16) {
+        Some(p) => p,
+        // Unreachable: `validate_plan` already rejected every unknown opcode.
+        None => return LGJ_ERR_UNKNOWN_OPCODE,
+    };
+
+    let fixture = match pattern.fixture() {
+        Some(f) => f,
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    // Same index order as `plan_eval_impl`, pinned by the same `const _`
+    // assertions: LANE_IDS, LANE_CLASSES, LANE_VALUES.
+    let lanes = [
+        LaneRef::U64(fixture.ids()),
+        LaneRef::U32(fixture.classes()),
+        LaneRef::I32(fixture.values()),
+    ];
+    let planes = Planes {
+        n_rows: rows,
+        masks: &[],
+        lanes: &lanes,
+    };
+    // The foreign lane, borrowed from the `via` pattern for the length of
+    // this call. Its length is the OTHER table's row count and is never
+    // checked against `n_rows` — a key past it drops the row (zero fallback,
+    // `mask_risc`'s contract), it does not error.
+    let via_lanes: [LaneRef<'_>; 1];
+    let foreign = match &via {
+        Some(entry) => {
+            let classes = match lane_view(entry, via_lane) {
+                Ok(LaneView::U32(v)) => v,
+                // Checked above; kept as a status rather than an unwrap.
+                _ => return LGJ_ERR_LANE_KIND_MISMATCH,
+            };
+            via_lanes = [LaneRef::U32(classes)];
+            Foreign {
+                planes: &[],
+                lanes: &via_lanes,
+            }
+        }
+        None => Foreign::NONE,
+    };
+
+    // TILED, exactly as `plan_eval_impl`: the scratch is `SLOTS ×
+    // tile_words_for(rows)` words however many rows the resource holds, and
+    // the terminal adds each tile's contribution into the caller's `i64`
+    // buffer — the demanded sink, and the ONLY thing sized by the answer
+    // rather than by a tile. No `Keep`, no mask handle, no population.
+    let tile = tile_words_for(rows);
+    let need = match scratch_words_for(tile, plan_lower::SLOTS as usize) {
+        Some(n) => n,
+        None => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    // SAFETY: non-null (checked) and the caller states it points at
+    // `n_groups` contiguous, writable `i64`. `execute_into` validates the
+    // whole program before its first write to this slice, so a refused call
+    // leaves it byte-for-byte as it was; on `LGJ_OK` every element holds its
+    // group's sum (zero for a group no selected row names).
+    let out: &mut [i64] = unsafe { std::slice::from_raw_parts_mut(out_sums, groups) };
+    PLAN_SCRATCH.with(|cell| {
+        let mut buf = cell.borrow_mut();
+        if buf.len() < need {
+            buf.resize(need, 0);
+        }
+        let mut scratch = match Scratch::over(&mut buf[..need], tile, plan_lower::SLOTS as usize) {
+            Ok(s) => s,
+            Err(e) => return exec_error_to_status(e),
+        };
+        match execute_into(&program, &planes, &foreign, &mut scratch, Out::I64(out)) {
+            Ok(Value::GroupSummed) => LGJ_OK,
+            // The lowering emits exactly one terminal and it is a grouped
+            // sum; any other value means this file built a program it did
+            // not intend to.
+            Ok(_) => LGJ_ERR_ALLOCATION_FAILED,
+            Err(e) => exec_error_to_status(e),
+        }
+    })
+}
+
+/// `GROUP BY group_lane SUM(val_lane)` over the rows the plan selects — **one
+/// crossing, one program, and no selection anywhere** (ABI minor ≥ 12,
+/// `docs/abi.md` §20).
+///
+/// # Why this symbol exists
+///
+/// Every reduction Java could ask for before minor 12 paid for a selection
+/// first: `lgj_plan_eval` landed the plan's answer in a mask handle, and a
+/// `lgj_reduce_*` then read that mask. The selection was never HELD by Java
+/// — it lived in a native mask — but it was still a population-sized thing
+/// that existed only to be consumed by the very next fold, which is the
+/// intermediate materialisation the fold algebra exists to remove. A
+/// `GROUP BY` made it worse by a factor of the group count: the `bricks`
+/// consumer's `sumBy()` measured **32 crossings for 16 groups** (one plan
+/// evaluation and one reduce per group).
+///
+/// This symbol lowers the plan and the grouped sum as ONE
+/// `mask_risc::Program` — the same prefix rewrite and survivor skip as
+/// `lgj_plan_eval` (`plan_lower::lower_group_sum`), ending in
+/// `Terminal::GroupSumI32` over the accumulator instead of `Keep`. The
+/// executor runs it tile by tile; the accumulator is `TILE_WORDS` of scratch;
+/// the terminal folds `val_lane[i]` into `out_sums[group_lane[i]]` for every
+/// selected row of the tile and moves on. The only state sized by the answer
+/// is `out_sums` itself, and the only thing that crosses back is one `i64`
+/// per group. 16 groups cost one crossing; so do 10⁹ rows.
+///
+/// # Semantics
+///
+/// - `ops`/`n_ops` are the fused plan, exactly as `lgj_plan_eval` reads them
+///   (accumulator starts as all rows; each op combines per its `combine`).
+///   **`n_ops == 0` is legal here** and means every row — there is no
+///   destination mask for a caller to fill itself, so the empty plan lowers
+///   to a whole-lane range rather than being refused (`EMPTY_PLAN` is
+///   `lgj_plan_eval`'s answer, not this symbol's).
+/// - `group_lane` is a `U32` lane of `res`; `val_lane` an `I32` lane of `res`.
+/// - `out_sums[g]` receives `Σ val_lane[i]` over selected rows `i` with
+///   `group_lane[i] == g`, for `g < n_groups`; a selected row whose key is
+///   `>= n_groups` names no group and is dropped, never an error. Every
+///   element is written on `LGJ_OK` (zero for a group no row names); none is
+///   written on any failure.
+/// - **`via_res != 0` is the fk-keyed form**: `group_lane` is then read as a
+///   foreign KEY into `via_res` (another pattern resource), and the group of
+///   row `i` is `via_lane[group_lane[i]]` — `via_lane` a `U32` lane of
+///   `via_res`. `SUM(line.amount) GROUP BY partner.country` in one program,
+///   with no partner-side mask and no remapped key lane: the indirection is
+///   fused inside `Terminal::GroupSumViaI32`. A key that names no row of
+///   `via_res` drops the row (zero fallback at both hops). `via_res` may
+///   equal `res`. `via_lane` is ignored when `via_res == 0`.
+///
+/// # Statuses
+///
+/// `NULL_ARGUMENT` for a null `out_sums`, a null `ops` with `n_ops > 0`, or
+/// `n_groups == 0`; `INVALID_HANDLE` / `WRONG_RESOURCE_KIND` for `res` or a
+/// non-zero `via_res` that is not a live pattern; every plan defect exactly
+/// as `lgj_plan_eval` reports it; `INVALID_LANE` / `LANE_KIND_MISMATCH` for a
+/// `group_lane` that is not `U32`, a `val_lane` that is not `I32`, or a
+/// `via_lane` that is not `U32` on `via_res`; `LENGTH_OVERFLOW` for a pattern
+/// past `2^32 - 1` rows. All of it before any write.
+///
+/// # Bulk (§6)
+///
+/// `O(rows)` in ONE pass over the predicate lanes plus, for the selected
+/// rows only, one read of the key and value lanes. No per-row crossing, no
+/// per-group crossing.
+///
+/// # Safety
+///
+/// A null pointer is *handled*, not UB: `NULL_ARGUMENT`. Beyond that, `ops`
+/// must point to `n_ops` contiguous, initialized `LgjOpDesc` (24 bytes, align
+/// 8) when `n_ops > 0`, and `out_sums` to `n_groups` writable, aligned `i64`;
+/// both stay valid for the call and neither is touched after the null checks
+/// except as stated above.
+///
+/// `unsafe` here is a note to Rust callers linking the `rlib`. The JVM,
+/// which is the real caller, has no such concept — it upholds the same
+/// contract by construction, because every pointer it passes comes from a
+/// `MemorySegment` whose size and alignment it derived from the manifest.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_plan_group_sum_i32(
+    res: u64,
+    ops: *const LgjOpDesc,
+    n_ops: u32,
+    group_lane: u32,
+    val_lane: u32,
+    via_res: u64,
+    via_lane: u32,
+    out_sums: *mut i64,
+    n_groups: u64,
+) -> i32 {
+    guard(|| {
+        plan_group_sum_impl(
+            res, ops, n_ops, group_lane, val_lane, via_res, via_lane, out_sums, n_groups,
+        )
+    })
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Graph traversal (ABI minor ≥ 4) — the first symbol gated by the
 // lance-graph-contract ClassView/FieldMask LAW (docs/abi.md §13).
 // ───────────────────────────────────────────────────────────────────────────
@@ -2393,6 +2686,10 @@ mod tests {
     use super::*;
     use crate::fixture::{Fixture, LANE_CLASSES, LANE_IDS, LANE_VALUES};
 
+    /// Minor 12: the grouped sum that never builds a selection — parity
+    /// against the two-crossing path it replaces, the scalar oracle, the
+    /// fk-keyed form against a hand-walked join, and every refusal.
+    mod group_sum;
     /// The lowering differential: this crate's `plan_lower` (a flat op list)
     /// against `lance-graph-quack`'s `lower` (a Boolean tree), both producing
     /// a `mask_risc::Program`. Two implementations of one law; until this
@@ -3988,6 +4285,29 @@ mod tests {
             out_present: *mut u32,
         ) -> i32 {
             unsafe { lgj_reduce_i32(res, lane, reduce_op, m, out_value, out_present) }
+        }
+    }
+
+    mod call12 {
+        use super::*;
+
+        #[allow(clippy::too_many_arguments)]
+        pub fn plan_group_sum_i32(
+            res: u64,
+            ops: *const LgjOpDesc,
+            n_ops: u32,
+            group_lane: u32,
+            val_lane: u32,
+            via_res: u64,
+            via_lane: u32,
+            out_sums: *mut i64,
+            n_groups: u64,
+        ) -> i32 {
+            unsafe {
+                lgj_plan_group_sum_i32(
+                    res, ops, n_ops, group_lane, val_lane, via_res, via_lane, out_sums, n_groups,
+                )
+            }
         }
     }
 

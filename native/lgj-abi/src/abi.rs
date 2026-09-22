@@ -82,7 +82,18 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// [`LgjOpDesc`] op-codes that cost no symbol at all
 /// ([`LGJ_OP_NE_U32`] … [`LGJ_OP_TERNARY_MATCH_U32`]). No new status and no
 /// manifest growth, so a minor-10 Java loads and sees none of it.
-pub const LGJ_ABI_MINOR: u32 = 11;
+///
+/// **Minor 12** (docs/abi.md §20): [`crate::exports::lgj_plan_group_sum_i32`]
+/// — the fused plan run STRAIGHT INTO a grouped-sum terminal. Until now every
+/// Java reduction paid for a selection first (`lgj_plan_eval` into a mask,
+/// then `lgj_reduce_*` over it); this symbol lowers the plan and the
+/// `GROUP BY key SUM(val)` as ONE `mask_risc::Program`, so the only
+/// population-sized state is a tile-local scratch word and what crosses back
+/// is one `i64` per group. A second table's `u32` lane may be read THROUGH a
+/// key lane of this one (`via_res`/`via_lane`, the fk-keyed group sum) with
+/// no partner-side mask and no second program. No new status and no manifest
+/// growth, so a minor-11 Java loads and sees none of it.
+pub const LGJ_ABI_MINOR: u32 = 12;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///

@@ -226,6 +226,41 @@ public final class NativePattern implements NativeResource, AutoCloseable {
         return reduceI32(predicates, field, Layouts.REDUCE_OP_MAX);
     }
 
+    /**
+     * {@code GROUP BY key SUM(value)} over the rows the plan selects, as ONE native program
+     * (docs/abi.md §20). No selection is built: the plan is not evaluated into a mask and then
+     * reduced per group, it is folded straight into the group totals tile by tile. An empty
+     * plan crosses as such — the ABI treats it as every row — rather than being routed through
+     * the cached all-rows selection {@link #sumOf} uses, because here there is nothing for a
+     * selection to be consumed by.
+     */
+    GroupTotals sumByGroup(List<Predicate> predicates, U32Field key, I32Field value, int groups) {
+        requireOpen("sumByGroup()");
+        synchronized (lock) {
+            requireOpen("sumByGroup()");
+            return new GroupTotals(Engine.groupSumI32(handle, plan(predicates),
+                    key.lane().index(), value.lane().index(), 0L, 0, groups));
+        }
+    }
+
+    /**
+     * The fk-keyed form of {@link #sumByGroup}: the group of a row is {@code viaKey} read on
+     * {@code via} at the row index this resource's {@code key} names — {@code SUM(line.amount)
+     * GROUP BY partner.country}, still one program and one crossing, with no selection on either
+     * resource. {@code via} may be this resource.
+     */
+    GroupTotals sumByGroupVia(List<Predicate> predicates, U32Field key, NativePattern via,
+            U32Field viaKey, I32Field value, int groups) {
+        requireOpen("sumByGroupVia()");
+        via.requireOpen("sumByGroupVia() via");
+        synchronized (lock) {
+            requireOpen("sumByGroupVia()");
+            return new GroupTotals(Engine.groupSumI32(handle, plan(predicates),
+                    key.lane().index(), value.lane().index(), via.handle(),
+                    viaKey.lane().index(), groups));
+        }
+    }
+
     /** Materialise a selection the caller owns and closes. */
     Mask selectInto(List<Predicate> predicates) {
         requireOpen("select()");

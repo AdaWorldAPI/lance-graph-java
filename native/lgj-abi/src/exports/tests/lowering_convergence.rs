@@ -68,7 +68,7 @@
 use super::*;
 
 use lance_graph_mask_risc::Program;
-use lance_graph_quack::{Agg, Cmp, Col, Filter, Query};
+use lance_graph_quack::{Agg, Cmp, Col, Filter, Mask as QuackMask, Query};
 
 /// `n = 1000, seed = 33` — the identical fixture
 /// `pr4_matrix.rs::combine_mode_products_agree_with_the_oracle` sweeps, so
@@ -652,5 +652,71 @@ fn every_opcode_maps_to_the_same_predicate_in_both_lowerings() {
         SWEEP_N,
         &[before, swapped, after],
         "TCAM swapped halves at position 1 of 3",
+    );
+}
+
+/// The minor-12 arm of the same differential: `plan_lower::lower_group_sum`
+/// against `lance_graph_quack::lower` with `Agg::GroupSumI32`, both run
+/// through `execute_into` into an `Out::I64` — one law, two lowerings, now
+/// for the grouped sum as well as the count. The all-rows plan is included:
+/// quack spells it `Filter::Plane(alpha)` over a resident all-ones plane,
+/// `plan_lower` spells it the whole-lane `Range`; they must total the same.
+#[test]
+fn grouped_sums_agree_with_quack_over_the_combine_sweep() {
+    let fixture = Fixture::generate(SWEEP_N, SWEEP_SEED).expect("fixture");
+    let lanes = [
+        LaneRef::U64(fixture.ids()),
+        LaneRef::U32(fixture.classes()),
+        LaneRef::I32(fixture.values()),
+    ];
+    let words = (SWEEP_N as usize).div_ceil(64);
+    let mut alpha = vec![u64::MAX; words];
+    let tail = (SWEEP_N as usize) % 64;
+    if tail != 0 {
+        alpha[words - 1] = (1u64 << tail) - 1;
+    }
+    let alpha_ref: &[u64] = &alpha;
+    let planes = Planes {
+        n_rows: SWEEP_N as usize,
+        masks: &[alpha_ref],
+        lanes: &lanes,
+    };
+    let run_groups = |p: &Program| -> Vec<i64> {
+        let mut scratch = Scratch::for_program(p, planes.n_rows).expect("addressable");
+        let mut out = vec![0i64; 16];
+        let v = execute_into(p, &planes, &Foreign::NONE, &mut scratch, Out::I64(&mut out))
+            .expect("runs");
+        assert!(matches!(v, Value::GroupSummed), "not a grouped sum: {v:?}");
+        out
+    };
+    let mut distinct = std::collections::HashSet::new();
+    let mut check = |label: String, ops: Vec<LgjOpDesc>| {
+        let ours = plan_lower::lower_group_sum(
+            &ops,
+            SWEEP_N as u32,
+            plan_lower::GroupKey::Local(LANE_CLASSES as u16),
+            LANE_VALUES as u16,
+        )
+        .expect("lowers");
+        let filter = fold_to_tree(&ops).unwrap_or(Filter::Plane(QuackMask(0)));
+        let q = Query {
+            filter,
+            agg: Agg::GroupSumI32 {
+                key: Col(LANE_CLASSES as u16),
+                val: Col(LANE_VALUES as u16),
+            },
+        };
+        let theirs = lance_graph_quack::lower(&q).expect("quack lowers");
+        let a = run_groups(&ours);
+        let b = run_groups(&theirs);
+        assert_eq!(a, b, "{label}: plan_lower's grouped sum vs quack's");
+        distinct.insert(a);
+    };
+    check("n=0 []".into(), Vec::new());
+    for_each_combine_vector(&mut check);
+    assert!(
+        distinct.len() >= 4,
+        "anti-vacuity: {} distinct answers",
+        distinct.len()
     );
 }
