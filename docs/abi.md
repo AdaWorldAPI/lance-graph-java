@@ -62,8 +62,9 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 29 symbols (minor 11's three additions are argued
-  in §19, and the same section argues the SEVEN capabilities it deliberately did
+- It is **small** — currently 30 symbols (minor 12's one addition — the grouped
+  sum that never builds a selection — is argued in §20; 29 at minor 11, whose three
+  additions are argued in §19, and the same section argues the SEVEN capabilities it deliberately did
   NOT spend a symbol on; 26 at minor 10, whose one addition — the
   columnar constructor — is argued in §18; 25 at minor 9, whose one addition is argued
   in §11: a reduction Java was performing on the wrong side of the membrane,
@@ -85,7 +86,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 11   // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 12   // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -145,6 +146,17 @@ required — a gate that rejected everything would satisfy a rejection-only test
 
 ### Minor version history
 
+- **Minor 12** (2026-09-22) — `lgj_plan_group_sum_i32` (§20): the fused plan
+  run STRAIGHT INTO a grouped-sum terminal. Every reduction before this minor
+  paid for a selection first — `lgj_plan_eval` into a mask, then a
+  `lgj_reduce_*` over it — and a `GROUP BY` paid it once per group (the
+  `bricks` consumer measured 32 crossings for 16). One symbol lowers the plan
+  and `GROUP BY key SUM(val)` as ONE `mask_risc::Program` whose accumulator is
+  tile-local scratch and whose only answer-sized state is the caller's `i64`
+  per group; a second table's key may be read THROUGH this table's key lane
+  (`via_res`/`via_lane`) with no partner-side mask. **One crossing for any
+  number of groups and any number of rows.** No new status; no manifest
+  growth; a minor-11 Java loads and sees none of it.
 - **Minor 11** (2026-09-14) — the masking-op completion (§19): the ndarray
   masking facade finished growing, and this minor consumes what it grew.
   **Three symbols and seven op-codes for fifteen capabilities**, which is the
@@ -427,7 +439,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (29 symbols)
+## 7. The function surface (30 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -528,6 +540,21 @@ i32 lgj_reduce_i32(u64 res, u32 lane_id, u32 reduce_op, u64 mask,
 
 Sums the `I32` lane over set mask bits into a widened `i64` (no overflow for
 `n_rows ≤ 2^32` on `i32` inputs).
+
+### Grouped reduction (ABI minor ≥ 12)
+
+```
+i32 lgj_plan_group_sum_i32(u64 res, const LgjOpDesc* ops, u32 n_ops,
+                           u32 group_lane, u32 val_lane,
+                           u64 via_res, u32 via_lane,
+                           i64* out_sums, u64 n_groups)           // minor >= 12, §20
+```
+
+`GROUP BY group_lane SUM(val_lane)` over the rows the plan selects, in ONE
+crossing and ONE program — no selection is evaluated first and no mask handle
+is involved. `out_sums[g]` for `g < n_groups`; a key past `n_groups` is
+dropped. `n_ops == 0` is legal and means every row. `via_res != 0` reads the
+group key THROUGH `group_lane` into `via_res`'s `via_lane` (the fk-keyed form).
 
 ### Parity escape hatch
 
@@ -1667,3 +1694,112 @@ is textually ABSENT from the function body afterwards, not merely that a
 replacement occurred), and both then went red. The lesson is the one already on
 record and worth one more instance: assert what the disable REMOVED, never only
 that an edit landed.
+
+## 20. The grouped sum that never builds a selection (ABI minor ≥ 12)
+
+```
+i32 lgj_plan_group_sum_i32(u64 res, const LgjOpDesc* ops, u32 n_ops,
+                           u32 group_lane, u32 val_lane,
+                           u64 via_res, u32 via_lane,
+                           i64* out_sums, u64 n_groups)
+```
+
+### 20.1 What was wrong before it
+
+Every reduction this ABI carried until minor 11 consumed a **mask**: `lgj_plan_eval`
+landed the plan's answer in a mask handle, and `lgj_reduce_sum_i32` /
+`lgj_reduce_i32` / the register sweeps read that handle. Java never HELD the
+selection — it lived natively — but it was still a population-sized thing that
+existed only to be consumed by the very next fold, which is the intermediate
+materialisation the fold algebra exists to remove (lance-graph #1256's ruling:
+*any intermediate population is prohibited if an addressable projection can be
+consumed directly by the next fold*). A `GROUP BY` multiplied it by the group
+count: `where(key.eq(g)).sumOf(value)` per `g`, measured in the `bricks`
+consumer at **32 crossings for 16 groups**.
+
+### 20.2 What it does
+
+The plan is lowered exactly as `lgj_plan_eval` lowers it — the prefix rewrite
+and the survivor skip of `plan_lower` — but the program ends in
+`Terminal::GroupSumI32 { mask: acc, key, val }` instead of `Terminal::Keep`. The
+executor runs it tile by tile over `SLOTS × tile_words_for(rows)` words of
+scratch; for each tile the terminal folds `val[i]` into `out_sums[key[i]]` for
+every selected row and moves on. Nothing population-sized exists at any point:
+the accumulator is a tile, the sink is `n_groups` integers, and the crossing
+returns when the last tile has folded.
+
+`via_res != 0` is the fk-keyed form. `group_lane` is then a foreign KEY into
+`via_res` (another pattern resource) and the group of row `i` is
+`via_lane[group_lane[i]]` — `SUM(line.amount) GROUP BY partner.country` in one
+program, `Terminal::GroupSumViaI32`, with the indirection fused inside the
+terminal: no partner-side mask, no remapped key lane, no second program. A key
+that names no row of `via_res` drops the row (zero fallback at both hops,
+`mask_risc`'s contract). `via_res` may equal `res`.
+
+**`n_ops == 0` is legal here** and means every row. `lgj_plan_eval` refuses an
+empty plan because its caller can fill the destination mask itself; a grouped
+sum has no destination mask, so the whole-lane case is a program — the one
+`Pred::Range` this crate emits, always `0..n_rows`, pinned by
+`the_group_sum_range_is_the_whole_lane_and_nothing_else` so that
+`exec_error_to_status`'s `RangeOutOfBounds` arm stays an internal-bug mapping.
+
+### 20.3 Contract
+
+- `out_sums[g] = Σ val_lane[i]` over selected rows `i` with key `g`, for
+  `g < n_groups`; a selected row whose key is `>= n_groups` names no group and
+  is dropped, never an error. Every element is written on `OK` (zero for a
+  group no row names); none on any failure — `execute_into` validates the whole
+  program before its first write.
+- `group_lane` must be a `U32` lane of `res`, `val_lane` an `I32` lane of `res`,
+  `via_lane` a `U32` lane of `via_res` when given.
+- Statuses: `NULL_ARGUMENT` for a null `out_sums`, a null `ops` with
+  `n_ops > 0`, or `n_groups == 0` (a zero-length sink is no sink);
+  `INVALID_HANDLE` / `WRONG_RESOURCE_KIND` for `res` or a non-zero `via_res` that
+  is not a live pattern; every plan defect as `lgj_plan_eval` reports it;
+  `INVALID_LANE` / `LANE_KIND_MISMATCH` for the three lanes; `LENGTH_OVERFLOW`
+  past `2^32 - 1` rows (`Pred::Range` and the sum carry are both `u32`-bounded).
+  **No new status.**
+- Bulk (§6): `O(rows)` in one pass over the predicate lanes plus one read of
+  the key and value lanes for the selected rows. No per-row and no per-group
+  crossing.
+
+### 20.4 Why one symbol, and why no scalar twin
+
+The plan surface (`LgjOpDesc`) is reused unchanged, so the whole cost of the
+capability is the terminal, and the terminal's two shapes (local key / key
+through a second table) are one parameter (`via_res`) rather than two symbols
+— the shape §15 mandated for the reductions. There is no
+`lgj_plan_group_sum_i32_scalar`: parity is falsified in the crate against
+`mask_risc`'s row-at-a-time reference executor on the identical lowered
+program (both key shapes, multi-tile), and through the membrane against the
+two-crossing path it replaces — which runs a different kernel behind a
+different terminal, so agreement is evidence rather than a tautology.
+
+### 20.5 The Java spelling
+
+`View.sumByGroup(key, value, groups)` → `GroupTotals`, and
+`View.sumByGroupVia(key, via, viaKey, value, groups)`. `GroupTotals` is
+addressed by key (`total(g)`, `groups()`) and exposes no array — it is sized
+by the question the caller typed, never by the data, which is the eighth named
+materialisation site (`Engine.groupSumI32`'s `toArray`, pinned in
+`DoctrineFenceTest`). Measured: **one crossing** at 1,024 and at 65,536 rows
+for 16 groups, beside the per-group path measured at **32** in the same run.
+
+### 20.6 The disable table (red-then-green, or it is not evidence)
+
+| what was disabled | test that went red |
+|---|---|
+| the `via` key silently downgraded to the local key | `via_reads_the_second_table_through_the_key_lane` |
+| the all-rows range emptied to `0..0` | `an_empty_plan_and_an_all_or_plan_both_group_every_row`, `the_group_sum_range_is_the_whole_lane_and_nothing_else`, `grouped_sums_agree_with_quack_over_the_combine_sweep` |
+| the `n_groups == 0` guard removed | `every_refusal_is_a_status_and_leaves_out_sums_untouched` (mask-risc's own refusal surfaced as `ALLOCATION_FAILED` instead) |
+| Java: the `toArray` pin reverted to 1 | `DoctrineFenceTest` — *"UNFENCED MATERIALIZATION: Engine.java\|.toArray( 2 (pinned 1)"* |
+| Java: `requirePositiveGroups` made a no-op | `GroupSumTest` — `groups = 0` reached the membrane and came back as the ABI's `NULL_ARGUMENT`, not the Java exception |
+| Java: `Engine` passes `viaResource = 0` always | `GroupSumTest` — every `via group g` |
+
+Each restored from the commit (the disable cycle runs only against committed
+work) and re-run green. The compatibility direction was run for real, not
+assumed: `OldAbiCompatTest` against a minor-11 library built from `07e044f`
+reports *"View.sumByGroup (minor 12) reports an ABI mismatch, not a missing
+symbol (threw AbiMismatchException)"*, with every minor-11 feature still
+working beside it.
+

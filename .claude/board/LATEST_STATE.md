@@ -1,3 +1,35 @@
+## 2026-09-22 — minor 12: `lgj_plan_group_sum_i32`, the grouped sum that never builds a selection (fold-distillation wave 4)
+
+Upstream first (lance-graph #1256 merged `99cdca38`: the tiled executor,
+`Terminal::GroupSumI32`/`GroupSumViaI32`, `Out::I64`; ndarray #318 merged:
+the T1 kernels; lance-graph-java #83 merged: the status arms). This is the
+Java→Panama→mask-risc proof that wave: a `GROUP BY` crosses once and no
+selection exists at any point.
+
+- **ABI:** ONE new symbol, no new status, no manifest growth — the plan
+  surface is reused; only the terminal changed (`Keep` → `GroupSumI32`, or
+  `GroupSumViaI32` when `via_res != 0`). `n_ops == 0` is legal here (the
+  whole-lane `Range`, the one `Range` this crate emits, pinned to be exactly
+  `0..n_rows`). `docs/abi.md` §20.
+- **Measured through the membrane:** `View.sumByGroup` = **1 crossing** at
+  1,024 and 65,536 rows for 16 groups; the two-crossing-per-group path it
+  replaces measured **32** beside it in the same run (the `bricks` number,
+  reproduced). `sumByGroupVia` (the fk-keyed form, `SUM(line) GROUP BY
+  partner.key`) also 1.
+- **Gates:** native **191** tests (+8), clippy `-D warnings` + fmt clean;
+  Java **612** checks (409 + `GroupSumTest` 203) under JDK 28
+  `--enable-preview` against `abi 0.12`; six disable arms red-then-green
+  (§20.6). `OldAbiCompatTest` gains a minor-12 leg, run BOTH ways: 13/13
+  against this library, and against a minor-11 library built from `07e044f`
+  `View.sumByGroup` throws `AbiMismatchException` naming minor 12 — never a
+  missing-symbol failure.
+- **The eighth named materialisation site:** `Engine.groupSumI32`'s
+  `toArray`, sized by `groups` (the question), pinned in `DoctrineFenceTest`
+  and listed in root `CLAUDE.md`. `GroupTotals` exposes no array.
+- **Still owed:** the `bricks` consumer's `sumBy()` still runs the 32-crossing
+  path; migrating it to `sumByGroup` is a consumer-wave change, not this
+  one. `lgj_hop` still holds mask-sized Vecs (pre-existing, unrelated).
+
 ## 2026-09-19 — PR #81 merged (`07aa441`): production IS the Valhalla arm; Panama × Valhalla is one membrane
 
 **The frame, because it is easy to file this wrong:** this was not a JDK

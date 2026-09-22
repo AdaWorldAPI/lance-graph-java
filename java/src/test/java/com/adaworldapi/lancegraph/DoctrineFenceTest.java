@@ -100,6 +100,9 @@ public final class DoctrineFenceTest {
     // five named sites, mechanically:
     //   Mask.materializeRows()           → Arrays.copyOf ×2 + new long[ ×1   (the named terminal)
     //   Engine.rowLayoutProbe            → .toArray( ×1                       (≤32 B diagnostic)
+    //   Engine.groupSumI32               → .toArray( ×1                       (one i64 per GROUP —
+    //                                      sized by the question the caller typed, never by rows;
+    //                                      the eighth named site, minor 12)
     //   Engine.facetSumResolved          → new long[ ×1                       (fixed [2] pair)
     //   Abi manifest-name read (cString) → new byte[ ×1 + MemorySegment.copy ×1
     //   Abi.readCarvings                 → new int[ ×2                        (incl. empty arm)
@@ -108,7 +111,7 @@ public final class DoctrineFenceTest {
     static {
         MATERIALIZATION_PINS.put("Mask.java|Arrays.copyOf", 2);
         MATERIALIZATION_PINS.put("Mask.java|new long[", 1);
-        MATERIALIZATION_PINS.put("Engine.java|.toArray(", 1);
+        MATERIALIZATION_PINS.put("Engine.java|.toArray(", 2);
         MATERIALIZATION_PINS.put("Engine.java|new long[", 1);
         MATERIALIZATION_PINS.put("Abi.java|new int[", 2);
         MATERIALIZATION_PINS.put("Abi.java|new byte[", 1);
