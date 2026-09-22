@@ -1,3 +1,43 @@
+## ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE (2026-09-22) — OPEN
+
+`main` was RED and nothing said so. `GraphHopTest` reported 1 FAILED / 65
+passed at `bb81d80`, established by running it from a clean worktree, not
+inferred. The defect itself was small — a pin asserting a second
+`materializeRows()` costs zero crossings, written before `Mask.words()` began
+re-validating its cached window per facade call — and is fixed
+(D-LGJ-FOLD-5's second commit). **The issue is that it survived a merge.**
+
+`.github/workflows/` contains exactly one workflow and it gates `lgj-abi`
+only: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`. Nothing
+compiles a single line of Java. The **612-check core suite and all three
+consumer suites are LOCAL gates**, run by whoever remembers to run them, which
+root `CLAUDE.md` states plainly (*"the merge gate is the Rust suite plus the
+409-check Java run"*). A consumer is one step further out still: even a
+session that runs `AllTests` religiously never touches `consumers/`.
+
+This is the **same shape** as the r2il probe step that sat absent from
+lance-graph CI until its OGAR dependency reached main — a gate that exists
+and is simply never dispatched is indistinguishable from no gate. There the
+absence was deliberate and documented; here it is neither.
+
+**Why it is not just "add a job":** a Java job needs JDK 28 with
+`--enable-preview` (JEP 401 is preview-gated, per
+`ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA`) and JDK 28 is an EA build
+that apt does not carry — the container obtains it from a GitHub release
+download path because the distribution hosts are gateway-blocked. A CI runner
+has its own network posture, so the acquisition ladder that works here is not
+evidence it works there. Scoping that is this issue's first task, not an
+assumption to build on.
+
+**Minimum that would have caught this one:** a job that builds
+`java/src/{main,test}` plus `consumers/*/src` and runs `AllTests` and the
+three consumer mains. No new test, no new assertion — only dispatch.
+
+**Falsifier for any fix:** re-introduce the stale `0` pin on a branch and
+confirm the job goes red. A job that builds the consumers but never runs
+their mains would pass, and would be the no-gate-with-extra-steps outcome
+this entry exists to name.
+
 ## ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA — UNBLOCKED; JDK 28 installed and the flip proven (2026-09-19)
 
 ⊘ The entry below says the migration is blocked because no JDK 28 can be
