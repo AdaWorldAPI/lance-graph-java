@@ -96,9 +96,13 @@ pub(crate) fn lower_plan(ops: &[LgjOpDesc]) -> Option<Lowered> {
         });
     }
 
+    // `Keep`, not `Count`: the destination mask IS the demanded result, so
+    // the executor writes it tile by tile straight into the resource's own
+    // words (`Out::Mask`) and the count is a popcount over that sink. Under
+    // tiled execution no population-sized scratch exists to count from.
     Some(Lowered::Program(Program::new(
         program_ops,
-        Terminal::Count {
+        Terminal::Keep {
             mask: Operand::Scratch(ACC_SLOT),
         },
     )))
