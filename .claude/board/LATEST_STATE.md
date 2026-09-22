@@ -34,10 +34,22 @@ tool was introduced, there still is none by design.
   deliberately — a bare `java` under `bash -e` aborts at the first red main, so
   one broken consumer would mask three others and each round would reveal one.
 
-**OPEN:** dispatch itself is unproven locally and cannot be — whether a runner
-starts the job and resolves `28-ea` is proven only by this PR's own first run,
-which is the right falsifier because it is self-executing. If `28-ea` does not
-resolve there, the job goes red on the step that resolves it and says so.
+**The one OPEN item CLOSED on the first run** (#86, `af58fbd`):
+`java-suites completed success`, 13/13 steps. The runner downloaded
+`Java 28.0.0+16.0.ea (Temurin-Hotspot)` from
+`adoptium/temurin28-binaries/.../jdk-28+16-ea-beta` — the exact release the
+Adoptium API had named, so the chain is closed by execution and not only by
+reading. Bonus measurement: the runner reports `avx2 (x86-64-v3)` where this
+host reports `avx512`, and all 765 counts are byte-identical, which turns the
+backend-agnostic claim from something read out of the tests into something
+observed across two backends.
+
+**OPEN:** nothing on this. The remaining gap is elsewhere and unchanged —
+`lint.yml` fires `on: {pull_request, push}` for THIS repository only, so an
+upstream-only merge in `lance-graph` or `ndarray` cannot start the workflow and
+a sibling break stays invisible until someone pushes here. That is the trigger
+gap `E-THE-CI-GAP-WAS-THE-TRIGGER-NOT-THE-COVERAGE-1` already names; this job
+inherits it rather than fixing it, and now inherits it for the Java half too.
 
 ## 2026-09-22 — D-LGJ-FOLD-5: the consumer stops asking sixteen times, and a red pin on `main` gets root-caused
 

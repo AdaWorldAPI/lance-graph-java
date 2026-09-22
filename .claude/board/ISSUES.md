@@ -99,10 +99,21 @@ have revealed exactly one of them. `AllTests` does not behave that way either,
 and now neither does this loop.
 
 What a local run CANNOT prove is
-dispatch: whether a runner starts the job and reaches JDK 28. That is proven by
-this PR's own CI run, which is the right falsifier because it is
-self-executing — and if `28-ea` fails to resolve on the runner, the job goes red
-on the step that resolves it and says so.
+dispatch: whether a runner starts the job and reaches JDK 28. **That is now
+SETTLED by the first run (#86, `af58fbd`): `java-suites completed success`, all
+13 steps.** The runner's own log closes the acquisition chain end to end —
+`Downloading Java 28.0.0+16.0.ea (Temurin-Hotspot) from
+.../adoptium/temurin28-binaries/releases/download/jdk-28%2B16-ea-beta/...`, the
+exact release the Adoptium API named, resolved into
+`/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/28.0.0-ea.16.0.ea/x64`.
+
+It also MEASURED something that had only been reasoned about. The runner reports
+`abi 0.12, simd ndarray::simd avx2 (x86-64-v3)` against this host's `avx512`,
+and every count comes back byte-identical — core **612**, bricks **70**, graph
+**68**, trades **3** and **12**. The `simdBackend()` "diagnostic only" rule was
+asserted here from reading the tests (`AbiContractTest` asserts only that a
+backend was reported, `FusionParityTest` notes it, `DoctrineFenceTest` counts
+source lines); it is now observed across two different backends.
 
 ## ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA — UNBLOCKED; JDK 28 installed and the flip proven (2026-09-19)
 
