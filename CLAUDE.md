@@ -283,10 +283,12 @@ build):
   not row count — verified fixed-size on both the Rust and Java sides);
   `Abi.java`'s `readCarvings` (bounded by `CARVING_SLOTS`, a manifest
   constant, not n_rows); `Engine.facetSumResolved`'s fixed `long[2]`
-  result pair; `View.where()`'s `List.copyOf` of the PREDICATE chain; and
-  `NativePattern.plan()`'s `predicates.stream()…toList()`. None of the
-  seven is a hidden proportional-to-n_rows population copy — keep this list
-  exhaustive when an eighth site is added, rather than letting the
+  result pair; `View.where()`'s `List.copyOf` of the PREDICATE chain;
+  `NativePattern.plan()`'s `predicates.stream()…toList()`; and
+  `Engine.groupSumI32`'s `toArray` of the group totals (minor 12 — sized by
+  `groups`, the key domain the caller asked for, never by rows). None of the
+  eight is a hidden proportional-to-n_rows population copy — keep this list
+  exhaustive when a ninth site is added, rather than letting the
   enumeration silently go stale again.
 
   > **⊘ RE-AUDITED 2026-09-16 and the list WAS stale — it claimed five and
