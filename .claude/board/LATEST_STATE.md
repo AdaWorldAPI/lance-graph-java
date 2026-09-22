@@ -44,6 +44,35 @@ host reports `avx512`, and all 765 counts are byte-identical, which turns the
 backend-agnostic claim from something read out of the tests into something
 observed across two backends.
 
+**Review follow-up (`2a30039`), both findings CodeRabbit-confirmed.** Two real
+defects, both mine:
+
+- **Persisted checkout credentials** (zizmor `artipacked`). Fixed on ALL
+  THIRTEEN checkout steps, not the four named — `persist-credentials` appeared
+  nowhere in the file, every job runs `cargo`, so the `build.rs` read path was
+  identical in `format`/`clippy`/`rust-test`. Verified free first: nothing
+  pushes, `contents: read`, no secret read. **Verified at RUNTIME, not just in
+  YAML** — each of the four checkouts logs `persist-credentials: false`, then
+  `Setting up auth`, then `Removing auth` INSIDE the checkout step, so the
+  credential no longer spans the later `cargo build`. Without the flag there is
+  no in-step `Removing auth` and the config survives to post-job cleanup.
+- **The documented suite command could not run.** My own pointer sentence aimed
+  at a JDK 25/26 command without the preview flags; measured `error: value
+  classes are a preview feature and are disabled by default`, exit 1. Fixing it
+  surfaced three more in the same block (`/usr/lib/jvm` now holds only Java 21
+  so `temurin-26-jdk-amd64` does not exist here; the block mixed working
+  directories and died on `find: 'java/src/main'`; `-Dlgj.library=$PWD/target/...`
+  named an incidental leftover `target/` that is a separate inode from what
+  step 1 builds) — and one I INTRODUCED, caught only by executing it:
+  `--manifest-path` instead of `cd` broke the toolchain, because rustup reads
+  `rust-toolchain.toml` from the CWD (`rustc 1.94.1 is not supported`, exit
+  101). The `cd` is load-bearing and is back in a subshell. Verified by
+  extracting the fenced block by PARSE and running it under `bash -e`: exit 0,
+  `ALL PASSED (612 checks)`.
+  I also nearly filed a FALSE finding — the two `.so` paths have different
+  mtimes, which read as a stale artifact; they are md5-identical. Checking
+  content instead of timestamps stopped it.
+
 **OPEN:** nothing on this. The remaining gap is elsewhere and unchanged —
 `lint.yml` fires `on: {pull_request, push}` for THIS repository only, so an
 upstream-only merge in `lance-graph` or `ndarray` cannot start the workflow and
