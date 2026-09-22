@@ -81,11 +81,24 @@ Measured, all four command strings run verbatim: core **612** (0 failures, abi
 0.12, avx512, release), bricks **70**, graph **68**, trades **3** and **12** —
 **765 checks across 5 entry points**, every one exit 0.
 
-**FALSIFIER: PENDING at the time of this commit** — deliberately, because the
-disable run must happen on committed work (a `git checkout` restore is what
-ends it, and this repo has lost uncommitted work to exactly that). The run and
-its result are recorded in the commit that follows this one. What a local run
-CANNOT prove is
+**FALSIFIER: RUN, red-then-green, in the shape this entry demanded.** The stale
+`0` pin was re-introduced in `GraphHopTest` and the consumer step's `run:` body
+— extracted VERBATIM from the committed workflow via a YAML parse, not retyped —
+was executed under `bash -e`:
+
+| run | mains reached | step exit |
+|---|---|---|
+| stale `0` pin | all four; `::error::consumer suites FAILED: …GraphHopTest` | **1** |
+| restored | bricks 70, graph 68, trades 3 + 12, "all four consumer suites passed" | **0** |
+
+Two properties, one run. It catches the exact defect that survived a merge
+(`1 FAILED, 67 passed` — the `bb81d80` shape), AND it reaches every main
+regardless: a bare `java` under `bash -e` aborts the step at the first red one,
+so one broken consumer would have masked the other three and each CI round would
+have revealed exactly one of them. `AllTests` does not behave that way either,
+and now neither does this loop.
+
+What a local run CANNOT prove is
 dispatch: whether a runner starts the job and reaches JDK 28. That is proven by
 this PR's own CI run, which is the right falsifier because it is
 self-executing — and if `28-ea` fails to resolve on the runner, the job goes red
