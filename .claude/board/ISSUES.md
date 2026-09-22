@@ -1,4 +1,4 @@
-## ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE (2026-09-22) — OPEN
+## ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE (2026-09-22) — RESOLVED 2026-09-22 (job landed; dispatch proven by its own first run)
 
 `main` was RED and nothing said so. `GraphHopTest` reported 1 FAILED / 65
 passed at `bb81d80`, established by running it from a clean worktree, not
@@ -37,6 +37,83 @@ three consumer mains. No new test, no new assertion — only dispatch.
 confirm the job goes red. A job that builds the consumers but never runs
 their mains would pass, and would be the no-gate-with-extra-steps outcome
 this entry exists to name.
+
+---
+
+**RESOLUTION (2026-09-22).** `java-suites` in `.github/workflows/lint.yml`:
+twelve steps, same three-sibling checkout as `rust-test`, `cargo build
+--release` for the artifact, then the four `javac`/`java` command strings
+`java/README.md` documents, verbatim. No build tool was introduced — there
+still is none, by design.
+
+**The first task — acquisition — is ANSWERED, and by a different mechanism
+than the local one, which is why this entry was right to refuse to generalise
+from the container's ladder.** Chain, each link read from a primary source
+rather than inferred:
+
+1. `actions/setup-java`'s `normalizeVersion`: `if (version.endsWith('-ea')) {
+   ... stable = false }` — so `java-version: '28-ea'` is not-stable.
+2. its temurin installer: `const releaseType = this.stable ? 'ga' : 'ea'`.
+3. Adoptium's API, queried live: `release_type=ea` + `version=[28,29)` +
+   linux/x64/jdk serves `jdk-28+16-ea-beta` — the same build this container
+   runs. And `/v3/info/available_releases` omits 28 while naming it
+   `most_recent_feature_version`, which is *why* the `-ea` suffix is load-bearing.
+
+The container's blocker (gateway-blocked distribution hosts, hence the
+GitHub-release download path) is a **this-container** constraint and never
+applied to a runner. The version is deliberately NOT pinned to `+16`: internal
+head pins are forbidden, and an upstream EA build is an external dependency
+whose purpose is to move — what the suite needs is JEP 401 under preview, which
+every 28 EA build carries.
+
+**Two counts in the entry above were wrong, measured on `origin/main`
+(`aef2382`) before the job was written:** it is **four** consumer mains, not
+three (`trades` carries both `TradesAllocationTest` and `TradesParityTest`, and
+running one of two would have been precisely the no-gate-with-extra-steps
+outcome this entry names). The core suite is **612 checks / 17 suites**, which
+this entry had right while root `CLAUDE.md` still briefed every session with
+`409 / 16 suites / abi 0.11`. That drift is fixed in the same commit, and fixed
+STRUCTURALLY: the live count now exists in exactly one dated place and every
+other site had its number removed rather than re-pinned. One measurement
+restated in eight places goes stale in eight places.
+
+Measured, all four command strings run verbatim: core **612** (0 failures, abi
+0.12, avx512, release), bricks **70**, graph **68**, trades **3** and **12** —
+**765 checks across 5 entry points**, every one exit 0.
+
+**FALSIFIER: RUN, red-then-green, in the shape this entry demanded.** The stale
+`0` pin was re-introduced in `GraphHopTest` and the consumer step's `run:` body
+— extracted VERBATIM from the committed workflow via a YAML parse, not retyped —
+was executed under `bash -e`:
+
+| run | mains reached | step exit |
+|---|---|---|
+| stale `0` pin | all four; `::error::consumer suites FAILED: …GraphHopTest` | **1** |
+| restored | bricks 70, graph 68, trades 3 + 12, "all four consumer suites passed" | **0** |
+
+Two properties, one run. It catches the exact defect that survived a merge
+(`1 FAILED, 67 passed` — the `bb81d80` shape), AND it reaches every main
+regardless: a bare `java` under `bash -e` aborts the step at the first red one,
+so one broken consumer would have masked the other three and each CI round would
+have revealed exactly one of them. `AllTests` does not behave that way either,
+and now neither does this loop.
+
+What a local run CANNOT prove is
+dispatch: whether a runner starts the job and reaches JDK 28. **That is now
+SETTLED by the first run (#86, `af58fbd`): `java-suites completed success`, all
+13 steps.** The runner's own log closes the acquisition chain end to end —
+`Downloading Java 28.0.0+16.0.ea (Temurin-Hotspot) from
+.../adoptium/temurin28-binaries/releases/download/jdk-28%2B16-ea-beta/...`, the
+exact release the Adoptium API named, resolved into
+`/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/28.0.0-ea.16.0.ea/x64`.
+
+It also MEASURED something that had only been reasoned about. The runner reports
+`abi 0.12, simd ndarray::simd avx2 (x86-64-v3)` against this host's `avx512`,
+and every count comes back byte-identical — core **612**, bricks **70**, graph
+**68**, trades **3** and **12**. The `simdBackend()` "diagnostic only" rule was
+asserted here from reading the tests (`AbiContractTest` asserts only that a
+backend was reported, `FusionParityTest` notes it, `DoctrineFenceTest` counts
+source lines); it is now observed across two different backends.
 
 ## ISS-LGJ-TOOLCHAIN-MUST-BE-JDK28-VALHALLA-PANAMA — UNBLOCKED; JDK 28 installed and the flip proven (2026-09-19)
 

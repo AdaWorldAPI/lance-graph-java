@@ -1,3 +1,85 @@
+## 2026-09-22 — the Java gate is DISPATCHED, and one measurement stops being restated in eight places
+
+`ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE` is RESOLVED. `java-suites` in
+`.github/workflows/lint.yml` builds `liblgj_abi.so`, then runs the four
+`javac`/`java` command strings `java/README.md` documents, verbatim — no build
+tool was introduced, there still is none by design.
+
+- **The issue's first task was acquisition, not the job**, and it resolves by a
+  mechanism this container does not use — which is why the entry was right to
+  refuse to generalise from the local ladder. Read from primary sources:
+  setup-java's `normalizeVersion` sets `stable = false` on an `-ea` suffix, its
+  temurin installer then asks `release_type=ea`, and Adoptium's API (queried
+  live) serves `jdk-28+16-ea-beta` — the same build this container runs. The
+  container's blocker was gateway-blocked distribution hosts; a runner never had
+  that constraint. NOT pinned to `+16`: internal head pins are forbidden, and
+  what the suite needs is JEP 401 under preview, which every 28 EA build carries.
+- **Measured on `origin/main` (`aef2382`), every command verbatim:** core **612
+  checks / 17 suites / 0 failures** (abi 0.12, avx512, release), bricks **70**,
+  graph **68**, trades **3** and **12** — **765 checks across 5 entry points**,
+  all exit 0. All of it was gating nothing.
+- **Two counts were wrong on the way in.** FOUR consumer mains, not three
+  (`trades` carries two; running one of two would have been the
+  no-gate-with-extra-steps outcome the issue names). And root `CLAUDE.md`
+  briefed every session with `409 / 16 suites / abi 0.11`. Fixed
+  **structurally**, not re-pinned: the live count now exists in exactly ONE
+  dated place and every other site had its number REMOVED. One measurement
+  restated in eight places goes stale in eight places — which is what had
+  happened. The three surviving 409s are dated historical measurements kept as
+  evidence; the Valhalla-flip comparison is only meaningful against its own
+  baseline and must not be restated forward.
+- **Falsifier run, red-then-green, on the step body extracted from the
+  committed YAML rather than retyped.** Stale `0` pin: all four mains reached,
+  `::error::` named the culprit, exit 1. Restored: exit 0. Not fail-fast
+  deliberately — a bare `java` under `bash -e` aborts at the first red main, so
+  one broken consumer would mask three others and each round would reveal one.
+
+**The one OPEN item CLOSED on the first run** (#86, `af58fbd`):
+`java-suites completed success`, 13/13 steps. The runner downloaded
+`Java 28.0.0+16.0.ea (Temurin-Hotspot)` from
+`adoptium/temurin28-binaries/.../jdk-28+16-ea-beta` — the exact release the
+Adoptium API had named, so the chain is closed by execution and not only by
+reading. Bonus measurement: the runner reports `avx2 (x86-64-v3)` where this
+host reports `avx512`, and all 765 counts are byte-identical, which turns the
+backend-agnostic claim from something read out of the tests into something
+observed across two backends.
+
+**Review follow-up (`2a30039`), both findings CodeRabbit-confirmed.** Two real
+defects, both mine:
+
+- **Persisted checkout credentials** (zizmor `artipacked`). Fixed on ALL
+  THIRTEEN checkout steps, not the four named — `persist-credentials` appeared
+  nowhere in the file, every job runs `cargo`, so the `build.rs` read path was
+  identical in `format`/`clippy`/`rust-test`. Verified free first: nothing
+  pushes, `contents: read`, no secret read. **Verified at RUNTIME, not just in
+  YAML** — each of the four checkouts logs `persist-credentials: false`, then
+  `Setting up auth`, then `Removing auth` INSIDE the checkout step, so the
+  credential no longer spans the later `cargo build`. Without the flag there is
+  no in-step `Removing auth` and the config survives to post-job cleanup.
+- **The documented suite command could not run.** My own pointer sentence aimed
+  at a JDK 25/26 command without the preview flags; measured `error: value
+  classes are a preview feature and are disabled by default`, exit 1. Fixing it
+  surfaced three more in the same block (`/usr/lib/jvm` now holds only Java 21
+  so `temurin-26-jdk-amd64` does not exist here; the block mixed working
+  directories and died on `find: 'java/src/main'`; `-Dlgj.library=$PWD/target/...`
+  named an incidental leftover `target/` that is a separate inode from what
+  step 1 builds) — and one I INTRODUCED, caught only by executing it:
+  `--manifest-path` instead of `cd` broke the toolchain, because rustup reads
+  `rust-toolchain.toml` from the CWD (`rustc 1.94.1 is not supported`, exit
+  101). The `cd` is load-bearing and is back in a subshell. Verified by
+  extracting the fenced block by PARSE and running it under `bash -e`: exit 0,
+  `ALL PASSED (612 checks)`.
+  I also nearly filed a FALSE finding — the two `.so` paths have different
+  mtimes, which read as a stale artifact; they are md5-identical. Checking
+  content instead of timestamps stopped it.
+
+**OPEN:** nothing on this. The remaining gap is elsewhere and unchanged —
+`lint.yml` fires `on: {pull_request, push}` for THIS repository only, so an
+upstream-only merge in `lance-graph` or `ndarray` cannot start the workflow and
+a sibling break stays invisible until someone pushes here. That is the trigger
+gap `E-THE-CI-GAP-WAS-THE-TRIGGER-NOT-THE-COVERAGE-1` already names; this job
+inherits it rather than fixing it, and now inherits it for the Java half too.
+
 ## 2026-09-22 — D-LGJ-FOLD-5: the consumer stops asking sixteen times, and a red pin on `main` gets root-caused
 
 The consumer half of minor 12. `BricksQuery.sumBy()` was sixteen queries —
