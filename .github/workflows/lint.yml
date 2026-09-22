@@ -290,9 +290,18 @@ jobs:
       # parity suite — and running only one of them would be the
       # no-gate-with-extra-steps outcome: compiling a consumer proves it builds,
       # never that its assertions hold.
+      #
+      # NOT fail-fast, deliberately. A `run:` step is `bash -e`, and a bare
+      # `java` in this loop would abort the whole step at the first red main —
+      # verified, the loop does not reach its remaining members — so one broken
+      # consumer would mask the other three and each CI round would reveal
+      # exactly one of them. `|| failed=...` collects instead, and the step still
+      # exits non-zero. This mirrors `AllTests`, which runs every suite before
+      # exiting 1 rather than stopping at the first failure.
       - name: Run the consumer suites
         working-directory: lance-graph-java
         run: |
+          failed=""
           for main in com.adaworldapi.bricks.BricksAuthTest \
                       com.adaworldapi.graph.GraphHopTest \
                       com.adaworldapi.trades.TradesAllocationTest \
@@ -300,6 +309,11 @@ jobs:
             echo "::group::$main"
             java --enable-preview --enable-native-access=ALL-UNNAMED \
               -Dlgj.library="$GITHUB_WORKSPACE/lance-graph-java/native/lgj-abi/target/release/liblgj_abi.so" \
-              -cp "java/out:consumers/out" "$main"
+              -cp "java/out:consumers/out" "$main" || failed="$failed $main"
             echo "::endgroup::"
           done
+          if [ -n "$failed" ]; then
+            echo "::error::consumer suites FAILED:$failed"
+            exit 1
+          fi
+          echo "all four consumer suites passed"
