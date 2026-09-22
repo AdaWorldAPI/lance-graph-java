@@ -246,8 +246,8 @@ public final class BricksAuthTest {
 
     // ------------------------------------------------------------------
     // 3. Compose-not-execute: crossings stay 0 through where()/authorize(), and the exact
-    //    crossing cost of each terminal (count(): 1; sumBy(): 16, group-count-scaled, never
-    //    row-count-scaled).
+    //    crossing cost of each terminal (count(): 1; sumBy(): 1, scaled by neither the row count
+    //    nor the group count — see checkSumByCrossingCost for the 32 it replaced).
     // ------------------------------------------------------------------
 
     private static void checkComposeNotExecute(Checks c) {
@@ -290,15 +290,33 @@ public final class BricksAuthTest {
             chain.sumBy(Orders.REGION, Orders.REVENUE);
             long cost = Diagnostics.crossings() - c0;
 
-            // A sum terminal is TWO crossings, not one: plan evaluation into the selection mask
-            // (lgj_plan_eval) plus the reduction itself (lgj_reduce_sum_i32) — unlike count(),
-            // whose plan evaluation RETURNS the count and so pays only one. 16 groups x 2 = 32.
-            // The thesis assertion is the arithmetic's SHAPE: crossings are proportional to the
-            // number of groups, never to the number of rows — which is why this same literal is
-            // asserted at BOTH n = 1000 and n = 64000.
-            c.eq("sumBy() at n = " + rows + " costs exactly 32 crossings"
-                            + " (2 per region group — plan eval + reduce — never one per row)",
-                    32, cost);
+            // ONE crossing. The chain and the grouped fold are a single fused native program
+            // (lgj_plan_group_sum_i32, ABI minor 12): no selection mask is built, so there is no
+            // second crossing to reduce over, and nothing is asked per group.
+            //
+            // This replaces a measured 32 (re-pinned 2026-09-22, D-LGJ-FOLD-5). That number was
+            // real and was itself a correction: sixteen sumOf calls over where(REGION.eq(v)), each
+            // paying plan eval PLUS lgj_reduce_sum_i32. It was already invariant in the number of
+            // rows, which is why the old literal was asserted at both row counts; this path is
+            // invariant in the number of GROUPS as well, a strictly stronger claim, so that gets
+            // its own arm below.
+            c.eq("sumBy() at n = " + rows + " costs exactly one crossing"
+                            + " (one fused grouped fold — no selection built, nothing per group)",
+                    1, cost);
+
+            // The group-count arm. Without it, "one crossing whatever the group count" would be a
+            // doc comment no input could falsify: the public sumBy() always asks for exactly
+            // Orders.REGIONS groups, so the two row counts above vary rows and hold groups fixed.
+            // A path that still paid per group would read 1 here at 1 group and more at 64.
+            for (int groups : new int[] {1, Orders.REGIONS, 4 * Orders.REGIONS}) {
+                chain.sumByGroupCount(Orders.REGION, Orders.REVENUE, groups);   // warm-up
+                long g0 = Diagnostics.crossings();
+                chain.sumByGroupCount(Orders.REGION, Orders.REVENUE, groups);
+                long gCost = Diagnostics.crossings() - g0;
+                c.eq("sumBy() at n = " + rows + " with " + groups + " groups still costs exactly"
+                                + " one crossing (invariant in groups, not merely in rows)",
+                        1, gCost);
+            }
         }
     }
 
@@ -311,6 +329,7 @@ public final class BricksAuthTest {
 
         checkSumByCrossingCost(c, 1_000);
         checkSumByCrossingCost(c, 64_000);
+        checkRegionCardinality(c);
 
         final int rows = 64_000;
         Fixture expected = generate(rows, SEED);
@@ -358,6 +377,54 @@ public final class BricksAuthTest {
 
     // ------------------------------------------------------------------
     // 5. Aggregate-only egress: BricksQuery's return-type surface, and Orders as a schema.
+    // ------------------------------------------------------------------
+
+    /**
+     * {@link Orders#REGIONS} is a MIRROR of the native generator's classid cardinality, which the
+     * ABI manifest does not report — so it is pinned against the fixture's own behaviour rather
+     * than against a number copied from the other side. Two-sided on purpose: every id below
+     * REGIONS must be populated (so the constant is not too LARGE) and id REGIONS itself must be
+     * empty (so it is not too SMALL). A comparison against a second Java literal would drift in
+     * lockstep with whatever edited it and prove nothing; this goes red if the generator changes
+     * under us, in either direction.
+     *
+     * <p>Mirrors the shape of the native side's own cardinality test, which asserts every facet
+     * lane hits all 16 classids at n = 4096.
+     */
+    private static void checkRegionCardinality(Checks c) {
+        c.section("Orders.REGIONS is pinned to the fixture, not to a copied literal");
+
+        final int rows = 64_000;
+        try (BricksSession session = Bricks.open(rows, SEED)) {
+            int populated = 0;
+            for (int region = 0; region < Orders.REGIONS; region++) {
+                long n = session.query()
+                        .where(Orders.REGION.eq(region))
+                        .authorize(Role.GLOBAL)
+                        .count();
+                if (n > 0) {
+                    populated++;
+                } else {
+                    c.that("region " + region + " is populated at n = " + rows
+                                    + " — an empty id below Orders.REGIONS means the constant"
+                                    + " is larger than the generator's cardinality",
+                            false);
+                }
+            }
+            c.eq("every id in 0..Orders.REGIONS-1 carries rows at n = " + rows,
+                    Orders.REGIONS, populated);
+
+            long beyond = session.query()
+                    .where(Orders.REGION.eq(Orders.REGIONS))
+                    .authorize(Role.GLOBAL)
+                    .count();
+            c.eq("id Orders.REGIONS (" + Orders.REGIONS + ") carries no rows — a populated id"
+                            + " here means the constant is smaller than the generator's"
+                            + " cardinality and sumBy() is silently dropping a group",
+                    0L, beyond);
+        }
+    }
+
     // ------------------------------------------------------------------
 
     private static void checkAggregateOnlyEgress(Checks c) {

@@ -94,35 +94,56 @@ public final class BricksQuery {
     /**
      * Sum {@code value} grouped by every possible value of {@code group}.
      *
-     * <p>{@code group} is a {@link com.adaworldapi.lancegraph.U32Field}, and this consumer's fixture
-     * gives such fields exactly 16 distinct values ({@code 0..15}) — see {@link Orders#REGION}. This
-     * method issues one fused native query per group value (16 total), each narrowing this query's
-     * already-authorized chain by one more {@code group.eq(v)} condition and summing {@code value}
-     * over the result. Each of those 16 sums costs <em>two</em> native crossings — plan evaluation
-     * into the selection mask, then the {@code lgj_reduce_sum_i32} reduction — so the measured
-     * total is 32 crossings (unlike {@link #count()}, whose plan evaluation returns the count and
-     * pays one). <strong>The crossing count scales with the number of groups, never with the
-     * number of rows</strong> — the same laziness guarantee every other terminal operation in this
-     * codebase carries, just paid per group instead of once.
+     * <p><strong>One crossing</strong>, whatever the number of groups or rows. The whole question —
+     * this query's authorized chain plus the grouped fold — is a single fused native program; no
+     * selection is built, nothing is asked per group, and only the totals cross. See {@link
+     * com.adaworldapi.lancegraph.View#sumByGroup}.
      *
-     * <p>Every group value {@code 0..15} appears as a key in the returned map, including groups with
-     * zero matching rows (mapped to a sum of {@code 0L}): a group's absence from a real dataset is
-     * itself a legitimate aggregate fact, not something to hide by omitting the key.
+     * <p>This used to be sixteen separate queries: one {@code sumOf} over {@code
+     * where(group.eq(v))} for each {@code v}, each costing two crossings (plan evaluation into a
+     * selection mask, then the reduction), measured here at <strong>32</strong>. That path was
+     * invariant in the number of rows but proportional to the number of groups; this one is
+     * invariant in both, which is the stronger claim and is asserted as such — {@code
+     * BricksAuthTest} pins the cost at 1 across two row counts <em>and</em> two group counts.
      *
-     * <p>If measurement ever shows this 32-crossing loop is a bottleneck, a native grouped-aggregate
-     * kernel (one crossing, sixteen output buckets) is the natural W6-tier follow-up — not built
-     * here, because nothing has measured a need for it yet.
+     * <p>Groups come from {@link Orders#REGIONS}, the fixture's region cardinality. Every id in
+     * {@code 0..REGIONS-1} appears as a key in the returned map, including ids no selected row
+     * carries (mapped to {@code 0L}): a group's absence is itself a legitimate aggregate fact, not
+     * something to hide by omitting the key.
+     *
+     * <p>The returned map is sized by the question — one entry per group — never by the data, so
+     * the answer for a billion rows is the same sixteen numbers as the answer for a thousand.
      *
      * @throws UnauthorizedQueryException if {@link #authorize(Role)} was never called on this chain
+     * @throws com.adaworldapi.lancegraph.AbiMismatchException if the loaded library reports ABI
+     *     minor &lt; 12, which is where the fused grouped fold arrived
      */
     public Map<Integer, Long> sumBy(
             com.adaworldapi.lancegraph.U32Field group, com.adaworldapi.lancegraph.I32Field value) {
+        return sumByGroupCount(group, value, Orders.REGIONS);
+    }
+
+    /**
+     * {@link #sumBy} with the group count as a parameter, so a test can vary it.
+     *
+     * <p>Package-private on purpose. The public {@code sumBy} answers for exactly the fixture's
+     * regions and a caller has no business asking for a different number; but the claim that this
+     * costs one crossing <em>whatever</em> the group count is only a claim if something varies the
+     * group count, and nothing else in this package can. It is not part of the aggregate-egress
+     * surface the reflection guard audits — that guard reads public methods, which is the surface
+     * the guarantee is about.
+     */
+    Map<Integer, Long> sumByGroupCount(
+            com.adaworldapi.lancegraph.U32Field group,
+            com.adaworldapi.lancegraph.I32Field value,
+            int groups) {
         requireAuthorized("sumBy()");
         java.util.Objects.requireNonNull(group, "group");
         java.util.Objects.requireNonNull(value, "value");
-        Map<Integer, Long> result = new LinkedHashMap<>(16);
-        for (int v = 0; v < 16; v++) {
-            result.put(v, view.where(group.eq(v)).sumOf(value));
+        com.adaworldapi.lancegraph.GroupTotals totals = view.sumByGroup(group, value, groups);
+        Map<Integer, Long> result = new LinkedHashMap<>(totals.groups());
+        for (int v = 0; v < totals.groups(); v++) {
+            result.put(v, totals.total(v));
         }
         return result;
     }
