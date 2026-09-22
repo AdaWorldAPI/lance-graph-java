@@ -33,8 +33,22 @@ jobs:
       run:
         working-directory: lance-graph-java/native/lgj-abi
     steps:
+      # `persist-credentials: false` on EVERY checkout in this file (13 of them).
+      # Without it, a `pull_request` checkout leaves the workflow token in the
+      # clone's local git config, and every job here then runs `cargo`, which
+      # executes any `build.rs` the PR added — a read path to that token before
+      # the post-job cleanup. Flagged by zizmor as `artipacked`; raised by
+      # CodeRabbit against the `java-suites` checkouts on #86, and the other
+      # nine were already exposed identically, so this is the root-cause fix
+      # rather than four of thirteen.
+      #
+      # Provably free: no step in this file pushes, the workflow declares
+      # `contents: read`, and nothing reads a secret — so nothing here needs a
+      # persisted credential, and the sibling checkouts of ndarray /
+      # lance-graph / OGAR are public reads that never used one.
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: lance-graph-java
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -76,20 +90,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: lance-graph-java
       - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/ndarray
           path: ndarray
       - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/lance-graph
           path: lance-graph
       - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/OGAR
           path: OGAR
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -133,20 +151,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: lance-graph-java
       - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/ndarray
           path: ndarray
       - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/lance-graph
           path: lance-graph
       - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/OGAR
           path: OGAR
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -205,6 +227,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: lance-graph-java
       # Same three siblings as `rust-test`, for the same reason: cargo resolves
       # the whole graph including the inactive optional path dep, so all three
@@ -212,16 +235,19 @@ jobs:
       - name: Checkout AdaWorldAPI/ndarray (sibling dependency)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/ndarray
           path: ndarray
       - name: Checkout AdaWorldAPI/lance-graph (sibling dependency, lance-graph-contract)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/lance-graph
           path: lance-graph
       - name: Checkout AdaWorldAPI/OGAR (sibling dependency, optional ogar-classview feature)
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: AdaWorldAPI/OGAR
           path: OGAR
       - uses: actions-rust-lang/setup-rust-toolchain@v1

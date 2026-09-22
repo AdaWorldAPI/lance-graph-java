@@ -675,21 +675,57 @@ nothing ran** — a missing library reported as a failure would send the reader
 hunting a bug that is not there). So: build the `.so`, `javac`, `java`.
 
 ```sh
-# 1. the native artifact
-cd native/lgj-abi && cargo build --release          # -> target/release/liblgj_abi.so
+# Every path below is relative to the REPO ROOT; stay there for all three steps.
+# (The block used to `cd native/lgj-abi` in step 1 and then use root-relative
+# paths in step 2, so running it top-to-bottom failed on
+# `find: 'java/src/main': No such file or directory`.)
+SO=$PWD/native/lgj-abi/target/release/liblgj_abi.so
 
-# 2. compile main + test together (58 files)
-J=/usr/lib/jvm/temurin-26-jdk-amd64/bin      # or java-25-openjdk-amd64
+# 1. the native artifact. The `cd` is LOAD-BEARING and must stay: rustup reads
+#    `rust-toolchain.toml` from the CWD, and that file lives in native/lgj-abi,
+#    so `--manifest-path` alone builds with whatever rustc is ambient -- measured
+#    2026-09-22, `error: rustc 1.94.1 is not supported ... requires rustc 1.97`,
+#    exit 101. Same trap as `setup-rust-toolchain`'s `rust-src-dir` input in
+#    .github/workflows/lint.yml, one layer down. The subshell keeps the CWD from
+#    leaking into step 2, which is root-relative.
+( cd native/lgj-abi && cargo build --release )
+
+# 2. compile main + test together (58 files). BOTH flags are required, not
+#    stylistic: six types in java/src/main are `public value record`, so a
+#    javac without --enable-preview fails with "value classes are a preview
+#    feature and are disabled by default" (measured 2026-09-22, exit 1). And
+#    the JDK must be 28 -- see the inventory note below before reaching for a
+#    /usr/lib/jvm path.
+J=/opt/jdks/jdk-28+16/bin
 find java/src/main java/src/test -name '*.java' > /tmp/srcs.txt
-$J/javac -d /tmp/jout @/tmp/srcs.txt
+$J/javac --release 28 --enable-preview -d /tmp/jout @/tmp/srcs.txt
 
 # 3. run. `-Dlgj.library` is an EXPLICIT request and `Abi.locateLibrary`
 #    refuses to fall back to a search path if it cannot be honoured — by
 #    design, so a run can never silently measure a different artifact.
-$J/java --enable-native-access=ALL-UNNAMED \
-        -Dlgj.library=$PWD/target/release/liblgj_abi.so \
+#    $PWD/target/release/... was the OLD spelling and was ambiguous: from
+#    native/lgj-abi it is right, but from the repo root it names an incidental
+#    leftover `target/` (there is no root Cargo.toml) that is a SEPARATE inode
+#    from the artifact step 1 builds — byte-identical today, free to diverge,
+#    and absent entirely in a fresh clone. An ambiguous path is exactly what
+#    the no-fallback rule exists to rule out, so $SO is absolute.
+$J/java --enable-preview --enable-native-access=ALL-UNNAMED \
+        -Dlgj.library="$SO" \
         -cp /tmp/jout com.adaworldapi.lancegraph.AllTests
 ```
+
+> **⊘ CONTAINER JDK INVENTORY, measured 2026-09-22 — the 25/26 routes below are
+> RECOVERY instructions, not a description of this container.** `/opt/jdks`
+> holds exactly `jdk-28+16` (`jdk-26.0.2` and the `jdk-27` Valhalla EA build
+> are both GONE), and `/usr/lib/jvm` holds **only Java 21**, which cannot
+> compile this repo at all — value records need 28. So the `temurin-26-jdk-amd64`
+> path the command above used to name did not exist, and the reachability table
+> further down reads "verified on 25 AND 26" as DATED EVIDENCE from 2026-09-16,
+> never as a statement about what is installed now. The rung-1 check
+> (`ls -d /opt/jdks/*/`) remains the answer; rungs 3-4 (apt) are what you run
+> when rung 1 comes back empty. Same failure shape as the 409-vs-612 drift this
+> file already carries: a present-tense claim about a measured environment goes
+> stale silently, and the fix is to date it rather than to re-pin it forward.
 
 **Measured 2026-09-16 on BOTH `Temurin 26.0.2.1` and `openjdk 25.0.4`:
 `ALL PASSED (409 checks)`** across all 16 suites, against `abi 0.11, simd
