@@ -149,6 +149,26 @@ public final class GraphHopTest {
     private static final long PREDICTED_COUNT_CROSSINGS = 1;             // MEASURED-AND-PINNED
     private static final long PREDICTED_MINUS_CROSSINGS = 2;             // MEASURED-AND-PINNED
     private static final long PREDICTED_MATERIALIZE_FIRST_CROSSINGS = 1; // MEASURED-AND-PINNED
+
+    /**
+     * What a materializeRows() call costs AFTER the first, re-pinned 1 (was 0) on 2026-09-22.
+     *
+     * <p>It was 0 while {@code Mask.words()} was a pure cache. It is 1 because that cache now
+     * re-validates: every top-level facade call re-describes the mask through {@code
+     * lgj_mask_describe} and compares the returned epoch against the stamp it holds, so a cached
+     * address can never be read after the substrate has moved under it. That is the shipped
+     * safety property (root {@code CLAUDE.md}, zero-copy section: {@code Mask} "re-validates the
+     * cached window against the generation-checked registry at each top-level facade call"), so
+     * the number is the design's, not a regression — reverting it would mean deleting the
+     * re-validation.
+     *
+     * <p>The pin this replaces cited the plan's §3.5 "describe cached per Mask; zero crossings
+     * steady-state". That reading is superseded for {@code Mask}: the describe is still cached in
+     * the sense that the WORDS are not re-fetched and the population is never re-scanned —
+     * {@code lgj_mask_describe} fills a descriptor and does no work over the rows — but it is no
+     * longer free. Steady-state is now "constant per call", which is what the arms below assert.
+     */
+    private static final long PREDICTED_MATERIALIZE_STEADY_CROSSINGS = 1; // MEASURED-AND-PINNED
     private static final long PREDICTED_IMPORT_CROSSINGS = 2;            // MEASURED-AND-PINNED
 
     private static long[] seedRows() {
@@ -449,9 +469,11 @@ public final class GraphHopTest {
             c.eq("minus(Mask) costs exactly " + PREDICTED_MINUS_CROSSINGS + " crossing(s)",
                     PREDICTED_MINUS_CROSSINGS, minusCost);
 
-            // materializeRows(): "describe cached per Mask; zero crossings steady-state" (spec
-            // §3.5) -- so the FIRST call on a given Mask should cost something, the SECOND call
-            // on the very same Mask should cost nothing further.
+            // materializeRows(): constant cost per call, not zero after the first -- see
+            // PREDICTED_MATERIALIZE_STEADY_CROSSINGS for why the spec's "zero crossings
+            // steady-state" no longer holds and why that is the design rather than a regression.
+            // A THIRD call is measured too: it is what distinguishes "constant per call" from
+            // "one extra, once", and only the former is consistent with a per-call re-validation.
             long beforeFirstMaterialize = Diagnostics.crossings();
             long[] materializedOnce = afterMinus.materializeRows();
             long firstMaterializeCost = Diagnostics.crossings() - beforeFirstMaterialize;
@@ -462,9 +484,21 @@ public final class GraphHopTest {
             c.eq("materializeRows() first call costs " + PREDICTED_MATERIALIZE_FIRST_CROSSINGS
                             + " crossing (the one-time describe of this Mask's word lane)",
                     PREDICTED_MATERIALIZE_FIRST_CROSSINGS, firstMaterializeCost);
-            c.eq("materializeRows() SECOND call on the SAME Mask costs zero further crossings"
-                            + " -- steady-state, per spec §3.5",
-                    0, secondMaterializeCost);
+            long beforeThirdMaterialize = Diagnostics.crossings();
+            long[] materializedThrice = afterMinus.materializeRows();
+            long thirdMaterializeCost = Diagnostics.crossings() - beforeThirdMaterialize;
+
+            c.eq("materializeRows() SECOND call on the SAME Mask costs "
+                            + PREDICTED_MATERIALIZE_STEADY_CROSSINGS
+                            + " further crossing -- the cached window is re-validated against the"
+                            + " registry on every facade call, never read on trust",
+                    PREDICTED_MATERIALIZE_STEADY_CROSSINGS, secondMaterializeCost);
+            c.eq("materializeRows() THIRD call costs the same as the second -- constant per call,"
+                            + " which a one-off extra describe would not produce",
+                    secondMaterializeCost, thirdMaterializeCost);
+            c.that("the third materializeRows() agrees with the first on content too -- the"
+                            + " re-validation returns the same selection, it does not re-answer it",
+                    sameRowSet(materializedOnce, materializedThrice));
             c.that("both materializeRows() calls agree on content (the describe caching did not"
                             + " change the answer)",
                     sameRowSet(materializedOnce, materializedAgain));
