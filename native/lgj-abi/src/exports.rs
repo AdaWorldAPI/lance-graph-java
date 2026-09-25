@@ -1756,7 +1756,12 @@ fn exec_error_to_status(e: ExecError) -> i32 {
         | ExecError::BlendNeedsOut
         | ExecError::TerminalNeedsOut { .. }
         | ExecError::GateAliasesDst { .. }
-        | ExecError::RangeOutOfBounds { .. } => LGJ_ERR_ALLOCATION_FAILED,
+        | ExecError::RangeOutOfBounds { .. }
+        // Raised only by `execute_extent` over a PARTIAL extent. Every call in
+        // this file executes the whole population, so reaching either would
+        // be a bug here, exactly like the arms above.
+        | ExecError::ExtentOutOfRange { .. }
+        | ExecError::ExtentUnsupported { .. } => LGJ_ERR_ALLOCATION_FAILED,
     }
 }
 
