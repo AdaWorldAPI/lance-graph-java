@@ -1761,7 +1761,12 @@ fn exec_error_to_status(e: ExecError) -> i32 {
         // this file executes the whole population, so reaching either would
         // be a bug here, exactly like the arms above.
         | ExecError::ExtentOutOfRange { .. }
-        | ExecError::ExtentUnsupported { .. } => LGJ_ERR_ALLOCATION_FAILED,
+        | ExecError::ExtentUnsupported { .. }
+        // Raised only for `LaneRef::Strided` views and the
+        // `MaskedStridedGroupSum` terminal. This file lowers neither, so
+        // reaching either would be a bug here, exactly like the arms above.
+        | ExecError::StridedOutOfBounds { .. }
+        | ExecError::StridedGroupWidth { .. } => LGJ_ERR_ALLOCATION_FAILED,
     }
 }
 
