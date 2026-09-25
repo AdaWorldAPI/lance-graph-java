@@ -256,7 +256,10 @@ fn the_tiled_executor_and_the_scalar_reference_agree_on_the_lowered_program() {
         for key in keys {
             let program =
                 plan_lower::lower_group_sum(&ops, n as u32, key, LANE_VALUES as u16).unwrap();
-            let tile = tile_words_for(n as usize);
+            // An explicit narrow tile, not `tile_words_for`: the default tile
+            // is a performance setting (256 words since lance-graph #1281) and
+            // must not decide whether this fixture spans several tiles.
+            let tile = (n.div_ceil(64) as usize).min(8);
             let need = scratch_words_for(tile, plan_lower::SLOTS as usize).unwrap();
             let mut buf = vec![0u64; need];
             let mut scratch = Scratch::over(&mut buf, tile, plan_lower::SLOTS as usize).unwrap();
