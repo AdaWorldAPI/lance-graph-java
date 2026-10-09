@@ -10,7 +10,16 @@ J="${LGJ_JDK:-/opt/jdks/jdk-28}/bin"
 SO="$root/native/lgj-abi/target/release/liblgj_abi.so"
 out="$here/out"
 rm -rf "$out" && mkdir -p "$out"
-cp="$(ls "$here"/lib/*.jar | tr '\n' ':')"
+# The classpath is exactly the jars pinned in deps.lock, never a lib/ wildcard:
+# a stale jar left in lib/ must not shadow a pinned one.
+cp=""
+while read -r coord _; do
+  [ -z "$coord" ] && continue
+  IFS=: read -r _ a v <<<"$coord"
+  jar="$here/lib/$a-$v.jar"
+  [ -f "$jar" ] || { echo "missing $jar; run ./fetch-deps.sh" >&2; exit 1; }
+  cp="$cp$jar:"
+done < <(grep -v '^#' "$here/deps.lock")
 if ! "$J/javac" --release 28 --enable-preview -d "$out" -cp "$cp" \
   $(find "$root/java/src/main" "$root/java/src/test" "$root/consumers/graph/src/main" "$here/src" -name '*.java') \
   >"$out/javac.log" 2>&1; then

@@ -13,10 +13,11 @@ grep -v '^#' deps.lock | while read -r coord sum; do
     # Maven Central answers 429 under bursts; back off and retry a few times.
     for delay in 0 2 4 8 16; do
       sleep "$delay"
-      if curl -fsS -o "$jar.part" "$url"; then break; fi
+      # Bound each attempt: a stalled transfer must time out so the loop advances.
+      if curl -fsS --connect-timeout 20 --max-time 120 -o "$jar.part" "$url"; then break; fi
     done
     mv "$jar.part" "$jar"
   fi
   echo "$sum  $jar" | sha256sum -c --quiet - || { echo "checksum mismatch: $jar" >&2; rm -f "$jar"; exit 1; }
 done
-echo "deps ok: $(ls lib/*.jar | wc -l) jars"
+echo "deps ok: $(grep -cv -e '^#' -e '^$' deps.lock) jars"
