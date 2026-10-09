@@ -8,6 +8,24 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
+## PR (open) — A1 TinkerPop parity harness (branch `ccr-70e679fa-9qvl9y`)
+
+**Entry written at open.**
+
+- **Added:** `interop/tinkerpop/`, consisting of `TinkerParityTest`,
+  `deps.lock` (19 jars, sha256), `fetch-deps.sh`, `run.sh`, a README, and
+  gitignore lines for `lib/` and `out/`.
+- **Locked:** the lance-graph-java hop chain equals the Gremlin `dedup()`
+  count for k = 1..3 on three fixtures. The walk count without `dedup()`
+  differs, and the suite requires that difference.
+- **Deferred:** A2 (a `TraversalStrategy` that lowers compilable step runs
+  with a counted fallback), and CI wiring (it needs the jar fetch on the
+  runner).
+- **Gates:** 25 checks green; disable run red-then-green. The core suite was
+  untouched (612 checks green before the change).
+- **Confidence:** high for parity on these fixtures. It says nothing yet about
+  the speed or allocation of any lowered path (A3).
+
 ## PR #81 — Panama × Valhalla as ONE production membrane (merged `07aa441`, branch `claude/great-pascal-k96kok`, head `1c66091`, 3 commits)
 
 **Entry written at merge**, not backfilled.
