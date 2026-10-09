@@ -1,4 +1,4 @@
-# interop/tinkerpop: A1 parity harness
+# interop/tinkerpop: A1 parity harness and A2 lowering strategy
 
 One seeded graph, two engines, the same answers. The harness opens a
 `RowStore.openWithEdges` fixture and copies its edges into **TinkerGraph** 3.7.7,
@@ -30,4 +30,46 @@ The `java-suites` job runs this harness in two separate steps at its end:
 ## Rules it follows
 
 - The TinkerGraph copy reads facets one row at a time (`classidAt`, `payloadHi32At`, `payloadLow64At`). That is a scalar test oracle, which lance-graph-java licenses only in test code (rule E2). It is never an execution path.
-- Nothing here changes `src/main`. A provider strategy that rewrites Gremlin into mask chains is the next step (A2), and it must keep a counted, visible fallback for every traversal it does not lower.
+- Nothing here changes `src/main`.
+
+## A2: `LanceHopStrategy` (55 checks, all green)
+
+A TinkerPop provider strategy. Register it on a traversal source:
+
+```java
+GraphTraversalSource g = graph.traversal()
+        .withStrategies(new LanceHopStrategy(store, Map.of("knows", Edge.KNOWS)));
+long n = g.V(seeds).out("knows").out("knows").dedup().count().next();
+```
+
+It lowers exactly one shape, `V(ids).out(label)^k.dedup().count()` with k >= 1, onto
+the mask hop chain. The whole traversal becomes one `LanceHopCountStep`, which
+emits the count when iterated. `repeat(out(label)).times(k)` reaches the same
+shape because TinkerPop unrolls it first. Vertex ids are row numbers, and each
+edge label maps to an edge classid.
+
+Everything else stays with Gremlin, and each such root traversal is counted in
+`fellBack()`, with the reason in `lastFallbackReason()`:
+
+- a walk count (no `dedup()`), which is a bag, not a set;
+- `has()`, `in()`, `both()`, an unmapped label, more than one label per hop;
+- `V()` without ids, a non-numeric id, or an id outside the row store;
+- any `as()` label.
+
+`LoweringStrategyTest` checks four things:
+
+- **Parity:** lowered equals plain Gremlin for k = 1..3, through both `out()^k` and `repeat()`, and the traversal really ran as one `LanceHopCountStep`.
+- **Provenance:** against an *empty* TinkerGraph the lowered traversal still returns the row store's count, while plain Gremlin returns 0. The answer comes from the mask chain, not from Gremlin.
+- **Fallbacks:** each excluded shape is counted once and answers exactly as Gremlin.
+- **Counters:** the lowered and fallback counters move by one per root traversal.
+
+Disable runs, each red then green:
+- remove the `dedup()` guard: the walk count through `barrier()` gets lowered and gives the distinct count instead (6 red);
+- make the lowered step return 0: every parity check and the provenance check go red (7 red).
+
+Gremlin rewrites `out().count()` into `outE().count()` before provider strategies
+run, so a plain walk count never reaches the `dedup()` guard. The `barrier()`
+case exists to exercise that guard.
+
+The strategy reads the row store it was given, not the graph the traversal
+source wraps. Keeping both consistent is the caller's job.

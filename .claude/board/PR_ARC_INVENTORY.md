@@ -8,9 +8,28 @@
 > anti-pattern the imported board rules name. Backfilled below in one
 > pass rather than left stale; PR #4 onward gets its entry at merge time.
 
-## PR (open) — A1 TinkerPop parity harness (branch `ccr-70e679fa-9qvl9y`)
+## PR (open) — A2 TinkerPop lowering strategy (branch `ccr-70e679fa-9qvl9y`)
 
 **Entry written at open.**
+
+- **Added:** `interop/tinkerpop/LanceHopStrategy` (a TinkerPop
+  `ProviderOptimizationStrategy`), `LanceHopCountStep`, `LoweringStrategyTest`;
+  `run.sh` now runs both mains and fails if either fails.
+- **Locked:** only `V(ids).out(label)^k.dedup().count()` is lowered (k >= 1, one
+  mapped label per hop, numeric row ids within the store, no `has()` or `as()`).
+  Every other root traversal is counted as a fallback with a reason and answers
+  exactly as Gremlin.
+- **Gates:** 55 checks green (plus A1's 25). Disable runs: the `dedup()` guard
+  removed turns 6 checks red (a walk count through `barrier()` gets lowered to a
+  distinct count); a lowered step answering 0 turns 7 red.
+- **Deferred:** A3 (measure lowered vs plain Gremlin), A5 (Gremlin Server
+  endpoint).
+- **Confidence:** high for correctness of the lowered shape on this fixture.
+  Nothing yet about speed.
+
+## PR #89 — A1 TinkerPop parity harness (merged `0136005`, branch `ccr-70e679fa-9qvl9y`)
+
+**Entry written at open; merge recorded 2026-10-09.**
 
 - **Added:** `interop/tinkerpop/`, consisting of `TinkerParityTest`,
   `deps.lock` (19 jars, sha256), `fetch-deps.sh`, `run.sh`, a README, and

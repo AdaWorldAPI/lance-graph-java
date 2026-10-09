@@ -1,3 +1,18 @@
+## 2026-10-09 — Gremlin traversals lowered onto the mask hop chain (interop/tinkerpop, A2)
+
+`LanceHopStrategy` is a TinkerPop provider strategy. It rewrites
+`V(ids).out(label)^k.dedup().count()` into one `LanceHopCountStep` answered by the
+lance-graph-java mask hop chain, and leaves everything else to Gremlin with a
+counted fallback and a reason.
+
+- **Measured:** 55 checks green. Lowered results equal plain Gremlin for k = 1..3,
+  through both `out()^k` and `repeat().times(k)`. Against an empty TinkerGraph the
+  lowered traversal still returns the row store's count, which proves where the
+  answer comes from.
+- **Found:** Gremlin turns `out().count()` into `outE().count()` before provider
+  strategies run, so a walk count needs `barrier()` to reach the `dedup()` guard.
+  That case is now a test, and removing the guard turns it red.
+
 ## 2026-10-09 — Gremlin and the mask hop chain agree (interop/tinkerpop, A1)
 
 `interop/tinkerpop/` adds a parity harness, built outside `consumers/` so the
