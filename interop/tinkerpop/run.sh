@@ -27,5 +27,13 @@ if ! "$J/javac" --release 28 --enable-preview -d "$out" -cp "$cp" \
   echo "compile failed" >&2
   exit 1
 fi
-exec "$J/java" --enable-preview --enable-native-access=ALL-UNNAMED -Dlgj.library="$SO" \
-  -cp "$out:$cp" com.adaworldapi.interop.tinkerpop.TinkerParityTest
+# Run every main, then fail if any failed: one red suite must not hide the next.
+failed=""
+for main in TinkerParityTest LoweringStrategyTest; do
+  "$J/java" --enable-preview --enable-native-access=ALL-UNNAMED -Dlgj.library="$SO" \
+    -cp "$out:$cp" "com.adaworldapi.interop.tinkerpop.$main" || failed="$failed $main"
+done
+if [ -n "$failed" ]; then
+  echo "FAILED:$failed" >&2
+  exit 1
+fi

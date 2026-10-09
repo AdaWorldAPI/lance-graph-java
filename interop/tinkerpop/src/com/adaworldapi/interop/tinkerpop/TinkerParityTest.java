@@ -146,7 +146,7 @@ public final class TinkerParityTest {
     }
 
     /** Test-oracle copy: every KNOWS facet becomes one Gremlin edge, duplicates kept. */
-    private static TinkerGraph copyIntoTinkerGraph(RowStore store) {
+    static TinkerGraph copyIntoTinkerGraph(RowStore store) {
         TinkerGraph tg = TinkerGraph.open();
         long n = store.rowCount();
         Vertex[] vs = new Vertex[(int) n];
@@ -171,7 +171,7 @@ public final class TinkerParityTest {
         return tg;
     }
 
-    private static Object[] boxed(long[] rows) {
+    static Object[] boxed(long[] rows) {
         Object[] out = new Object[rows.length];
         for (int i = 0; i < rows.length; i++) {
             out[i] = rows[i];
