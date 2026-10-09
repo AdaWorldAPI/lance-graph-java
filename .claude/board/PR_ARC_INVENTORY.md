@@ -19,8 +19,9 @@
   count for k = 1..3 on three fixtures. The walk count without `dedup()`
   differs, and the suite requires that difference.
 - **Deferred:** A2 (a `TraversalStrategy` that lowers compilable step runs
-  with a counted fallback), and CI wiring (it needs the jar fetch on the
-  runner).
+  with a counted fallback).
+- **CI:** two steps at the end of `java-suites` fetch the sha256-pinned jars
+  and run the harness on the job's JDK 28 EA.
 - **Gates:** 25 checks green; disable run red-then-green. The core suite was
   untouched (612 checks green before the change).
 - **Confidence:** high for parity on these fixtures. It says nothing yet about

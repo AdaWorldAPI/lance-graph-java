@@ -17,6 +17,8 @@ from the same seeds twice:
 
 The harness lives outside `consumers/` on purpose. CI compiles every file under
 `consumers/` against `java/out` alone, and TinkerPop is not on that classpath.
+The `java-suites` job runs this harness in two separate steps at its end:
+`fetch-deps.sh`, then `run.sh` with `LGJ_JDK` set to the job's JDK 28 EA.
 
 ## What it checks (25 checks, all green)
 

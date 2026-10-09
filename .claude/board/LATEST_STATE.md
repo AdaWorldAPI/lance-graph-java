@@ -1,8 +1,9 @@
 ## 2026-10-09 — Gremlin and the mask hop chain agree (interop/tinkerpop, A1)
 
 `interop/tinkerpop/` adds a parity harness, built outside `consumers/` so the
-`java-suites` CI job (which compiles `consumers/` without TinkerPop) is
-untouched. It copies three `RowStore.openWithEdges` fixtures into TinkerGraph
+`java-suites` CI job (which compiles `consumers/` without TinkerPop) does not
+see TinkerPop. Two extra steps at the end of that job fetch the pinned jars and
+run the harness. It copies three `RowStore.openWithEdges` fixtures into TinkerGraph
 3.7.7, a test-oracle copy under rule E2. It then compares
 `Graph.from(seeds).hop(KNOWS)^k.count()` with
 `g.V(seeds).out("knows")^k.dedup().count()` for k = 1..3.
