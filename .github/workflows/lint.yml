@@ -343,3 +343,17 @@ jobs:
             exit 1
           fi
           echo "all four consumer suites passed"
+      # Quick win A1: TinkerGraph 3.7.7 vs mask hop chain parity. Kept out of
+      # `consumers/` because that tree is compiled above without TinkerPop on the
+      # classpath. `fetch-deps.sh` downloads 19 jars from Maven Central and
+      # refuses any whose sha256 differs from `deps.lock`; `run.sh` reads
+      # LGJ_JDK, not JAVA_HOME, so point it at the JDK 28 EA that setup-java
+      # installed in this job.
+      - name: Fetch TinkerPop jars (sha256-pinned)
+        working-directory: lance-graph-java/interop/tinkerpop
+        run: ./fetch-deps.sh
+      - name: Run the TinkerPop parity harness (A1)
+        working-directory: lance-graph-java/interop/tinkerpop
+        env:
+          LGJ_JDK: ${{ env.JAVA_HOME }}
+        run: ./run.sh

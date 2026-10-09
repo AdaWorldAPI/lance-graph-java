@@ -1,3 +1,24 @@
+## 2026-10-09 — Gremlin and the mask hop chain agree (interop/tinkerpop, A1)
+
+`interop/tinkerpop/` adds a parity harness, built outside `consumers/` so the
+`java-suites` CI job (which compiles `consumers/` without TinkerPop) does not
+see TinkerPop. Two extra steps at the end of that job fetch the pinned jars and
+run the harness. It copies three `RowStore.openWithEdges` fixtures into TinkerGraph
+3.7.7, a test-oracle copy under rule E2. It then compares
+`Graph.from(seeds).hop(KNOWS)^k.count()` with
+`g.V(seeds).out("knows")^k.dedup().count()` for k = 1..3.
+
+- **Measured (JDK 28-ea+18, abi 0.12, avx512):** 25 checks green. All 9
+  counts are equal, the pinned fixture reproduces GraphHopTest's 19 and 29,
+  and the largest case is n=20000, k=3, with 873 distinct rows.
+- **Walks are not vertices:** the counts without `dedup()` are higher on every
+  fixture (e.g. 76 vs 55). Only the `dedup()` form may be lowered to a mask
+  chain, and the suite pins that it can tell the difference.
+- **Disable-verified:** with the chain one hop short, all 9 comparisons go red.
+- Dependencies: 19 jars pinned with sha256 in `deps.lock`. `fetch-deps.sh`
+  retries on HTTP 429 from Maven Central.
+- **Not done:** a provider strategy (A2). Nothing in `src/main` changed.
+
 ## 2026-09-22 — the Java gate is DISPATCHED, and one measurement stops being restated in eight places
 
 `ISS-LGJ-CONSUMERS-HAVE-NO-CI-LINE` is RESOLVED. `java-suites` in

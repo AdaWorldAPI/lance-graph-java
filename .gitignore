@@ -35,3 +35,7 @@ Cargo.lock.bak
 valhalla-lab/reproducers/*.so
 valhalla-lab/reproducers/r8_standalone
 valhalla-lab/reproducers/r8-ndarray/target/
+
+# interop/tinkerpop: fetched jars and compiled classes (fetch-deps.sh / run.sh)
+/interop/tinkerpop/lib/
+/interop/tinkerpop/out/
