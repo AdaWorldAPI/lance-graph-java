@@ -71,7 +71,8 @@ no `cbindgen`, no `jextract`, no JNI. See `docs/abi.md` §1 and
 
 ## Toolchains
 
-- Rust: **1.97.1** stable, matching `ndarray`/`lance-graph`'s pin.
+- Rust: stable, pinned in `native/lgj-abi/rust-toolchain.toml` (the version
+  lives there only, matching `ndarray`/`lance-graph`'s pin).
 - Production JDK: **JDK 28** (`/opt/jdks/jdk-28+16`). Panama FFM is final
   there and needs no flag; Valhalla (JEP 401) is preview-gated and production
   uses it, so `--enable-preview` is required — for the value classes, never

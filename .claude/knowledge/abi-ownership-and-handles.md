@@ -66,3 +66,38 @@ the `Arena`/segment lifetime as nested *inside* the resource's own lifetime,
 so Java's own bookkeeping fails fast on a use-after-close even before the
 call reaches Rust (belt-and-braces, not a substitute for the Rust-side
 check).
+
+## Rust 1.99 (2026-10-10): what the C-ABI changes do and do not buy here
+
+MEASURED on 1.99.0 / LLVM 23. lgj-abi is clippy-clean with `-D warnings`. All
+four Java suites pass (`AllTests` 612, consumers 70 + 68 + 3 + 12) against a
+`liblgj_abi.so` built by 1.99. lgj-abi's graph contains no lance, lancedb or
+arrow, so the lance 13 move does not reach this crate.
+
+- **`UnsafeCell` contents may be accessed without `get` (newly guaranteed).**
+  This does NOT change the soundness of the writable mask lane.
+  - `lgj_mask_describe` hands Java the address of `MaskWords.words`. That is
+    a boxed heap buffer, not the inside of the lock's `UnsafeCell`. Java writes
+    to it through the segment, outside the lock.
+  - It is sound today because no Rust reference to those words is live while
+    Java writes. The one production writer, `RowStore.importRows`, writes a
+    mask whose handle has not been returned to anyone yet. Every Rust op
+    re-borrows through the lock.
+  - A concurrent Java writer would still be a data race, and the guarantee
+    does not make a race defined. That needs `AtomicU64` words plus a
+    documented protocol, which this ABI deliberately does not define.
+  - Possible hardening, not done: take the address under the write guard
+    (`as_mut_ptr`), so it carries write provenance. Not done because
+    `write_mask` also invalidates `resolved_carving`, so every describe would
+    drop the carving cache. That is a behaviour change for no reachable
+    defect.
+- **C-variadic definitions / `VaList` (stabilized):** not applicable. The ABI
+  is fixed-arity and bulk-only (`docs/abi.md` §6), and `no-c-ever.md` holds.
+- **`no_mangle` on generic items is now a hard error:** the 30 `#[no_mangle]`
+  exports are all non-generic.
+- **Extern statics no longer promoted:** none are referenced.
+- **`Box::into_non_null` / `Vec::from_parts`:** no site here. Handles are
+  registry ids, never raw boxes.
+
+REVISIT WHEN: the ABI grows a concurrent-writer protocol (then: atomic word
+lanes), or a Java writer other than `importRows` appears.
