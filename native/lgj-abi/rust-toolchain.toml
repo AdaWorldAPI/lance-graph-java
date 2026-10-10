@@ -2,7 +2,7 @@
 # Stable only. Matches ndarray / lance-graph / the rest of the AdaWorldAPI
 # stack. No nightly features anywhere in this crate — in particular no
 # `core::simd` / portable-simd (abi.md §8).
-channel = "1.98.1"
+channel = "1.99.0"
 components = ["clippy", "rustfmt"]
 
 # Bump log (append one line per bump; the version itself is the `channel`
