@@ -2,7 +2,7 @@
 # Stable only. Matches ndarray / lance-graph / the rest of the AdaWorldAPI
 # stack. No nightly features anywhere in this crate — in particular no
 # `core::simd` / portable-simd (abi.md §8).
-channel = "1.98.1"
+channel = "1.99.0"
 components = ["clippy", "rustfmt"]
 
 # Bump log (append one line per bump; the version itself is the `channel`
@@ -11,6 +11,12 @@ components = ["clippy", "rustfmt"]
 #                     carried by ndarray / lance-graph / OGAR. Forced, not
 #                     optional: ndarray 0.17.2 now declares rustc 1.98, so
 #                     a 1.97.1 build of this crate fails to resolve at all.
+#   1.98.1 → 1.99.0   2026-10-10: workspace-wide sweep (lance-graph #1437).
+#                     Must merge BEFORE the ndarray / lance-graph bumps: CI
+#                     checks the siblings out at main, and once they declare
+#                     rust-version 1.99 a 1.98 build here no longer resolves.
+#                     Measured: clippy -D warnings clean; AllTests 612 +
+#                     consumers 153 green against a 1.99-built .so.
 #
 # This is THE toolchain file for this repo. A second one briefly existed at
 # the repository root; it was removed rather than kept in sync, because two
