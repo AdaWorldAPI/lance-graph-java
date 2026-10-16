@@ -39,3 +39,6 @@ valhalla-lab/reproducers/r8-ndarray/target/
 # interop/tinkerpop: fetched jars and compiled classes (fetch-deps.sh / run.sh)
 /interop/tinkerpop/lib/
 /interop/tinkerpop/out/
+
+# No tracked Cargo.lock (no pins, 2026-10-16): builds resolve the latest heads.
+Cargo.lock
