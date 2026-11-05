@@ -1,66 +1,50 @@
-# LGJ-HOLOGRAPHIC-OBJECT-FACADE-1: Typed façade, no row hydration
+# LGJ-FOLDING-PRECEDENT-1: Folding without materialization
 
-**Status:** PROPOSED / plans only. **Date:** 2026-11-05. **Owner:** lance-graph-java. **Dependencies:** lance-graph P0 and P2 (semantic decisions, not runtime dependencies).
+**Status:** PROPOSED / documentary reference only. **Date:** 2026-11-05. **Owner:** lance-graph-java for the precedent evidence only. **Dependency status:** NON-BLOCKING REFERENCE, not an upstream component of GridCraft, Bagop, ndarray or report-rs.
 
-**Mission:** Capture the existing Valhalla/Panama membrane precedent for GridCraft and a PowerShell PSCustomObject-shaped holographic Bag projection. **Do not** introduce Java or PowerShell as an execution dependency of GridCraft. DR64 remains exclusively the Bag representation; the façade has no alternate semantic authority.
+## Operator clarification: strictly a precedent
 
-## Existing source-backed precedent
+**lance-graph-java has exactly one role in this seven-PR program: demonstrate the pattern of folding over native columnar/mask representations without materializing one host-language object per logical row.**
 
-- [Top-level architecture](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/README.md) describes one native lane set + packed mask + semantic descriptors in place of 64,000 Java objects.
-- [Java semantic API](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/java/README.md): fluent View/where/count; one membrane crossing for a terminal operation; API surface checks disallow native internals in the consumer API.
-- [Valhalla three truths](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/valhalla-lab/docs/three-truths.md): separate semantic equivalence, physical representation, and measured allocation/throughput. Some benchmarks were run under older JDKs and must not be silently generalized to all JDK 28 builds.
-- [Membrane integration plan](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/.claude/plans/mask-membrane-valhalla-integration-v1.md): consumer façade only names native operations; no Java-side mask ALU or consumer-visible worker topology; stale generation checks and exception list matter.
-- [ABI contract](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/docs/abi.md) and [Panama design](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/docs/panama.md) separate descriptors, handles, memory lifetime and execution.
+Nothing else is imported from this repository into the planned XVERWEIS implementation. It is **not**:
 
-## Proposed semantic mapping
+- An execution or binary dependency of GridCraft, ndarray, Bagop or report-rs.
+- The owner of XVERWEIS semantics, PSCustomObject semantics, order, multiplicity, canonical identity or tenant scope.
+- A required Java/Valhalla/Panama FFM bridge, ABI or API.
+- A prerequisite owner decision, implementation gate or cross-runtime oracle for P0–P3/P5–P6.
+- A mandate to replicate a Java object façade, consumer DSL or host-language type hierarchy.
 
-A PowerShell expression can *look* like:
+The actual implementation route remains **holographic DR64 Bag → lawfully admitted Bagop fold → ndarray positional/SIMD operations → GridCraft/PowerShell presentation**. The first three responsibilities belong to lance-graph and ndarray, not to Java.
 
-    $customer.Services.ExchangeOnline
+## Source-backed fold-without-hydration evidence
 
-while its canonical interpretation is:
+- [lance-graph-java/README.md](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/README.md): 65,536 logical entities are represented as a native lane set, packed selection mask, small descriptors and bulk terminal operation, rather than 65,536 Java row objects.
+- [java/README.md](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/java/README.md): a fluent where/where/count chain composes lazy predicates and crosses the membrane at terminal evaluation. Its LazinessTest counts crossings, rather than assuming laziness.
+- [valhalla-lab/docs/three-truths.md](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/valhalla-lab/docs/three-truths.md): measurements distinguish semantic equivalence, allocation and runtime cost. Do not infer GridCraft performance from Java/Valhalla observations.
+- [mask-membrane plan](https://github.com/AdaWorldAPI/lance-graph-java/blob/main/.claude/plans/mask-membrane-valhalla-integration-v1.md): host façade names a native operation, does not recompute native mask algebra; execution ownership stays below the membrane.
 
-    TypedPropertyPath(Customer, Services, ExchangeOnline)
-        + authenticated Bag scope
-        + DT64 method/field binding
-        + witnessed DR frame / layout / value revision
-        → Bagop projected value, not allocated nested objects
+The transferable invariant is **construct a tiny descriptor of a fold over a borrowed population; execute the fold in the owning native substrate; materialize only the demanded terminal scalar, viewport or external serialization**.
 
-Java / PowerShell / GridCraft owns human-readable property syntax, projection descriptors and presentation. Bagop owns Bag semantics. ndarray/mask-risc owns authorized computation; DR64 represents the Bag. **No PSCustomObject interpreter, Java heap object tree, HashMap of customer attributes, or second SIMD engine is permitted in the hot path.** Actual PowerShell object construction is allowed at a terminal serialization boundary when the external host requires it.
+The Java-specific mechanisms that realize this invariant do **not** transfer as requirements.
 
-## Semantics and refusals
+## Narrow precedent checklist
 
-| Obligation | Plan | Gate |
+| Evidence question | Method | What it does NOT prove |
 |---|---|---|
-| Property path resolves correctly | Typed symbols bind via owner DT64 basis | Unknown/unbound path refuses, not dynamic HashMap fallback |
-| Lifetime | Descriptor stamped with source/frame/layout/scope/value witness | Stale, closed, foreign-scope handles refuse |
-| No per-row hydration | One native population, masks, tiny value descriptors | Allocated bytes proportional to descriptors/terminal demand |
-| Multiplicity | Named object view is a lens over Bag occurrences | No silent DISTINCT or first-row overwrite |
-| Missing/unknown | Preserve source cell states and errors | No invented null defaults |
-| Fusion/laziness | Descriptor chain has no native crossing until terminal | Count crossings and allocations, not prose assertions |
-| Native ownership | No facade code runs its own SIMD/Bag folds | ApiSurfaceTest-like static audit |
+| Are logical rows represented without one Java object each? | Review native lane+mask design and allocated bytes | That GridCraft has already achieved zero row hydration |
+| Is folding lazy until terminal evaluation? | Read the Java LazinessTest and native crossing counter | That an XVERWEIS ordered fold is admitted |
+| Are rows folded in native SIMD? | Trace existing native mask/count call and backend evidence | That lookup/multiplicity/first-last semantics are automatically correct |
+| Is cost attributed correctly? | Separate bind, descriptor construction, terminal fold and egress | That every runtime, architecture or dataset has the same performance |
 
-Do not describe PowerShell as already running through this Java ABI. This is a **cross-language design analogy** and an evidence plan. Valhalla value classes are neither required for Rust nor a proof that PowerShell avoids per-output object allocation.
+**The end-to-end implementation oracle belongs to P6 GridCraft; semantic law belongs to P2 lance-graph; SIMD mechanics belong to P1 ndarray.** P4 does not supply a parallel Java oracle or require a Java runtime during the probe.
 
-## Independent research falsifier
+## Scope of this PR
 
-Use one synthetic 65,536-identity Bag fixture with duplicate occurrences, two tenants with same external label and one value revision. Compare:
+One documentation-only reference, no Java source changes, no new tests, no FFM changes, no implementer tasks for Java. Downstream readers should cite the precedent only for the no-materialization folding design and its measurement discipline.
 
-1. Direct Bagop typed property projection.
-2. Java façade descriptor terminal operation (only for existing admitted verbs).
-3. Proposed GridCraft virtual cell descriptor.
-4. Independent scalar oracle over canonical identities/values.
+### Decision log
 
-Track object allocations, native crossing count, frame and scope refusals. Disable semantic handle validation and require wrong/unauthorized results to be caught. For a property verb not admitted in Java, specify the missing native primitive and stop; do not implement Java computation. Separate overhead of typed descriptor construction from object hydration and from cold/terminal serialization.
+- **2026-11-05:** Initial plan was too broad: it described PSCustomObject semantic façade design and implied P4 was a predecessor/gate.
+- **2026-11-05 (correction):** Operator clarified lance-graph-java is **only a precedent for folding without materialization**. All Java-specific façade, API and runtime obligations are out of scope. P4 is non-blocking historical/empirical evidence. Implementations do not wait for P4 approval.
 
-## Traceability and decisions
-
-| Requirement | Existing contract | Owner | Falsifier |
-|---|---|---|---|
-| Zero row-object façade | java/README.md + valhalla three truths | LGJ | Heap allocated bytes vs 65,536 entities |
-| One native Bag | P0 | lance-graph | Drop derived indexes, compare oracle |
-| XVERWEIS/PSCustomObject meaning | P2 | Bagop/DT64 | Ordered occurrence and named field parity |
-| Spreadsheet projection | P3 | GridCraft | Viewport not whole worksheet |
-| Integrated proof | P6 | GridCraft orchestrates | Independent cross-runtime semantics |
-
-**Decision log 2026-11-05:** derive façade rules from existing LGJ precedent. **Next implementation PR:** none in this repo unless the owner finds a specifically missing semantic descriptor after P2. No Java build/code changes in this plan PR.
+**No implementation authorization. No extra dependency on the Java repository.**
