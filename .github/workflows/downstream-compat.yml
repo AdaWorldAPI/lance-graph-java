@@ -7,13 +7,16 @@ name: Downstream compatibility
 # `mask_risc::ExecError` variants meeting the exhaustive match in
 # `exec_error_to_status` (E0004): 183745e, 4cae6da, 979692c, 3593fb3, ce6ce22.
 #
-# This workflow compiles `lgj-abi` against today's sibling heads once a day,
+# This workflow compiles and tests `lgj-abi` against today's sibling heads once a day,
 # so the drift is found within a day instead of at the next push. It is a
 # DETECTOR: it runs after the upstream merge. Catching the break before the
 # merge is the job of the matching check in AdaWorldAPI/lance-graph.
 #
-# It compiles and does not test: `cargo check --all-targets` is what an API
-# break needs, and it keeps the daily run short.
+# It runs the tests, not only the compile. An upstream change can keep every
+# signature and still change an answer; `cargo check` cannot see that, and the
+# native tests (parity against scalar oracles, the Quack lowering comparison)
+# can. lgj is not in production, so it follows the sibling heads and this run
+# is where a change in meaning shows.
 
 on:
   schedule:
@@ -93,8 +96,8 @@ jobs:
               echo "| $repo | \`$(git -C "$repo" rev-parse HEAD)\` |"
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: cargo check --all-targets (lgj-abi)
-        run: cargo check --all-targets
+      - name: cargo test --all-targets (lgj-abi)
+        run: cargo test --all-targets
       - name: How to reproduce a failure
         if: failure()
         run: |
@@ -106,7 +109,7 @@ jobs:
             echo
             echo '```'
             echo "cd lance-graph-java/native/lgj-abi"
-            echo "RUSTFLAGS='-D warnings -Ctarget-cpu=x86-64-v3' cargo check --all-targets"
+            echo "RUSTFLAGS='-D warnings -Ctarget-cpu=x86-64-v3' cargo test --all-targets"
             echo '```'
             echo
             echo "An \`E0004\` in \`exec_error_to_status\` means lance-graph added a"

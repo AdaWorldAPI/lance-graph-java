@@ -43,11 +43,12 @@ match in `exec_error_to_status`: `183745e`, `4cae6da`, `979692c` (#87),
 
 **Two gates, two jobs.**
 
-- Daily, here: `cargo check --all-targets` on `lgj-abi` against the default
+- Daily, here: `cargo test --all-targets` on `lgj-abi` (compile and tests,
+  since 2026-11-12; first version compiled only) against the default
   branch heads of lance-graph, ndarray and OGAR. Finds drift within a day.
   Runs on `schedule` and `workflow_dispatch`, and on a PR that edits the
   workflow file.
-- On lance-graph PRs: the same compile against the PR's own head, so the break
+- On lance-graph PRs: the same compile and tests against the PR's own head, so the break
   shows before the upstream merge. That check lives in lance-graph.
 
 **Verified.** With the two `Sel*` arms removed from `exec_error_to_status`
