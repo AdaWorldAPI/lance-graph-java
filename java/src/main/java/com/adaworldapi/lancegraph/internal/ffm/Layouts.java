@@ -116,6 +116,11 @@ public final class Layouts {
     /** Union into the accumulator — widening. Deliberately unreachable from {@code View.where}. */
     public static final int COMBINE_OR = 1;
 
+    /** {@code lgj_plan_scalar} fold (docs/abi.md §21): how many rows the plan selects. */
+    public static final int FOLD_COUNT = 0;
+    /** {@code lgj_plan_scalar} fold (docs/abi.md §21): the sum of an {@code I32} lane. */
+    public static final int FOLD_SUM_I32 = 1;
+
     // ── SIMD backend ids (docs/abi.md §5) ────────────────────────────────────────────────────
 
     public static final int SIMD_SCALAR = 0;

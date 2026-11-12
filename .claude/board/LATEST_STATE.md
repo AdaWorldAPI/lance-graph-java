@@ -1,3 +1,55 @@
+## 2026-11-12 — two characterisations (tests only; in a draft PR)
+
+**The two lowerings emit the same `Program`** (`lowering_convergence.rs`,
+`both_lowerings_emit_the_same_program`). For the 56 plans with at least one AND
+(arity 2 to 5, all nine opcodes) and the four terminals this crate lowers to
+(keep, count, sum, grouped sum), `plan_lower(ops) == quack::lower(fold_to_tree(ops))`
+structurally: 224 of 224. Until now the file compared answers only.
+
+- Disable-verified: dropping the survivor gate, or swapping the AND's operand
+  order, turns only this test red. Every answer-level test stays green, since
+  neither change alters an answer.
+- Scope: the Quack side receives this file's tree reading of the flat plan.
+  Plans with no AND and the fk-keyed grouped sum are outside the claim.
+
+**Which exports check a mask's parent** (`provenance.rs`). Twelve exports
+against five mask origins, asserted as a table:
+
+- Row count only (9): `lgj_op_eq_u32`, `lgj_op_gt_i32`, `lgj_plan_eval`,
+  `lgj_reduce_sum_i32`, `lgj_reduce_i32`, `lgj_op_eq_classid`,
+  `lgj_op_ternary_match`, `lgj_hop` (source and destination). A mask over a
+  different resource, or over a resource of the other kind, is accepted.
+- Same parent (3, plus the four mask-algebra ops): `lgj_reduce_facet_sum`,
+  `lgj_reduce_facet_sum_resolved`, `lgj_row_layout_probe`.
+- `a_selection_can_be_relabelled_onto_another_resource_today` shows the
+  consequence: a predicate evaluated on B, stored in A's mask and summed over
+  A's values returns `OK` and a number that answers neither A nor B.
+- Experiment, not committed: with the same-parent rule in all nine places,
+  the native suite (except the two tests that pin the lenient rule), `AllTests`
+  (617), the four consumer mains (153) and the TinkerPop harness (80) all pass.
+  `bench/` was not run. No rule was changed.
+
+## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, in a draft PR)
+
+Status: implemented and measured; in a draft PR on top of the merged P0 fix (#94).
+
+- **Added:** `lgj_plan_scalar` (`docs/abi.md` §21) with `LGJ_FOLD_COUNT` and
+  `LGJ_FOLD_SUM_I32`. `plan_lower::lower_scalar` reuses `lower_plan`'s ops and
+  ends in mask-RISC's existing `Count` / `MaskedSumI32` terminals. `lgj_plan_eval`
+  is unchanged. `View.count()` and `View.sumOf()` use the new symbol at minor
+  13 or later and keep the mask path against an older library.
+- **Measured:** native 205 tests (9 new, including one allocation gate); 6 of 6
+  disable runs red. Java core 617 checks; consumers 70 / 68 / 3 / 12, unchanged.
+  Against a minor-12 library built from the #94 commit, `OldAbiCompatTest` gives
+  the same answers (71, 6257, 111296) in 2 crossings where minor 13 takes 1.
+- **Cost:** `sumOf()` 2 crossings to 1; `count()` stays 1. Mask bytes written per
+  call go from `8 × ceil(rows / 64)` to 0. Native latency: count unchanged within
+  noise, sum 3–25% faster (`examples/plan_scalar_cost.rs`).
+- **Re-pinned:** `LazinessTest` (sumOf 2 to 1) and `GroupSumTest` (the per-group
+  path 32 to 16 crossings). Both pins moved because the cost moved.
+- **Not done:** JMH numbers through the JVM; a `Program`-level comparison with
+  Quack for these two terminals.
+
 ## 2026-10-09 — Gremlin traversals lowered onto the mask hop chain (interop/tinkerpop, A2)
 
 `LanceHopStrategy` is a TinkerPop provider strategy. It rewrites

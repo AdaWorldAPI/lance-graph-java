@@ -118,7 +118,9 @@ public final class GroupSumTest {
                 lv.where(Pattern.CLASS.eq(g)).sumOf(Pattern.VALUE);
             }
             long perGroupCost = Diagnostics.crossings() - d;
-            c.eq("the per-group path pays two crossings per group", 2L * GROUPS, perGroupCost);
+            // One crossing per group since ABI minor 13 (sumOf folds straight into the sum,
+            // docs/abi.md §21); it was two. Still GROUPS times what sumByGroup pays.
+            c.eq("the per-group path pays one crossing per group", (long) GROUPS, perGroupCost);
 
             long e = Diagnostics.crossings();
             large.view().sumByGroup(Pattern.CLASS, Pattern.VALUE, GROUPS);

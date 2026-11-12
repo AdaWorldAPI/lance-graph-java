@@ -720,3 +720,116 @@ fn grouped_sums_agree_with_quack_over_the_combine_sweep() {
         distinct.len()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Structural convergence: the two lowerings emit the SAME `Program`.
+// ---------------------------------------------------------------------------
+
+/// All nine opcodes appear across these two sets and the two above.
+const WIDE_FOUR_OP: [(u32, u32, i64); 4] = [
+    (LGJ_OP_NE_U32, LANE_CLASSES, 2),
+    (LGJ_OP_GE_I32, LANE_VALUES, -50),
+    (LGJ_OP_LE_I32, LANE_VALUES, 400),
+    (LGJ_OP_NE_I32, LANE_VALUES, 7),
+];
+const WIDE_FIVE_OP: [(u32, u32, i64); 5] = [
+    (LGJ_OP_EQ_I32, LANE_VALUES, 12),
+    (LGJ_OP_LT_I32, LANE_VALUES, 300),
+    (
+        LGJ_OP_TERNARY_MATCH_U32,
+        LANE_CLASSES,
+        (0x3_i64 << 32) | 0x1,
+    ),
+    (LGJ_OP_GT_I32, LANE_VALUES, 100),
+    (LGJ_OP_EQ_U32, LANE_CLASSES, 5),
+];
+
+/// Everything above compares ANSWERS. This compares the lowered `Program`
+/// values themselves — ops, terminal and scratch-slot count — for every plan
+/// that has at least one AND, under all four terminals this crate lowers to.
+///
+/// Scope, so it is not over-read: the Quack side is given the flat plan read
+/// as a tree by [`fold_to_tree`], which is this file's reading, not Quack's.
+/// The claim is `plan_lower(ops) == quack::lower(fold_to_tree(ops))`. Plans
+/// with no AND are outside it (this crate answers them without a filter),
+/// and so is the fk-keyed grouped sum.
+#[test]
+fn both_lowerings_emit_the_same_program() {
+    let sets: [&[(u32, u32, i64)]; 4] = [&TWO_OP, &THREE_OP, &WIDE_FOUR_OP, &WIDE_FIVE_OP];
+    let val = Col(LANE_VALUES as u16);
+    let key = Col(LANE_CLASSES as u16);
+    let (mut compared, mut opcodes) = (0usize, std::collections::BTreeSet::new());
+    let mut distinct = std::collections::HashSet::new();
+    for base in sets {
+        let arity = base.len() as u32;
+        for bits in 0u32..(1 << arity) {
+            let ops: Vec<LgjOpDesc> = base
+                .iter()
+                .enumerate()
+                .map(|(i, &(opcode, lane, operand))| {
+                    let combine = if bits & (1 << i) == 0 {
+                        LGJ_COMBINE_AND
+                    } else {
+                        LGJ_COMBINE_OR
+                    };
+                    op(opcode, lane, operand, combine)
+                })
+                .collect();
+            let Some(filter) = fold_to_tree(&ops) else {
+                continue; // no AND: outside the claim, see the doc above
+            };
+            opcodes.extend(ops.iter().map(|o| o.op));
+            let scalar = |fold| match plan_lower::lower_scalar(&ops, fold) {
+                Some(plan_lower::LoweredScalar::Program(p)) => p,
+                _ => panic!("a plan with an AND lowers to a program"),
+            };
+            let keep = match plan_lower::lower_plan(&ops) {
+                Some(plan_lower::Lowered::Program(p)) => p,
+                _ => panic!("a plan with an AND lowers to a program"),
+            };
+            let arms = [
+                ("count", scalar(plan_lower::ScalarFold::Count), Agg::Count),
+                (
+                    "sum",
+                    scalar(plan_lower::ScalarFold::SumI32 {
+                        val: LANE_VALUES as u16,
+                        n_rows: SWEEP_N as u32,
+                    }),
+                    Agg::SumI32(val),
+                ),
+                ("keep", keep, Agg::Rows),
+                (
+                    "group_sum",
+                    plan_lower::lower_group_sum(
+                        &ops,
+                        SWEEP_N as u32,
+                        plan_lower::GroupKey::Local(LANE_CLASSES as u16),
+                        LANE_VALUES as u16,
+                    )
+                    .expect("lowers"),
+                    Agg::GroupSumI32 { key, val },
+                ),
+            ];
+            for (name, ours, agg) in arms {
+                let theirs = lance_graph_quack::lower(&Query {
+                    filter: filter.clone(),
+                    agg,
+                })
+                .expect("quack lowers");
+                assert_eq!(
+                    ours, theirs,
+                    "{name}, arity {arity}, combine bits {bits:05b}: the two lowerings \
+                     emit different programs"
+                );
+                distinct.insert(format!("{ours:?}"));
+                compared += 1;
+            }
+        }
+    }
+    // 3 + 7 + 15 + 31 plans with an AND, four terminals each.
+    assert_eq!(compared, 56 * 4);
+    // Anti-vacuity: the programs are all different from one another, and the
+    // sweep reaches every opcode the ABI defines.
+    assert_eq!(distinct.len(), compared);
+    assert_eq!(opcodes.len(), 9);
+}

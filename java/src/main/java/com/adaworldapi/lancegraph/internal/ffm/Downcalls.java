@@ -492,6 +492,38 @@ public final class Downcalls {
     }
 
     /**
+     * ABI minor 13 symbol (docs/abi.md §21): the fused plan folded straight into one scalar,
+     * with no mask handle involved. Lazy per the minor-2..12 rule.
+     */
+    private static final class Minor13 {
+        static final MethodHandle PLAN_SCALAR = mh("lgj_plan_scalar",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private Minor13() {}
+    }
+
+    /**
+     * Fold the rows the plan selects into one scalar in ONE crossing (docs/abi.md §21, minor
+     * 13): a count ({@link Layouts#FOLD_COUNT}) or the sum of an {@code I32} lane
+     * ({@link Layouts#FOLD_SUM_I32}). No destination mask exists; {@code nOps == 0} is legal and
+     * means every row.
+     */
+    public static long planScalar(long res, MemorySegment ops, int nOps, int fold, int valLane,
+            MemorySegment outValue) {
+        crossed();
+        int st;
+        try {
+            st = (int) Minor13.PLAN_SCALAR.invokeExact(res, ops, nOps, fold, valLane, outValue);
+        } catch (Throwable t) {
+            throw wrap("lgj_plan_scalar", t);
+        }
+        Status.check("lgj_plan_scalar", st);
+        return outValue.get(ValueLayout.JAVA_LONG, 0);
+    }
+
+    /**
      * ABI minor 12 symbol (docs/abi.md §20): the fused plan run straight into a grouped-sum
      * terminal — one crossing returns one {@code i64} per group and no selection ever exists.
      * Lazy per the minor-2..11 rule.
