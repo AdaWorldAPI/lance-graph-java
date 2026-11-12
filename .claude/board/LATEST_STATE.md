@@ -1,4 +1,14 @@
-## 2026-11-12 — ABI minor 14: a mask belongs to one resource (D-LGJ-MASK-PARENT-1, in a PR)
+## 2026-11-12 — the toolchain mandate is a test (ToolchainMandateTest)
+
+`ToolchainMandateTest` (new suite, needs no native library) checks at run time
+what the compiler flags only imply: the JVM is 28 or later; `LaneId`, `MaskId`,
+`Ordinal`, `FacetId`, `RowRange` and `WideFieldMask` are value classes
+(`Class.isValue()`); the FFM linker is available; `java/src/main` has no JNI
+entry point (`System.load*`, `native` method). CI already installs JDK 28 EA
+through `actions/setup-java` and compiles with `--release 28 --enable-preview`.
+Disable-verified: `LaneId` as a plain `record` turns the suite red.
+
+## 2026-11-12 — ABI minor 14: a mask belongs to one resource (D-LGJ-MASK-PARENT-1, merged in #96)
 
 Operator decision 2026-11-12: apply the same-parent rule to the nine mask
 arguments that checked only the row count.
