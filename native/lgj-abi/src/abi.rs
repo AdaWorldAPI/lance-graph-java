@@ -100,7 +100,16 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// `lgj_plan_eval` is unchanged: it still lands the mask and returns its
 /// count, for callers that demand the mask. No new status and no manifest
 /// growth, so a minor-12 Java loads and sees none of it.
-pub const LGJ_ABI_MINOR: u32 = 13;
+///
+/// **Minor 14** (docs/abi.md §3.1): no new symbol. A mask is accepted only
+/// against the resource it was created over, in every export that takes a
+/// mask beside a resource. Nine exports checked only the row count until now
+/// (`lgj_op_eq_u32`, `lgj_op_gt_i32`, `lgj_plan_eval`, `lgj_reduce_sum_i32`,
+/// `lgj_reduce_i32`, `lgj_op_eq_classid`, `lgj_op_ternary_match` and both
+/// masks of `lgj_hop`). This NARROWS what those exports accept; it is not
+/// additive. The minor is bumped so the change is visible in the manifest;
+/// §3.1 states the compatibility effect.
+pub const LGJ_ABI_MINOR: u32 = 14;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -127,7 +136,8 @@ pub const LGJ_ERR_WRONG_RESOURCE_KIND: i32 = -3;
 pub const LGJ_ERR_INVALID_LANE: i32 = -4;
 /// The op's element type ≠ the lane's element type.
 pub const LGJ_ERR_LANE_KIND_MISMATCH: i32 = -5;
-/// Mask row-count ≠ resource row-count.
+/// The mask does not belong with the resource or masks it is used with:
+/// another parent, or another row count (docs/abi.md §3.1).
 pub const LGJ_ERR_MASK_LENGTH_MISMATCH: i32 = -6;
 /// A child (mask) outlived its parent resource.
 pub const LGJ_ERR_PARENT_CLOSED: i32 = -7;

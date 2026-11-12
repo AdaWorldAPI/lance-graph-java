@@ -22,7 +22,7 @@ public enum Status {
     WRONG_RESOURCE_KIND(-3, "a handle of the wrong resource kind was passed"),
     INVALID_LANE(-4, "lane_id out of range for this resource"),
     LANE_KIND_MISMATCH(-5, "the operation's element type does not match the lane's"),
-    MASK_LENGTH_MISMATCH(-6, "mask row-count does not match resource row-count"),
+    MASK_LENGTH_MISMATCH(-6, "mask does not belong to this resource (another parent, or another row count)"),
     PARENT_CLOSED(-7, "the mask outlived its parent resource"),
     VERSION_MISMATCH(-8, "caller's ABI version is incompatible"),
     LENGTH_OVERFLOW(-9, "requested size overflows the allocation limit"),

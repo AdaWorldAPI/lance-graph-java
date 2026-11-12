@@ -88,7 +88,7 @@ semantic API (see `architecture.md`). Therefore:
 
 ```
 LGJ_ABI_MAJOR = 0    // incompatible change ⇒ bump; Java refuses to load
-LGJ_ABI_MINOR = 12   // additive change ⇒ bump; older Java may still load
+LGJ_ABI_MINOR = 14   // additive change ⇒ bump; older Java may still load
 LGJ_MAGIC     = 0x4C_47_4A_5F_41_42_49_00   // "LGJ_ABI\0" big-endian-read
 ```
 
@@ -216,6 +216,10 @@ required — a gate that rejected everything would satisfy a rejection-only test
 - **Minor 13** (2026-11-12) — `lgj_plan_scalar` (§21): the fused plan folded
   straight into a count or a sum for a caller that asked for no mask.
   `lgj_plan_eval` is unchanged. No new status, no manifest growth.
+- **Minor 14** (2026-11-12) — no new symbol. A mask is accepted only against
+  the resource it was created over, in every export that takes one (§3.1).
+  Nine mask arguments that checked only the row count now check the parent.
+  This narrows accepted input; §3.1 states the compatibility effect.
 
 ## 3. Status codes
 
@@ -230,7 +234,7 @@ are no error strings across the membrane and no `errno` dependence.
 | `-3` | `WRONG_RESOURCE_KIND` | e.g. a mask handle passed where a pattern was required |
 | `-4` | `INVALID_LANE` | `lane_id` out of range for this resource |
 | `-5` | `LANE_KIND_MISMATCH` | op's element type ≠ lane's element type |
-| `-6` | `MASK_LENGTH_MISMATCH` | mask row-count ≠ resource row-count |
+| `-6` | `MASK_LENGTH_MISMATCH` | the mask does not belong with the resource or masks it is used with: another parent, or another row count (§3.1) |
 | `-7` | `PARENT_CLOSED` | child (mask) outlived its parent resource |
 | `-8` | `VERSION_MISMATCH` | caller's ABI version incompatible |
 | `-9` | `LENGTH_OVERFLOW` | requested size overflows `usize`/allocation limit |
@@ -246,6 +250,61 @@ are no error strings across the membrane and no `errno` dependence.
 
 `INVALID_HANDLE` is deliberately the response to *use-after-close*, not a crash.
 See §4.
+
+### 3.1 Mask provenance (ABI minor ≥ 14)
+
+**A mask may be read or written only against the resource it was created
+over.** Every export that takes a mask beside a resource compares the mask's
+parent with that resource by registry identity. Equal row count, equal
+resource kind and equal contents are not identity: two resources opened from
+the same `(rows, seed)` are two populations.
+
+The checks, in order, for each mask argument:
+
+1. the handle is live and is a mask (`INVALID_HANDLE`, `WRONG_RESOURCE_KIND`);
+2. its parent is still open (`PARENT_CLOSED`);
+3. its parent is the resource of this call, and its row count matches
+   (`MASK_LENGTH_MISMATCH`).
+
+A refusal happens before any output is written: the destination mask and every
+scalar or buffer output hold what they held before the call.
+
+`MASK_LENGTH_MISMATCH` is kept for the third check. The mask algebra (§7) and
+the register sweeps (§14 to §16) already report a foreign parent with this
+code, and it is the one status whose meaning is "these do not belong
+together". No status is added.
+
+**What changed at minor 14.** Until then nine mask arguments were checked for
+row count only: `lgj_op_eq_u32`, `lgj_op_gt_i32`, `lgj_plan_eval`,
+`lgj_reduce_sum_i32`, `lgj_reduce_i32`, `lgj_op_eq_classid`,
+`lgj_op_ternary_match`, and the source and the destination of `lgj_hop`. This
+document stated that reading as deliberate. It allowed a predicate evaluated on
+resource B to land in a mask belonging to resource A, and A's values to be
+summed over it, with status `OK` and a number that answered neither.
+
+**Compatibility.** This narrows accepted input; it is not an additive change.
+
+- A caller that only ever pairs a mask with the resource it was created over
+  sees no difference. Every Java build in this repository is such a caller:
+  the facade creates a mask from its owner and uses it with that owner only.
+  With the rule applied, `AllTests`, the four consumer mains and the TinkerPop
+  harness pass unchanged.
+- A raw-ABI caller that used a mask across two equally sized resources now
+  receives `MASK_LENGTH_MISMATCH` where it received `OK`.
+- §2 reserves the major for incompatible change. The major is not bumped
+  here: doing so would make every existing Java build refuse to load a library
+  that serves it correctly, for the sake of a pairing no shipped caller makes.
+  The minor is bumped instead, so the stricter rule is visible in the manifest
+  and a caller can test for it. This is a deliberate exception to the letter
+  of §2, recorded here rather than left implicit.
+
+What the rule does not restrict: several masks over one resource, one mask
+used with several lanes or facets of its resource, a mask aliased as source
+and destination, and any number of schemas or class readings over one
+resource. Those all share one parent.
+
+Pinned by `native/lgj-abi/src/exports/tests/provenance.rs`: twelve exports
+against five mask origins.
 
 ## 4. Ownership, lifetime, and the generation-checked handle
 
@@ -854,9 +913,9 @@ i32 lgj_hop(u64 store, u32 edge_classid, u64 facet_mask, u32 decode_mode,
 ```
 
 `store` must be a `LGJ_RESOURCE_ROWSTORE` (§11); `src_mask` and `dst_mask`
-must be row-count-compatible with it — the same row-count-only reading
-`lgj_op_eq_classid` already uses (a mask from an equally sized but
-distinct resource is accepted; `MASK_LENGTH_MISMATCH` otherwise).
+must each belong to it (§3.1): a mask over any other resource, equally
+sized or not, is `MASK_LENGTH_MISMATCH`. The two masks are checked
+separately. Until minor 14 only the row count was checked.
 
 **Semantics.** `dst_mask` is OVERWRITTEN with the one-hop reachable set:
 for every row `r` set in `src_mask`, for every facet `f` in the *effective
@@ -1535,11 +1594,9 @@ so the answer is `UNSUPPORTED_LAYOUT` (`-18`) — the same deferral-stated-as-a-
 status the register-sweep family already uses. Checked BEFORE the mask is
 resolved, so `dst_mask` is provably untouched on a refusal.
 
-**Mask compatibility is row-count only**, matching `lgj_op_eq_classid` — the
-closest sibling, a predicate that writes a mask — rather than the register
-sweeps' stricter parent-identity check. abi.md names only the row-count
-condition for a predicate's destination (§3), and inventing a second reading for
-one new predicate is exactly the drift this membrane exists to prevent.
+**The mask must belong to this store** (§3.1), as for every export that takes a
+mask beside a resource. Until minor 14 this predicate checked only the row
+count, matching `lgj_op_eq_classid` as it then was.
 
 **Kernel.** `ndarray::simd::ternary_match_strided_to_mask`, which lowers the
 test to one `ternlog::<XOR_AND>` per 16 records plus a compare-against-zero —

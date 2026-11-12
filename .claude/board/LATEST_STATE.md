@@ -1,4 +1,24 @@
-## 2026-11-12 — two characterisations (tests only; in a draft PR)
+## 2026-11-12 — ABI minor 14: a mask belongs to one resource (D-LGJ-MASK-PARENT-1, in a PR)
+
+Operator decision 2026-11-12: apply the same-parent rule to the nine mask
+arguments that checked only the row count.
+
+- **Changed:** `lgj_op_eq_u32`, `lgj_op_gt_i32`, `lgj_plan_eval`,
+  `lgj_reduce_sum_i32`, `lgj_reduce_i32`, `lgj_op_eq_classid`,
+  `lgj_op_ternary_match` and both masks of `lgj_hop` now compare the mask's
+  parent with the resource by registry identity (`Arc::ptr_eq`). The status is
+  the existing `MASK_LENGTH_MISMATCH`. No new symbol, no registry change.
+- **Contract:** `docs/abi.md` §3.1 is new and normative. The change narrows
+  accepted input, so it is not additive. The major is not bumped; the minor is
+  (13 to 14), and §3.1 records that as a deliberate exception to §2 with its
+  reason. Reversing that choice is one constant on each side.
+- **Tests:** `provenance.rs` re-pinned. All twelve exports refuse a sibling
+  mask and a mask of the other resource kind; every refusal leaves the mask and
+  all other outputs unchanged; `lgj_hop` is checked per mask; the earlier
+  relabelling hazard is now a refusal.
+- **Supersedes** the "No rule was changed" line of the entry below.
+
+## 2026-11-12 — two characterisations (tests only; merged in #95)
 
 **The two lowerings emit the same `Program`** (`lowering_convergence.rs`,
 `both_lowerings_emit_the_same_program`). For the 56 plans with at least one AND
@@ -29,9 +49,9 @@ against five mask origins, asserted as a table:
   (617), the four consumer mains (153) and the TinkerPop harness (80) all pass.
   `bench/` was not run. No rule was changed.
 
-## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, in a draft PR)
+## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, merged in #95)
 
-Status: implemented and measured; in a draft PR on top of the merged P0 fix (#94).
+Status: merged in #95 (`74cda93`), on top of the P0 fix (#94).
 
 - **Added:** `lgj_plan_scalar` (`docs/abi.md` §21) with `LGJ_FOLD_COUNT` and
   `LGJ_FOLD_SUM_I32`. `plan_lower::lower_scalar` reuses `lower_plan`'s ops and
