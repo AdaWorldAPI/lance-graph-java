@@ -96,13 +96,31 @@ public final class LazinessTest {
                         + " the large query matched " + largeRows + " rows");
             }
 
-            c.section("a reduction costs one crossing more, and no more than that");
+            c.section("a reduction is one crossing too: the plan folds straight into the sum");
+            // Until ABI minor 13 this was 2 (evaluate into a selection, then reduce over it).
+            // lgj_plan_scalar folds the plan and the sum as one program (docs/abi.md §21).
+            c.that("the loaded library carries lgj_plan_scalar (minor >= 13)",
+                    NativeRuntime.abiMinor() >= 13);
             View sel = data.view().where(Pattern.CLASS.eq(7));
             sel.sumOf(Pattern.VALUE);
             long c2 = Diagnostics.crossings();
             sel.sumOf(Pattern.VALUE);
             long sumCost = Diagnostics.crossings() - c2;
-            c.eq("sumOf() = evaluate the chain, then reduce", 2, sumCost);
+            c.eq("sumOf() crosses once", 1, sumCost);
+
+            long c3 = Diagnostics.crossings();
+            data.view().sumOf(Pattern.VALUE);
+            c.eq("sumOf() over an empty chain crosses once (a plan of zero ops)", 1,
+                    Diagnostics.crossings() - c3);
+
+            c.section("the scalar fold and the selection agree");
+            View narrow = sel.where(Pattern.VALUE.gt(100));
+            try (Mask kept = sel.select(); Mask keptNarrow = narrow.select()) {
+                c.eq("count() equals the selection's own count", kept.count(), sel.count());
+                c.eq("and for a longer chain", keptNarrow.count(), narrow.count());
+                c.that("the two chains select different, non-empty populations",
+                        keptNarrow.count() > 0 && keptNarrow.count() < kept.count());
+            }
 
             c.section("nothing here hydrated a row");
             c.note("no API on View, Mask or Lens returns a row object, an index list, or an"

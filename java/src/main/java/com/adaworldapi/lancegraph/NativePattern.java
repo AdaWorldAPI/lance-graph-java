@@ -161,7 +161,11 @@ public final class NativePattern implements NativeResource, AutoCloseable {
         }
     }
 
-    /** Evaluate a plan into the reusable scratch selection and return its popcount. */
+    /**
+     * Count the rows a plan selects. Against ABI minor 13 or later this is one scalar fold with
+     * no selection written; against an older library it evaluates into the reusable scratch
+     * selection and returns its popcount.
+     */
     long countOf(List<Predicate> predicates) {
         requireOpen("count()");
         if (predicates.isEmpty()) {
@@ -172,15 +176,27 @@ public final class NativePattern implements NativeResource, AutoCloseable {
         }
         synchronized (lock) {
             requireOpen("count()");
+            if (Engine.hasPlanScalar()) {
+                // Nobody asked for the selection, so none is written (docs/abi.md §21).
+                return Engine.planCount(handle, plan(predicates));
+            }
             return Engine.evaluateFused(handle, plan(predicates), scratch());
         }
     }
 
-    /** Evaluate a plan, then reduce one lane over the resulting selection. */
+    /**
+     * Sum one lane over the rows a plan selects. Against ABI minor 13 or later this is one
+     * crossing with no selection; against an older library it evaluates the plan into a
+     * selection, then reduces over it (two crossings).
+     */
     long sumOf(List<Predicate> predicates, I32Field field) {
         requireOpen("sumOf()");
         synchronized (lock) {
             requireOpen("sumOf()");
+            if (Engine.hasPlanScalar()) {
+                // One program, one crossing, no mask; an empty plan is every row (§21).
+                return Engine.planSumI32(handle, plan(predicates), field.lane().index());
+            }
             long mask;
             if (predicates.isEmpty()) {
                 // Sum over everything: select all rows rather than inventing an always-true plan.

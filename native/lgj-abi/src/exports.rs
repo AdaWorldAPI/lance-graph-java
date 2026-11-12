@@ -2350,6 +2350,179 @@ fn plan_group_sum_impl(
     })
 }
 
+fn plan_scalar_impl(
+    res: u64,
+    ops: *const LgjOpDesc,
+    n_ops: u32,
+    fold: u32,
+    val_lane: u32,
+    out_value: *mut i64,
+) -> i32 {
+    // An empty plan is LEGAL here, as for the grouped sum and for the same
+    // reason: there is no destination mask a caller could fill on its own.
+    if out_value.is_null() || (n_ops > 0 && ops.is_null()) {
+        return LGJ_ERR_NULL_ARGUMENT;
+    }
+    if fold != LGJ_FOLD_COUNT && fold != LGJ_FOLD_SUM_I32 {
+        return LGJ_ERR_UNKNOWN_OPCODE;
+    }
+    let pattern = match registry::resolve_kind(res, LGJ_RESOURCE_PATTERN) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    // SAFETY: when `n_ops > 0`, `ops` is non-null (checked) and the caller
+    // states it points at `n_ops` contiguous `LgjOpDesc` — the same contract
+    // as `lgj_plan_eval`. When `n_ops == 0` no pointer is read at all.
+    let ops: &[LgjOpDesc] = if n_ops == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(ops, n_ops as usize) }
+    };
+    if !ops.is_empty() {
+        if let Err(e) = validate_plan(&pattern, ops) {
+            return e;
+        }
+    }
+
+    let n_rows = pattern.n_rows;
+    let rows = match usize::try_from(n_rows) {
+        Ok(r) => r,
+        Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    let scalar = if fold == LGJ_FOLD_COUNT {
+        plan_lower::ScalarFold::Count
+    } else {
+        let val = match u16::try_from(val_lane) {
+            Ok(l) => l,
+            Err(_) => return LGJ_ERR_INVALID_LANE,
+        };
+        match lane_view(&pattern, val_lane) {
+            Ok(LaneView::I32(_)) => {}
+            Ok(_) => return LGJ_ERR_LANE_KIND_MISMATCH,
+            Err(e) => return e,
+        }
+        // `Pred::Range` and the sum terminal's carry are both `u32`-bounded,
+        // exactly as for the grouped sum.
+        let n_rows = match u32::try_from(n_rows) {
+            Ok(r) => r,
+            Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+        };
+        plan_lower::ScalarFold::SumI32 { val, n_rows }
+    };
+    let program = match plan_lower::lower_scalar(ops, scalar) {
+        Some(plan_lower::LoweredScalar::AllRowsCount) => {
+            let count = match i64::try_from(n_rows) {
+                Ok(c) => c,
+                Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+            };
+            // SAFETY: non-null (checked above); written only on success.
+            unsafe { *out_value = count };
+            return LGJ_OK;
+        }
+        Some(plan_lower::LoweredScalar::Program(p)) => p,
+        // Unreachable: `validate_plan` already rejected every unknown opcode.
+        None => return LGJ_ERR_UNKNOWN_OPCODE,
+    };
+
+    let fixture = match pattern.fixture() {
+        Some(f) => f,
+        None => return LGJ_ERR_WRONG_RESOURCE_KIND,
+    };
+    // Same index order as `plan_eval_impl`: LANE_IDS, LANE_CLASSES, LANE_VALUES.
+    let lanes = [
+        LaneRef::U64(fixture.ids()),
+        LaneRef::U32(fixture.classes()),
+        LaneRef::I32(fixture.values()),
+    ];
+    let planes = Planes {
+        n_rows: rows,
+        masks: &[],
+        lanes: &lanes,
+    };
+    // TILED, as `plan_eval_impl`, but with `Out::None`: the accumulator is a
+    // tile of scratch and the terminal folds each tile into one running
+    // scalar. Nothing sized by the population is written anywhere.
+    let tile = tile_words_for(rows);
+    let need = match scratch_words_for(tile, plan_lower::SLOTS as usize) {
+        Some(n) => n,
+        None => return LGJ_ERR_LENGTH_OVERFLOW,
+    };
+    PLAN_SCRATCH.with(|cell| {
+        let mut buf = cell.borrow_mut();
+        if buf.len() < need {
+            buf.resize(need, 0);
+        }
+        let mut scratch = match Scratch::over(&mut buf[..need], tile, plan_lower::SLOTS as usize) {
+            Ok(s) => s,
+            Err(e) => return exec_error_to_status(e),
+        };
+        let value = match execute_into(&program, &planes, &Foreign::NONE, &mut scratch, Out::None) {
+            Ok(Value::Count(c)) if fold == LGJ_FOLD_COUNT => match i64::try_from(c) {
+                Ok(c) => c,
+                Err(_) => return LGJ_ERR_LENGTH_OVERFLOW,
+            },
+            Ok(Value::SumI64(s)) if fold == LGJ_FOLD_SUM_I32 => s,
+            // The lowering emits exactly the terminal `fold` names; any
+            // other value means this file built a program it did not intend.
+            Ok(_) => return LGJ_ERR_ALLOCATION_FAILED,
+            Err(e) => return exec_error_to_status(e),
+        };
+        // SAFETY: non-null (checked above); written only on success.
+        unsafe { *out_value = value };
+        LGJ_OK
+    })
+}
+
+/// The fused plan folded STRAIGHT INTO one scalar — a count or a sum — with
+/// no mask anywhere (ABI minor ≥ 13, `docs/abi.md` §21).
+///
+/// `lgj_plan_eval` answers two things: it lands the selection in `dst_mask`
+/// and returns its count. A caller that wants only a number still pays for
+/// the mask — one bit per row written into a destination that is read once —
+/// and a sum pays a second crossing (`lgj_reduce_sum_i32`) to read it back.
+/// This symbol is for that caller. `lgj_plan_eval` is unchanged and remains
+/// the symbol for a caller that demands the mask.
+///
+/// The plan lowers exactly as `lgj_plan_eval` lowers it
+/// (`plan_lower::lower_scalar` reuses `lower_plan`'s ops unchanged); only the
+/// terminal differs: `Terminal::Count` or `Terminal::MaskedSumI32`.
+///
+/// # Semantics
+///
+/// - `ops`/`n_ops` are the fused plan. **`n_ops == 0` is legal** and means
+///   every row, as for `lgj_plan_group_sum_i32`.
+/// - `fold = LGJ_FOLD_COUNT`: `*out_value` is the number of selected rows;
+///   `val_lane` is ignored.
+/// - `fold = LGJ_FOLD_SUM_I32`: `*out_value` is `Σ val_lane[i]` over selected
+///   rows, widened to `i64`; `0` over an empty selection. `val_lane` must be
+///   an `I32` lane.
+/// - `*out_value` is written only on `LGJ_OK`.
+///
+/// # Statuses
+///
+/// `NULL_ARGUMENT` for a null `out_value` or a null `ops` with `n_ops > 0`;
+/// `UNKNOWN_OPCODE` for an unknown `fold`; `INVALID_HANDLE` /
+/// `WRONG_RESOURCE_KIND` for `res`; every plan defect as `lgj_plan_eval`
+/// reports it; `INVALID_LANE` / `LANE_KIND_MISMATCH` for `val_lane` under a
+/// sum; `LENGTH_OVERFLOW` for a sum past `2^32 - 1` rows. No new status.
+///
+/// # Safety
+///
+/// A null pointer is handled, not UB. `ops` must point to `n_ops` contiguous
+/// initialized `LgjOpDesc` when `n_ops > 0`; `out_value` must be a valid,
+/// aligned, writable `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn lgj_plan_scalar(
+    res: u64,
+    ops: *const LgjOpDesc,
+    n_ops: u32,
+    fold: u32,
+    val_lane: u32,
+    out_value: *mut i64,
+) -> i32 {
+    guard(|| plan_scalar_impl(res, ops, n_ops, fold, val_lane, out_value))
+}
+
 /// `GROUP BY group_lane SUM(val_lane)` over the rows the plan selects — **one
 /// crossing, one program, and no selection anywhere** (ABI minor ≥ 12,
 /// `docs/abi.md` §20).
@@ -2718,6 +2891,9 @@ mod tests {
     mod pr4_equivalence;
     mod pr4_matrix;
     mod pr4_seed;
+    /// Minor 13: a plan folded to one count or sum with no mask, against the
+    /// mask path, the scalar reference and a hand walk, plus every refusal.
+    mod scalar_fold;
 
     /// Safe wrappers over the pointer-taking exports.
     ///
@@ -4324,6 +4500,21 @@ mod tests {
                     res, ops, n_ops, group_lane, val_lane, via_res, via_lane, out_sums, n_groups,
                 )
             }
+        }
+    }
+
+    mod call13 {
+        use super::*;
+
+        pub fn plan_scalar(
+            res: u64,
+            ops: *const LgjOpDesc,
+            n_ops: u32,
+            fold: u32,
+            val_lane: u32,
+            out_value: *mut i64,
+        ) -> i32 {
+            unsafe { lgj_plan_scalar(res, ops, n_ops, fold, val_lane, out_value) }
         }
     }
 

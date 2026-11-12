@@ -62,8 +62,10 @@ cannot disagree with itself.
 The ABI is a **machine membrane**. It is not the product. The product is the Java
 semantic API (see `architecture.md`). Therefore:
 
-- It is **small** — currently 30 symbols (minor 12's one addition — the grouped
-  sum that never builds a selection — is argued in §20; 29 at minor 11, whose three
+- It is **small** — currently 31 symbols (minor 13's one addition — a plan
+  folded to one scalar with no mask — is argued in §21; 30 at minor 12, whose one
+  addition — the grouped sum that never builds a selection — is argued in §20;
+  29 at minor 11, whose three
   additions are argued in §19, and the same section argues the SEVEN capabilities it deliberately did
   NOT spend a symbol on; 26 at minor 10, whose one addition — the
   columnar constructor — is argued in §18; 25 at minor 9, whose one addition is argued
@@ -211,6 +213,9 @@ required — a gate that rejected everything would satisfy a rejection-only test
   since minor 2; nothing could consume a mask against the 12-byte facet
   register until now. Two new statuses: `UNSUPPORTED_CARVING` (-15) and
   `SUM_OVERFLOW` (-16).
+- **Minor 13** (2026-11-12) — `lgj_plan_scalar` (§21): the fused plan folded
+  straight into a count or a sum for a caller that asked for no mask.
+  `lgj_plan_eval` is unchanged. No new status, no manifest growth.
 
 ## 3. Status codes
 
@@ -439,7 +444,7 @@ predicates or rows are involved. The unfused per-predicate ops are retained only
 so the fused path can be benchmarked *against* something and so parity can be
 checked predicate-by-predicate.
 
-## 7. The function surface (30 symbols)
+## 7. The function surface (31 symbols)
 
 All symbols are prefixed `lgj_`. All return `i32` status except the manifest
 getter. `out_*` parameters are written only on `OK`.
@@ -555,6 +560,17 @@ crossing and ONE program — no selection is evaluated first and no mask handle
 is involved. `out_sums[g]` for `g < n_groups`; a key past `n_groups` is
 dropped. `n_ops == 0` is legal and means every row. `via_res != 0` reads the
 group key THROUGH `group_lane` into `via_res`'s `via_lane` (the fk-keyed form).
+
+### Scalar fold (ABI minor ≥ 13)
+
+```
+i32 lgj_plan_scalar(u64 res, const LgjOpDesc* ops, u32 n_ops,
+                    u32 fold, u32 val_lane, i64* out_value)       // minor >= 13, §21
+```
+
+The plan folded to one count (`fold = 0`) or one `I32` sum (`fold = 1`) in ONE
+crossing, with no mask handle. `n_ops == 0` is legal and means every row.
+`lgj_plan_eval` remains the symbol for a caller that demands the mask.
 
 ### Parity escape hatch
 
@@ -1803,3 +1819,106 @@ reports *"View.sumByGroup (minor 12) reports an ABI mismatch, not a missing
 symbol (threw AbiMismatchException)"*, with every minor-11 feature still
 working beside it.
 
+## 21. A plan folded to one scalar, with no mask (ABI minor ≥ 13)
+
+```
+i32 lgj_plan_scalar(u64 res, const LgjOpDesc* ops, u32 n_ops,
+                    u32 fold, u32 val_lane, i64* out_value)
+```
+
+### 21.1 Why it exists
+
+`lgj_plan_eval` answers two things: it lands the selection in `dst_mask` and
+returns its count. A caller that wants only a number still pays for the mask:
+one bit per row written into a destination that is read once. A sum pays a
+second crossing (`lgj_reduce_sum_i32`) to read that mask back. §20 removed this
+for the grouped sum; the plain count and sum were still on the mask path.
+
+`lgj_plan_eval` is **unchanged**. It remains the symbol for a caller that
+demands the mask, and it still returns the count with it.
+
+### 21.2 What it does
+
+The plan lowers exactly as `lgj_plan_eval` lowers it: `plan_lower::lower_scalar`
+reuses `lower_plan`'s ops unchanged (pinned by
+`the_scalar_sum_range_is_the_whole_lane`) and replaces only the terminal.
+
+| `fold` | terminal | `*out_value` |
+|---|---|---|
+| `LGJ_FOLD_COUNT` (0) | `Terminal::Count` | rows selected; `val_lane` ignored |
+| `LGJ_FOLD_SUM_I32` (1) | `Terminal::MaskedSumI32` | `Σ val_lane[i]` over selected rows, `0` if none |
+
+The accumulator is a tile of scratch and the terminal folds each tile into the
+running scalar (`Out::None`). No mask handle is named or written.
+
+`n_ops == 0` is legal and means every row, as in §20. A count over every row
+(an empty plan, or one whose every combine is OR) is answered from the row
+count without a program. A sum over every row uses the whole-lane
+`Pred::Range`, `0..n_rows`, the second and last `Range` this crate emits.
+
+### 21.3 Contract
+
+- `*out_value` is written only on `LGJ_OK`.
+- Statuses: `NULL_ARGUMENT` for a null `out_value`, or a null `ops` with
+  `n_ops > 0`; `UNKNOWN_OPCODE` for an unknown `fold`; `INVALID_HANDLE` /
+  `WRONG_RESOURCE_KIND` for `res`; every plan defect exactly as `lgj_plan_eval`
+  reports it (pinned against `lgj_plan_eval` itself, defect by defect);
+  `INVALID_LANE` / `LANE_KIND_MISMATCH` for `val_lane` under a sum;
+  `LENGTH_OVERFLOW` for a sum past `2^32 - 1` rows. **No new status.**
+- Bulk (§6): one pass, `O(rows)`.
+
+### 21.4 The Java spelling
+
+There is none. `View.count()` and `View.sumOf(field)` keep their signatures and
+call this symbol when the loaded library reports minor ≥ 13. Against an older
+library they keep the mask path, so neither is gated: both answer on every
+minor. Run against a minor-12 library built from this repo's history and
+against minor 13, `OldAbiCompatTest` reports the same three numbers (count 71,
+filtered sum 6257, whole-lane sum 111296), in 2 crossings and 1.
+
+### 21.5 Measured (2026-11-12)
+
+Parity: `scalar_fold.rs` compares the symbol with the mask path, with
+mask-risc's row-at-a-time reference on the same program (several tiles), and
+with a hand walk over the fixture arrays, across the `{AND, OR}^n` sweep at
+1,000 and 65,536 rows.
+
+| | mask path | scalar fold |
+|---|---|---|
+| crossings, `count()` | 1 | 1 |
+| crossings, `sumOf()` | 2 | 1 |
+| mask bytes written per call | `8 × ceil(rows / 64)` (8 KiB at 65,536 rows) | 0 |
+| native mask resources `count()`/`sumOf()` need | a scratch mask, and an all-rows mask for an unfiltered sum | none |
+| Rust allocation per call (3 ops) | 240 B, independent of rows | 240 B, independent of rows |
+
+Native latency, `examples/plan_scalar_cost.rs`, medians of 201, two runs, no JVM
+in the numbers:
+
+| rows | plan | count: mask → fold | sum: mask → fold |
+|---|---|---|---|
+| 1,024 | `class==7 AND value>100` | 389–463 → 328–407 ns | 464–564 → 340–406 ns |
+| 65,536 | same | 12.4–16.1 → 12.3–17.0 µs | 14.5–18.8 → 14.1–18.3 µs |
+| 65,536 | `value>100` | 4.8–6.3 → 4.7–6.1 µs | 14.3–19.1 → 13.9–17.3 µs |
+| 1,048,576 | `class==7 AND value>100` | 386–514 → 467–481 µs | 647–664 → 607–623 µs |
+| 1,048,576 | `value>100` | 186–187 → 181–183 µs | 413–423 → 313–337 µs |
+
+The count is not faster within run-to-run noise: the predicate pass dominates
+and the mask write is small beside it. The sum is 3–25% faster. What this
+symbol removes is the undemanded mask write, the second crossing of a sum and
+the two helper mask resources; it is not a large speed-up.
+
+### 21.6 The disable table (red-then-green, or it is not evidence)
+
+| what was disabled | test that went red |
+|---|---|
+| the all-rows `Range` emptied to `0..0` | `an_empty_plan_and_an_all_or_plan_fold_every_row`, `count_and_sum_match_the_mask_path_and_the_hand_walk`, `the_scalar_sum_range_is_the_whole_lane` |
+| the all-rows count answered `0` | `an_empty_plan_and_an_all_or_plan_fold_every_row`, `count_and_sum_match_the_mask_path_and_the_hand_walk` |
+| `out_value` written before validation | `every_refusal_is_a_status_and_leaves_out_value_untouched` |
+| the `fold` check removed | `every_refusal_is_a_status_and_leaves_out_value_untouched` |
+| the sum lowered to a count terminal | `count_and_sum_match_the_mask_path_and_the_hand_walk`, `an_empty_selection_is_zero_not_absent`, `the_scalar_sum_range_is_the_whole_lane` |
+| plan validation skipped | `plan_defects_are_reported_as_lgj_plan_eval_reports_them` |
+
+The last row was green on its first run: the executor refuses most defective
+plans by itself, with the same status. The test that pins it compares statuses
+with `lgj_plan_eval` for a lane index past `u16` and an undefined combine,
+which only the shared validation catches.

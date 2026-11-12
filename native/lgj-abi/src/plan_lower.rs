@@ -168,6 +168,64 @@ pub(crate) fn lower_group_sum(
     Some(Program::new(program_ops, terminal))
 }
 
+/// Which scalar a plan folds to when the caller asked for no mask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScalarFold {
+    /// How many rows the plan selects.
+    Count,
+    /// `SUM(val)` over the rows the plan selects. `n_rows` is the table's row
+    /// count, read only by the all-rows arm (a `Pred::Range` is `u32`-bounded).
+    SumI32 { val: u16, n_rows: u32 },
+}
+
+/// What a scalar fold lowers to.
+pub(crate) enum LoweredScalar {
+    /// A count over a plan that selects every row (empty, or every combine
+    /// OR). The answer is the row count, which the caller already holds, so
+    /// no program is built — the same reasoning as [`Lowered::AllRows`].
+    AllRowsCount,
+    /// One program: the plan's prefix rewrite and survivor skip, ending in a
+    /// scalar terminal over the accumulator.
+    Program(Program),
+}
+
+/// Lower a validated plan STRAIGHT INTO a scalar — the same prefix rewrite
+/// and survivor skip as [`lower_plan`], ending in [`Terminal::Count`] or
+/// [`Terminal::MaskedSumI32`] over the accumulator instead of
+/// [`Terminal::Keep`].
+///
+/// [`lower_plan`] keeps `Keep` because its caller asked for the mask. A
+/// caller that asked for a number has no use for it: under `Keep` the
+/// executor writes one bit per row into a destination that is read once and
+/// discarded. Here the accumulator stays in tile-local scratch and the
+/// terminal folds each tile into the running scalar.
+///
+/// The all-rows sum needs an accumulator that IS every row, exactly as
+/// [`lower_group_sum`] does, and takes it the same way:
+/// [`Pred::Range`]`{ lo: 0, hi: n_rows }`. That is the second place this
+/// crate emits a `Range`, and like the first it is always the whole lane —
+/// pinned by `range_falsifier::the_scalar_sum_range_is_the_whole_lane`.
+pub(crate) fn lower_scalar(ops: &[LgjOpDesc], fold: ScalarFold) -> Option<LoweredScalar> {
+    let mask = Operand::Scratch(ACC_SLOT);
+    let lowered = lower_plan(ops)?;
+    let (program_ops, terminal) = match (lowered, fold) {
+        (Lowered::AllRows, ScalarFold::Count) => return Some(LoweredScalar::AllRowsCount),
+        (Lowered::AllRows, ScalarFold::SumI32 { val, n_rows }) => (
+            vec![MaskOp::Pred {
+                pred: Pred::Range { lo: 0, hi: n_rows },
+                under: None,
+                dst: ACC_SLOT,
+            }],
+            Terminal::MaskedSumI32 { mask, lane: val },
+        ),
+        (Lowered::Program(p), ScalarFold::Count) => (p.ops, Terminal::Count { mask }),
+        (Lowered::Program(p), ScalarFold::SumI32 { val, .. }) => {
+            (p.ops, Terminal::MaskedSumI32 { mask, lane: val })
+        }
+    };
+    Some(LoweredScalar::Program(Program::new(program_ops, terminal)))
+}
+
 /// One `LgjOpDesc` opcode + operand → one `Pred`.
 ///
 /// Every operand conversion is the one `kernels::eval_predicate` performs, and
@@ -285,6 +343,81 @@ mod range_falsifier {
             lowered_count >= 9,
             "the sweep lowered only {lowered_count} programs — it is not exercising the lowering"
         );
+    }
+
+    /// The scalar sum's `Range` is the whole lane, in the all-rows arm only,
+    /// and the scalar count never emits one. Same reason as the grouped sum's
+    /// pin below: any other `Range` would make `RangeOutOfBounds` reachable
+    /// through the ABI.
+    #[test]
+    fn the_scalar_sum_range_is_the_whole_lane() {
+        let or_op = LgjOpDesc {
+            op: LGJ_OP_EQ_U32,
+            lane_id: 1,
+            operand: 7,
+            combine: LGJ_COMBINE_OR,
+            _reserved: 0,
+        };
+        let and_op = LgjOpDesc {
+            combine: LGJ_COMBINE_AND,
+            ..or_op
+        };
+        let sum = ScalarFold::SumI32 {
+            val: 2,
+            n_rows: 1000,
+        };
+        let ranges = |ops: &[LgjOpDesc], fold: ScalarFold| -> Option<Vec<(u32, u32)>> {
+            match lower_scalar(ops, fold).expect("lowers") {
+                LoweredScalar::AllRowsCount => None,
+                LoweredScalar::Program(p) => Some(
+                    p.ops
+                        .iter()
+                        .filter_map(|op| match op {
+                            MaskOp::Pred {
+                                pred: Pred::Range { lo, hi },
+                                ..
+                            } => Some((*lo, *hi)),
+                            _ => None,
+                        })
+                        .collect(),
+                ),
+            }
+        };
+        assert_eq!(ranges(&[], sum), Some(vec![(0, 1000)]));
+        assert_eq!(ranges(&[or_op, or_op], sum), Some(vec![(0, 1000)]));
+        assert_eq!(ranges(&[and_op], sum), Some(vec![]));
+        assert_eq!(ranges(&[or_op, and_op, or_op], sum), Some(vec![]));
+        // A count over every row builds no program at all.
+        assert_eq!(ranges(&[], ScalarFold::Count), None);
+        assert_eq!(ranges(&[or_op], ScalarFold::Count), None);
+        assert_eq!(ranges(&[and_op], ScalarFold::Count), Some(vec![]));
+
+        // The terminals, and that the ops are `lower_plan`'s own, unchanged.
+        let plan = [or_op, and_op, or_op, and_op];
+        let Some(Lowered::Program(keep)) = lower_plan(&plan) else {
+            panic!("a plan with an AND lowers to a program");
+        };
+        for (fold, terminal) in [
+            (
+                ScalarFold::Count,
+                Terminal::Count {
+                    mask: Operand::Scratch(ACC_SLOT),
+                },
+            ),
+            (
+                sum,
+                Terminal::MaskedSumI32 {
+                    mask: Operand::Scratch(ACC_SLOT),
+                    lane: 2,
+                },
+            ),
+        ] {
+            let Some(LoweredScalar::Program(p)) = lower_scalar(&plan, fold) else {
+                panic!("lowers to a program");
+            };
+            assert_eq!(p.terminal, terminal);
+            assert_eq!(p.ops, keep.ops, "the scalar fold reuses lower_plan's ops");
+        }
     }
 
     /// The one `Range` this crate emits is the whole lane, in the all-rows arm

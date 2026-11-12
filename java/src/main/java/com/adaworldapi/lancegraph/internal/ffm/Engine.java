@@ -379,6 +379,40 @@ public final class Engine {
         return new ReduceOutcome(value, present);
     }
 
+    /** The first ABI minor that carries {@code lgj_plan_scalar} (docs/abi.md §21). */
+    private static final int MINOR_PLAN_SCALAR = 13;
+
+    /**
+     * Whether the loaded library folds a plan straight into a scalar. Against an older library
+     * the callers below keep the mask path, which every minor since 1 has carried.
+     */
+    public static boolean hasPlanScalar() {
+        return Abi.manifest().abiMinor() >= MINOR_PLAN_SCALAR;
+    }
+
+    /**
+     * How many rows {@code plan} selects, in one crossing and with no mask (docs/abi.md §21).
+     * An empty plan is legal and means every row. Requires ABI minor &gt;= 13.
+     */
+    public static long planCount(long resource, List<PlanOp> plan) {
+        return planScalar(resource, plan, Layouts.FOLD_COUNT, 0);
+    }
+
+    /**
+     * The sum of {@code valLane} over the rows {@code plan} selects, in one crossing and with
+     * no mask (docs/abi.md §21). Zero over an empty selection. Requires ABI minor &gt;= 13.
+     */
+    public static long planSumI32(long resource, List<PlanOp> plan, int valLane) {
+        return planScalar(resource, plan, Layouts.FOLD_SUM_I32, valLane);
+    }
+
+    private static long planScalar(long resource, List<PlanOp> plan, int fold, int valLane) {
+        Abi.requireMinor(MINOR_PLAN_SCALAR);
+        MemorySegment ops = plan.isEmpty() ? MemorySegment.NULL : marshal(plan);
+        Scratch s = SCRATCH.get();
+        return Downcalls.planScalar(resource, ops, plan.size(), fold, valLane, s.out);
+    }
+
     /**
      * The grouped sum that never builds a selection (docs/abi.md §20, ABI minor 12):
      * {@code GROUP BY groupLane SUM(valLane)} over the rows {@code plan} selects, evaluated as

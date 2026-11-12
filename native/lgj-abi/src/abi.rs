@@ -93,7 +93,14 @@ pub const LGJ_ABI_MAJOR: u32 = 0;
 /// key lane of this one (`via_res`/`via_lane`, the fk-keyed group sum) with
 /// no partner-side mask and no second program. No new status and no manifest
 /// growth, so a minor-11 Java loads and sees none of it.
-pub const LGJ_ABI_MINOR: u32 = 12;
+///
+/// **Minor 13** (docs/abi.md §21): [`crate::exports::lgj_plan_scalar`] — the
+/// fused plan run STRAIGHT INTO a scalar terminal ([`LGJ_FOLD_COUNT`],
+/// [`LGJ_FOLD_SUM_I32`]) for a caller that asked for a number and no mask.
+/// `lgj_plan_eval` is unchanged: it still lands the mask and returns its
+/// count, for callers that demand the mask. No new status and no manifest
+/// growth, so a minor-12 Java loads and sees none of it.
+pub const LGJ_ABI_MINOR: u32 = 13;
 
 /// `"LGJ_ABI\0"` read big-endian.
 ///
@@ -330,6 +337,13 @@ pub const LGJ_REDUCE_SUM: u32 = 0;
 pub const LGJ_REDUCE_MIN: u32 = 1;
 /// Maximum of the selected elements. Not present over an empty population.
 pub const LGJ_REDUCE_MAX: u32 = 2;
+
+/// `lgj_plan_scalar` fold: how many rows the plan selects. `val_lane` is
+/// ignored.
+pub const LGJ_FOLD_COUNT: u32 = 0;
+/// `lgj_plan_scalar` fold: `SUM(val_lane)` over the rows the plan selects,
+/// widened to `i64`. `val_lane` must be an `I32` lane.
+pub const LGJ_FOLD_SUM_I32: u32 = 1;
 
 /// Narrow the accumulator: `acc &= op_result`.
 pub const LGJ_COMBINE_AND: u32 = 0;

@@ -64,6 +64,22 @@ public final class OldAbiCompatTest {
         try (NativePattern p = NativePattern.open(1024)) {
             long n = p.view().where(Pattern.CLASS.eq(3)).count();
             c.that("a minor-1 fluent count succeeded, returning " + n, n >= 0);
+
+            // count() and sumOf() are NOT gated on minor 13: against an older library they
+            // keep the mask path (evaluate into a selection, then count or reduce), so the two
+            // answers below must be the same numbers on every minor. The crossing count is
+            // what differs, and it is reported rather than pinned here.
+            View v = p.view().where(Pattern.CLASS.eq(3));
+            long before = Diagnostics.crossings();
+            long sum = v.sumOf(Pattern.VALUE);
+            long sumCost = Diagnostics.crossings() - before;
+            long all = p.view().sumOf(Pattern.VALUE);
+            try (Mask kept = v.select()) {
+                c.eq("count() equals the selection's own count on this minor", kept.count(), n);
+            }
+            c.that("sumOf() answered on minor " + loaded + ": filtered " + sum + ", every row "
+                    + all + ", in " + sumCost + " crossing(s)", sum != all);
+            c.eq("sumOf() crossings on this minor", loaded >= 13 ? 1L : 2L, sumCost);
         }
 
         c.section("(2) each later minor is gated INDEPENDENTLY: available if the library has it,"

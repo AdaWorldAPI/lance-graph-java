@@ -1,3 +1,25 @@
+## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, local branch)
+
+Status: implemented and measured on local branch `p1-scalar-terminal`, stacked on
+the P0 fix (#94). Not pushed; not in a PR.
+
+- **Added:** `lgj_plan_scalar` (`docs/abi.md` §21) with `LGJ_FOLD_COUNT` and
+  `LGJ_FOLD_SUM_I32`. `plan_lower::lower_scalar` reuses `lower_plan`'s ops and
+  ends in mask-RISC's existing `Count` / `MaskedSumI32` terminals. `lgj_plan_eval`
+  is unchanged. `View.count()` and `View.sumOf()` use the new symbol at minor
+  13 or later and keep the mask path against an older library.
+- **Measured:** native 205 tests (9 new, including one allocation gate); 6 of 6
+  disable runs red. Java core 617 checks; consumers 70 / 68 / 3 / 12, unchanged.
+  Against a minor-12 library built from the P0 commit, `OldAbiCompatTest` gives
+  the same answers (71, 6257, 111296) in 2 crossings where minor 13 takes 1.
+- **Cost:** `sumOf()` 2 crossings to 1; `count()` stays 1. Mask bytes written per
+  call go from `8 × ceil(rows / 64)` to 0. Native latency: count unchanged within
+  noise, sum 3–25% faster (`examples/plan_scalar_cost.rs`).
+- **Re-pinned:** `LazinessTest` (sumOf 2 to 1) and `GroupSumTest` (the per-group
+  path 32 to 16 crossings). Both pins moved because the cost moved.
+- **Not done:** JMH numbers through the JVM; a `Program`-level comparison with
+  Quack for these two terminals.
+
 ## 2026-10-09 — Gremlin traversals lowered onto the mask hop chain (interop/tinkerpop, A2)
 
 `LanceHopStrategy` is a TinkerPop provider strategy. It rewrites
