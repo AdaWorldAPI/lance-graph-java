@@ -1,0 +1,115 @@
+name: Downstream compatibility
+
+# What this is for: `lgj-abi` path-depends on AdaWorldAPI/lance-graph and
+# AdaWorldAPI/ndarray at their CURRENT heads. `lint.yml` runs only when THIS
+# repository is pushed, so an upstream merge that breaks `lgj-abi` stays
+# invisible until someone pushes here. That has happened five times with new
+# `mask_risc::ExecError` variants meeting the exhaustive match in
+# `exec_error_to_status` (E0004): 183745e, 4cae6da, 979692c, 3593fb3, ce6ce22.
+#
+# This workflow compiles `lgj-abi` against today's sibling heads once a day,
+# so the drift is found within a day instead of at the next push. It is a
+# DETECTOR: it runs after the upstream merge. Catching the break before the
+# merge is the job of the matching check in AdaWorldAPI/lance-graph.
+#
+# It compiles and does not test: `cargo check --all-targets` is what an API
+# break needs, and it keeps the daily run short.
+
+on:
+  schedule:
+    # 04:17 UTC daily. Off the hour, where scheduled runs are delayed least.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  # Run once on a PR that edits this file, so a change to the gate is itself
+  # exercised before it merges.
+  pull_request:
+    paths:
+      - .github/workflows/downstream-compat.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Read-only: checkout and compile. No secret is read and nothing is pushed.
+# The three siblings are public, so no token beyond the default is needed.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-against-sibling-heads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: lance-graph-java/native/lgj-abi
+    steps:
+      # On `schedule` and `workflow_dispatch` this is the default branch's
+      # head; on the `pull_request` trigger it is the PR's merge commit.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: lance-graph-java
+      # No `ref:` on the siblings: each resolves to its repository's default
+      # branch head, which is the thing this workflow exists to track.
+      - name: Checkout AdaWorldAPI/ndarray (default branch head)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
+      - name: Checkout AdaWorldAPI/lance-graph (default branch head)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: AdaWorldAPI/lance-graph
+          path: lance-graph
+      - name: Checkout AdaWorldAPI/OGAR (default branch head)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: AdaWorldAPI/OGAR
+          path: OGAR
+      # Same toolchain and CPU baseline as `lint.yml`; the reasons for
+      # `rust-src-dir` and for putting the baseline in `rustflags` are written
+      # out there.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rust-src-dir: lance-graph-java/native/lgj-abi
+          rustflags: -D warnings -Ctarget-cpu=x86-64-v3
+      # A failure is reproducible only with the exact commits, so they are
+      # printed before anything is compiled, and again in the job summary.
+      - name: Record the commits under test
+        working-directory: ${{ github.workspace }}
+        run: |
+          {
+            echo "### Commits under test"
+            echo
+            echo "| repository | commit |"
+            echo "|---|---|"
+            for repo in lance-graph-java lance-graph ndarray OGAR; do
+              echo "| $repo | \`$(git -C "$repo" rev-parse HEAD)\` |"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: cargo check --all-targets (lgj-abi)
+        run: cargo check --all-targets
+      - name: How to reproduce a failure
+        if: failure()
+        run: |
+          {
+            echo
+            echo "### Reproduce"
+            echo
+            echo "Check out the four commits above side by side, then:"
+            echo
+            echo '```'
+            echo "cd lance-graph-java/native/lgj-abi"
+            echo "RUSTFLAGS='-D warnings -Ctarget-cpu=x86-64-v3' cargo check --all-targets"
+            echo '```'
+            echo
+            echo "An \`E0004\` in \`exec_error_to_status\` means lance-graph added a"
+            echo "\`mask_risc::ExecError\` variant: add an arm in"
+            echo "\`native/lgj-abi/src/exports.rs\`."
+          } >> "$GITHUB_STEP_SUMMARY"
