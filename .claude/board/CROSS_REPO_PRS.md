@@ -28,6 +28,37 @@
 
 ---
 
+## The upstream-drift gates (2026-11-12)
+
+**Repos:** this one (`.github/workflows/downstream-compat.yml`) and
+`AdaWorldAPI/lance-graph` (a PR check that compiles `lgj-abi`).
+**Gated:** nothing. These detect; they do not block a merge here.
+
+**The gap.** `lgj-abi` path-depends on lance-graph and ndarray at their current
+heads, and `lint.yml` runs only on pushes to this repository. An upstream merge
+that breaks `lgj-abi` was invisible until the next push here. Five fixes have
+the same shape, a new `mask_risc::ExecError` variant meeting the exhaustive
+match in `exec_error_to_status`: `183745e`, `4cae6da`, `979692c` (#87),
+`3593fb3`, `ce6ce22` (#94).
+
+**Two gates, two jobs.**
+
+- Daily, here: `cargo check --all-targets` on `lgj-abi` against the default
+  branch heads of lance-graph, ndarray and OGAR. Finds drift within a day.
+  Runs on `schedule` and `workflow_dispatch`, and on a PR that edits the
+  workflow file.
+- On lance-graph PRs: the same compile against the PR's own head, so the break
+  shows before the upstream merge. That check lives in lance-graph.
+
+**Verified.** With the two `Sel*` arms removed from `exec_error_to_status`
+(not committed), the workflow's command exits 101 with `E0004`; restored, it
+exits 0.
+
+**Status:** the daily gate is in a PR here; the upstream check is in a PR in
+lance-graph.
+
+---
+
 ## ndarray #283 — `masked_strided_group_sum` (merged 2026-08-25)
 
 **Repo:** `AdaWorldAPI/ndarray`
