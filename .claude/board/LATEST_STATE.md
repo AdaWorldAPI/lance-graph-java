@@ -1,4 +1,4 @@
-## 2026-11-12 — two characterisations on local branch `p1-scalar-terminal` (not pushed)
+## 2026-11-12 — two characterisations (tests only; in a draft PR)
 
 **The two lowerings emit the same `Program`** (`lowering_convergence.rs`,
 `both_lowerings_emit_the_same_program`). For the 56 plans with at least one AND
@@ -29,10 +29,9 @@ against five mask origins, asserted as a table:
   (617), the four consumer mains (153) and the TinkerPop harness (80) all pass.
   `bench/` was not run. No rule was changed.
 
-## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, local branch)
+## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, in a draft PR)
 
-Status: implemented and measured on local branch `p1-scalar-terminal`, stacked on
-the P0 fix (#94). Not pushed; not in a PR.
+Status: implemented and measured; in a draft PR on top of the merged P0 fix (#94).
 
 - **Added:** `lgj_plan_scalar` (`docs/abi.md` §21) with `LGJ_FOLD_COUNT` and
   `LGJ_FOLD_SUM_I32`. `plan_lower::lower_scalar` reuses `lower_plan`'s ops and
@@ -41,7 +40,7 @@ the P0 fix (#94). Not pushed; not in a PR.
   13 or later and keep the mask path against an older library.
 - **Measured:** native 205 tests (9 new, including one allocation gate); 6 of 6
   disable runs red. Java core 617 checks; consumers 70 / 68 / 3 / 12, unchanged.
-  Against a minor-12 library built from the P0 commit, `OldAbiCompatTest` gives
+  Against a minor-12 library built from the #94 commit, `OldAbiCompatTest` gives
   the same answers (71, 6257, 111296) in 2 crossings where minor 13 takes 1.
 - **Cost:** `sumOf()` 2 crossings to 1; `count()` stays 1. Mask bytes written per
   call go from `8 × ceil(rows / 64)` to 0. Native latency: count unchanged within
