@@ -1766,7 +1766,13 @@ fn exec_error_to_status(e: ExecError) -> i32 {
         // `MaskedStridedGroupSum` terminal. This file lowers neither, so
         // reaching either would be a bug here, exactly like the arms above.
         | ExecError::StridedOutOfBounds { .. }
-        | ExecError::StridedGroupWidth { .. } => LGJ_ERR_ALLOCATION_FAILED,
+        | ExecError::StridedGroupWidth { .. }
+        // Raised only by `execute_sel`, the position-list entry beside
+        // `execute_into` (lance-graph D-DR-SELECT-K-SV-1). This file calls
+        // `execute_into` only and passes no position list, so reaching
+        // either would be a bug here, exactly like the arms above.
+        | ExecError::SelOutOfRange { .. }
+        | ExecError::SelSumBound { .. } => LGJ_ERR_ALLOCATION_FAILED,
     }
 }
 
