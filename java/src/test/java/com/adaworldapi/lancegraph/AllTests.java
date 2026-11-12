@@ -20,6 +20,7 @@ public final class AllTests {
         Map<String, Consumer<Checks>> suites = new LinkedHashMap<>();
         suites.put("ApiSurfaceTest", ApiSurfaceTest::run);
         suites.put("DoctrineFenceTest", DoctrineFenceTest::run);
+        suites.put("ToolchainMandateTest", ToolchainMandateTest::run);
         suites.put("AbiContractTest", AbiContractTest::run);
         suites.put("SmokeTest", SmokeTest::run);
         suites.put("FixtureParityTest", FixtureParityTest::run);
@@ -42,7 +43,8 @@ public final class AllTests {
             // before reporting the skip. They are exactly the checks most worth having before the
             // artifact exists.
             int shapeCode = 0;
-            for (String name : new String[] {"ApiSurfaceTest", "DoctrineFenceTest"}) {
+            for (String name : new String[] {
+                    "ApiSurfaceTest", "DoctrineFenceTest", "ToolchainMandateTest"}) {
                 Consumer<Checks> suite = suites.get(name);
                 if (suite == null) {
                     // A renamed registry key must fail as a report, not as an NPE mid-loop

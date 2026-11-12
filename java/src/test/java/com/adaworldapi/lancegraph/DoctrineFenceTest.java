@@ -723,7 +723,7 @@ public final class DoctrineFenceTest {
      * Walk up from the working directory to the first ancestor that carries both trees the
      * fences scan. Tests run from {@code java/} per the README, but the fence should not care.
      */
-    private static Path repoRoot() {
+    static Path repoRoot() {
         Path p = Path.of("").toAbsolutePath();
         for (int i = 0; i < 8 && p != null; i++, p = p.getParent()) {
             if (Files.isDirectory(p.resolve("java/src/main/java"))
@@ -734,7 +734,7 @@ public final class DoctrineFenceTest {
         return null;
     }
 
-    private static List<Path> sourcesUnder(Path root, String suffix) {
+    static List<Path> sourcesUnder(Path root, String suffix) {
         try (Stream<Path> walk = Files.walk(root)) {
             return walk.filter(p -> p.getFileName().toString().endsWith(suffix))
                     .filter(Files::isRegularFile)
