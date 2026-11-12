@@ -2891,6 +2891,9 @@ mod tests {
     mod pr4_equivalence;
     mod pr4_matrix;
     mod pr4_seed;
+    /// Which exports check a mask's parent and which check only its length,
+    /// pinned as a matrix, with what the length-only rule permits.
+    mod provenance;
     /// Minor 13: a plan folded to one count or sum with no mask, against the
     /// mask path, the scalar reference and a hand walk, plus every refusal.
     mod scalar_fold;

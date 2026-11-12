@@ -1,3 +1,34 @@
+## 2026-11-12 — two characterisations on local branch `p1-scalar-terminal` (not pushed)
+
+**The two lowerings emit the same `Program`** (`lowering_convergence.rs`,
+`both_lowerings_emit_the_same_program`). For the 56 plans with at least one AND
+(arity 2 to 5, all nine opcodes) and the four terminals this crate lowers to
+(keep, count, sum, grouped sum), `plan_lower(ops) == quack::lower(fold_to_tree(ops))`
+structurally: 224 of 224. Until now the file compared answers only.
+
+- Disable-verified: dropping the survivor gate, or swapping the AND's operand
+  order, turns only this test red. Every answer-level test stays green, since
+  neither change alters an answer.
+- Scope: the Quack side receives this file's tree reading of the flat plan.
+  Plans with no AND and the fk-keyed grouped sum are outside the claim.
+
+**Which exports check a mask's parent** (`provenance.rs`). Twelve exports
+against five mask origins, asserted as a table:
+
+- Row count only (9): `lgj_op_eq_u32`, `lgj_op_gt_i32`, `lgj_plan_eval`,
+  `lgj_reduce_sum_i32`, `lgj_reduce_i32`, `lgj_op_eq_classid`,
+  `lgj_op_ternary_match`, `lgj_hop` (source and destination). A mask over a
+  different resource, or over a resource of the other kind, is accepted.
+- Same parent (3, plus the four mask-algebra ops): `lgj_reduce_facet_sum`,
+  `lgj_reduce_facet_sum_resolved`, `lgj_row_layout_probe`.
+- `a_selection_can_be_relabelled_onto_another_resource_today` shows the
+  consequence: a predicate evaluated on B, stored in A's mask and summed over
+  A's values returns `OK` and a number that answers neither A nor B.
+- Experiment, not committed: with the same-parent rule in all nine places,
+  the native suite (except the two tests that pin the lenient rule), `AllTests`
+  (617), the four consumer mains (153) and the TinkerPop harness (80) all pass.
+  `bench/` was not run. No rule was changed.
+
 ## 2026-11-12 — ABI minor 13: a plan folded to one scalar, with no mask (D-LGJ-SCALAR-1, local branch)
 
 Status: implemented and measured on local branch `p1-scalar-terminal`, stacked on
