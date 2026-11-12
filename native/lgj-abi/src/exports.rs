@@ -896,12 +896,12 @@ fn resolve_pattern_and_mask(
     dst_mask: u64,
 ) -> Result<(std::sync::Arc<ResourceEntry>, std::sync::Arc<ResourceEntry>), i32> {
     let pattern = registry::resolve_kind(res, LGJ_RESOURCE_PATTERN)?;
-    let (mask, _parent) = registry::resolve_mask_with_parent(dst_mask)?;
-    // abi.md names only the row-count condition here (§3 MASK_LENGTH_MISMATCH),
-    // so a mask from a *different but equally sized* pattern is accepted. That
-    // is a deliberate reading: the kernels care about length, and the Java layer
-    // never constructs such a pairing.
-    if mask.n_rows != pattern.n_rows {
+    let (mask, parent) = registry::resolve_mask_with_parent(dst_mask)?;
+    // The mask must belong to THIS pattern (abi.md §3.1, minor 14): its parent
+    // is compared by registry identity, never by row count, kind or contents.
+    // Until minor 14 only the row count was checked, so a predicate evaluated
+    // on one pattern could land in a mask belonging to another.
+    if !std::sync::Arc::ptr_eq(&parent, &pattern) || mask.n_rows != pattern.n_rows {
         return Err(LGJ_ERR_MASK_LENGTH_MISMATCH);
     }
     Ok((pattern, mask))
@@ -1012,11 +1012,12 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
         if facet >= crate::rowstore::ROW_FACETS {
             return LGJ_ERR_INVALID_LANE;
         }
-        let (mask, _parent) = match registry::resolve_mask_with_parent(dst_mask) {
+        let (mask, parent) = match registry::resolve_mask_with_parent(dst_mask) {
             Ok(t) => t,
             Err(e) => return e,
         };
-        if mask.n_rows != store_entry.n_rows {
+        // The mask must belong to THIS store (abi.md §3.1, minor 14).
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) || mask.n_rows != store_entry.n_rows {
             return LGJ_ERR_MASK_LENGTH_MISMATCH;
         }
         let mut g = match mask.write_mask() {
@@ -1072,11 +1073,9 @@ pub extern "C" fn lgj_op_eq_classid(res: u64, facet: u32, needle: u32, dst_mask:
 ///
 /// # Mask compatibility
 ///
-/// Row-count only, matching [`lgj_op_eq_classid`] — the closest sibling, a
-/// predicate that WRITES a mask — rather than the register sweeps' stricter
-/// parent-identity check. abi.md names only the row-count condition for a
-/// predicate's destination, and inventing a second reading for one new
-/// predicate would be the drift this membrane is built to prevent.
+/// The mask must belong to this store (abi.md §3.1, minor 14), as for
+/// [`lgj_op_eq_classid`] and every other export that takes a mask beside a
+/// resource.
 ///
 /// # Bulk (§6)
 ///
@@ -1116,11 +1115,12 @@ pub unsafe extern "C" fn lgj_op_ternary_match(
         if facet >= crate::rowstore::ROW_FACETS {
             return LGJ_ERR_INVALID_LANE;
         }
-        let (mask, _parent) = match registry::resolve_mask_with_parent(dst_mask) {
+        let (mask, parent) = match registry::resolve_mask_with_parent(dst_mask) {
             Ok(t) => t,
             Err(e) => return e,
         };
-        if mask.n_rows != store_entry.n_rows {
+        // The mask must belong to THIS store (abi.md §3.1, minor 14).
+        if !std::sync::Arc::ptr_eq(&parent, &store_entry) || mask.n_rows != store_entry.n_rows {
             return LGJ_ERR_MASK_LENGTH_MISMATCH;
         }
 
@@ -2625,10 +2625,9 @@ pub unsafe extern "C" fn lgj_plan_group_sum_i32(
 // ───────────────────────────────────────────────────────────────────────────
 
 /// Resolve `(rowstore, src_mask, dst_mask)` for `lgj_hop`, checking that
-/// both masks are row-count-compatible with the store — the same
-/// row-count-only reading `resolve_pattern_and_mask` already uses (a mask
-/// from a different but equally sized resource is accepted; abi.md names
-/// only the row-count condition).
+/// both masks belong to the store (abi.md §3.1, minor 14): each mask's
+/// parent is compared with the store by registry identity, separately for
+/// the source and for the destination.
 #[allow(clippy::type_complexity)]
 fn resolve_rowstore_and_hop_masks(
     store: u64,
@@ -2643,9 +2642,13 @@ fn resolve_rowstore_and_hop_masks(
     i32,
 > {
     let store_entry = registry::resolve_kind(store, LGJ_RESOURCE_ROWSTORE)?;
-    let (src, _src_parent) = registry::resolve_mask_with_parent(src_mask)?;
-    let (dst, _dst_parent) = registry::resolve_mask_with_parent(dst_mask)?;
-    if src.n_rows != store_entry.n_rows || dst.n_rows != store_entry.n_rows {
+    let (src, src_parent) = registry::resolve_mask_with_parent(src_mask)?;
+    let (dst, dst_parent) = registry::resolve_mask_with_parent(dst_mask)?;
+    if !std::sync::Arc::ptr_eq(&src_parent, &store_entry)
+        || !std::sync::Arc::ptr_eq(&dst_parent, &store_entry)
+        || src.n_rows != store_entry.n_rows
+        || dst.n_rows != store_entry.n_rows
+    {
         return Err(LGJ_ERR_MASK_LENGTH_MISMATCH);
     }
     Ok((store_entry, src, dst))
