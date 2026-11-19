@@ -1,3 +1,21 @@
+## schema-bridge-v1 (2026-11-19) — PROPOSAL, not accepted
+
+`.claude/plans/schema-bridge-v1.md`. No schema crosses the membrane today: Java's
+`Pattern`/`Field` words and the native `ClassView` basis are two copies of one
+fact with no check between them (the defect `abi.md` §17 fixed for carvings).
+The plan sorts the DT64/DR types by the lab's 8-byte flattening limit and by
+what Panama passes for free: revisions and addresses fit value records or
+register arguments, `Frame` and `MethodRef` hold `Weak` pointers and stay behind
+handles, digests compare natively. Options: A change nothing, B a class-view
+revision in the manifest (no symbol; blocked on a contract accessor that does
+not exist), C a per-class describe call (not worth a symbol without a revision),
+D bind through the DT64 lane socket (blocked by the G11 fence, a test-only
+adapter and the refusal vocabulary), E names resolved natively through Quack's
+`Binder` (rejected: strings across the boundary). Recommends A now, B once the
+contract has the accessor. Nothing implemented; no D-id.
+
+**Status: PROPOSAL.**
+
 ## fused-hop-chain-v1 (2026-11-19) — PROPOSAL, not accepted
 
 `.claude/plans/fused-hop-chain-v1.md`. A k-hop count costs `3k + 4` native calls
