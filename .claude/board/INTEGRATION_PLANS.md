@@ -1,3 +1,22 @@
+## method-call-v1 (2026-11-19) — PROPOSAL, not accepted
+
+`.claude/plans/method-call-v1.md`. Follows `schema-bridge-v1`: a Java host needs
+a class id only for what acts, and acting is calling a method. Natively a
+behaviour is one 32-bit classid (`class :: arm`, arm in `0xF001..=0xFFFF`, from
+an append-only ledger), so the caller's side fits a 4-byte value record. DT64
+admits a method and runs nothing. Two things execute today and they differ in
+kind: R2IL's `prepare`/`run` over field lanes through mask-risc (bulk; a lab
+reading with an undecided permit issuer) and OGAR's `CapabilityExecutor` (one
+request, strings, SSH/REST/command). Options: A change nothing, B a vocabulary
+record with no call (rejected), C `lgj_method_prepare` + `lgj_method_run` over a
+mask (the only membrane-shaped form; blocked by the G11 fence, R2IL's own
+status, the permit issuer, the lack of a writable field lane and the refusal
+vocabulary), D capability invocation as an export (rejected: strings, per
+request). Recommends A now, C as the recorded shape. Nothing implemented; no
+D-id.
+
+**Status: PROPOSAL.**
+
 ## schema-bridge-v1 (2026-11-19) — PROPOSAL, not accepted
 
 `.claude/plans/schema-bridge-v1.md`. No schema crosses the membrane today: Java's
