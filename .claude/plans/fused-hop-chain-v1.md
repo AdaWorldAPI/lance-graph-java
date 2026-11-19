@@ -290,8 +290,9 @@ it is kept decides whether D saves anything:
 | A derived graph does not outlive its source | 7 at any k | a change to documented public behaviour |
 
 A recorded chain is plain data and can always be copied; the seed is the only
-part with a lifetime. So the D rows of the options table that opens §3 hold only
-under the second, third or fourth row here. Under copying, which is the only
+part with a lifetime. So the two D rows of the options table that opens §3
+that give 7 (and 5) calls at any k hold only under the second, third or fourth
+row here; the D row marked "seed copied at each derivation" is the first row. Under copying, which is the only
 row that needs no further ruling, D costs 3k + 7 against A's 3k + 4. Whichever
 row is chosen, a test must close the source first and then run the derived
 terminal.
