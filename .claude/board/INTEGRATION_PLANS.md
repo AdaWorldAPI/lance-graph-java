@@ -1,3 +1,22 @@
+## method-call-v1 (2026-11-19) — PROPOSAL, not accepted
+
+`.claude/plans/method-call-v1.md`. Follows `schema-bridge-v1`: a Java host needs
+a class id only for what acts, and acting is calling a method. Natively a
+behaviour is one 32-bit classid (`class :: arm`, arm in `0xF001..=0xFFFF`, from
+an append-only ledger), so the caller's side fits a 4-byte value record. DT64
+admits a method and runs nothing. Two things execute today and they differ in
+kind: R2IL's `prepare`/`run` over field lanes through mask-risc (bulk; a lab
+reading with an undecided permit issuer) and OGAR's `CapabilityExecutor` (one
+request, strings, SSH/REST/command). Options: A change nothing, B a vocabulary
+record with no call (rejected), C `lgj_method_prepare` + `lgj_method_run` over a
+mask (the only membrane-shaped form; blocked by the engine-is-never-a-dependency rule, R2IL's own
+status, the permit issuer, the lack of a writable field lane and the refusal
+vocabulary), D capability invocation as an export (rejected: strings, per
+request). Recommends A now, C as the recorded shape. Nothing implemented; no
+D-id.
+
+**Status: PROPOSAL.**
+
 ## schema-bridge-v1 (2026-11-19) — PROPOSAL, not accepted
 
 `.claude/plans/schema-bridge-v1.md`. No schema crosses the membrane today: Java's
@@ -9,7 +28,7 @@ register arguments, `Frame` and `MethodRef` hold `Weak` pointers and stay behind
 handles, digests compare natively. Options: A change nothing, B a class-view
 revision in the manifest (no symbol; blocked on a contract accessor that does
 not exist), C a per-class describe call (not worth a symbol without a revision),
-D bind through the DT64 lane socket (blocked by the G11 fence, a test-only
+D bind through the DT64 lane socket (blocked by the engine-is-never-a-dependency rule, a test-only
 adapter and the refusal vocabulary), E names resolved natively through Quack's
 `Binder` (rejected: strings across the boundary). Recommends A now, B once the
 contract has the accessor. Nothing implemented; no D-id.

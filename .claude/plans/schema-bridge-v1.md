@@ -145,10 +145,11 @@ This is the full bridge, and it is the one that gives revision-checked
 binding, route checks and frame checks. It is blocked on three things
 that are not this repo's to decide:
 
-1. `lgj-abi` may import only
-   `lance_graph_contract::{canonical_node, class_view, facet, ontology}`
-   (the G11 fence, enforced by a test). `lance-graph-dt64` is a different
-   crate and outside it.
+1. `lance-graph-dt64` is not a dependency of `lgj-abi`, and `CLAUDE.md`
+   says "the full lance-graph ENGINE is never a dependency". Whether
+   dt64 counts as the engine is the owner's reading. (The G11 fence is a
+   different rule: it limits which `lance_graph_contract` modules may be
+   imported, and does not speak about other crates.)
 2. The one existing adapter, `AbiLanes`
    (`lance-graph-report/src/lane_source.rs`), states of itself: "Reader
    scope: NOT production-admitted", `I32`/`U32` lanes only, and its only
@@ -228,7 +229,8 @@ vocabularies belong in a band of their own is an OGAR codebook ruling.
    the witness be per class?
 2. If B lands, does a mismatch refuse the load, or only the vocabularies
    generated at another revision?
-3. Is D wanted at all for this repo, given the G11 fence?
+3. Is D wanted at all for this repo, given that the engine is never a
+   dependency?
 4. If D: how are DT64 refusals reported through 19 error status codes?
 5. Should the vocabulary records for `SchemaRev`, `RouteVersion` and
    `Scope` exist in the facade before any call uses them? (This plan says
