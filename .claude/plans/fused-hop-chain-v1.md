@@ -372,10 +372,12 @@ Evidence missing before anything beyond A, and what would produce it:
    `bench/run.sh`, so FFM and facade costs are inside the number.
 4. The branching `Graph` case of §3.D: one prefix, two continuations, calls and
    wall time, lazy against eager.
-5. The consumer's workload: store sizes, k, request rate. If its stores are small
-   (hundreds of rows) the lifecycle share exceeds the roughly 5 % of §1.5 and the bar
-   may be met by crossings plus the allocation figure; at the sizes measured
-   here it is not.
+5. The consumer's workload: store sizes, k, request rate. A hypothesis to
+   measure, not a finding: in stores of a few hundred rows the hop itself is
+   cheaper, so the lifecycle calls may be a larger share than the roughly 5 %
+   seen at 2,000 rows. No store below 2,000 rows was timed. If measurement
+   bears it out, crossings plus the allocation figure may meet the bar; at the
+   sizes timed here nothing shows that they do.
 
 D proceeds only if 1 to 3 show a benefit for the workload of item 5: lower
 latency outside run-to-run noise at the consumer's store sizes and k, with
