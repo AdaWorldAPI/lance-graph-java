@@ -1,3 +1,19 @@
+## fused-hop-chain-v1 (2026-11-19) — PROPOSAL, not accepted
+
+`.claude/plans/fused-hop-chain-v1.md`. A k-hop count costs `3k + 4` native calls
+and a count with one label filter `3k + 10` (read from the Java and Rust,
+confirmed by running the shapes through the public API). An outside consumer's
+rule, one native call per request with releases excluded, is stricter than what
+this repo accepted ("crossings scale with hops"). The plan weighs four options
+against `abi.md` §1/§6, the warden, E1/E5 and the STOP rule: A change nothing,
+B Java side only, C a hop op-code in the fused-plan surface (does not fit: the
+plan surface takes pattern resources, the accumulator model and the upstream
+mask-risc rules, seeds), D a new `lgj_hop_chain` symbol (fits the doctrine; no
+latency, allocation or disable-run evidence). Recommends A now and lists the
+measurements that would decide D. Nothing implemented; no D-id.
+
+**Status: PROPOSAL.**
+
 ## mask-risc-lowering-v1 (2026-09-03) — DRAFT for the 5+3 council
 
 `.claude/plans/mask-risc-lowering-v1.md`. The API speaks database (loco verbs `where` /
