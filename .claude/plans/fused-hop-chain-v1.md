@@ -102,11 +102,14 @@ accepted here, nor was one per hop.
 
 A bare downcall is 22 ns and `lgj_mask_count` 118 ns, registry lookup included
 (`bench/RESULTS.md:54-56`). Per extra hop a chain makes one `lgj_mask_create`
-and one `lgj_close` beyond the hop. §1.3's last column bounds that pair from
-above (it also includes a describe): 0.77 µs against a 14.5 µs hop in the
-smallest facet-major store, about 5 %; 0.3 % at 65,536 rows facet-major; below
-0.2 % on AoS. That bounds what removing lifecycle calls can buy. It does not
-bound anything else a fused call might change, which is unmeasured. Two facts
+and one `lgj_close` beyond the hop. §1.3's last column times an empty import
+plus close (which also includes a describe) separately from the hop: 0.77 µs
+against a 14.5 µs hop in the smallest facet-major store, about 5 %; 0.3 % at
+65,536 rows facet-major; below 0.2 % on AoS. These are two separate timings
+from one run on a shared container, so the ratio is indicative, not an upper
+bound: the lifecycle arm of a chain (k × create + hop + close against k hops on
+one mask) was not measured, and §4 item 1 asks for it. Nothing else a fused
+call might change was measured either. Two facts
 bear on that: `lgj_hop` allocates four `Vec<u64>` of `n_rows/64` words per call
 (`exports.rs:2759,2767,2803-2804`), and no Rust-side allocation test covers
 `lgj_hop` (`native/lgj-abi/tests/` holds `plan_eval_no_alloc.rs` and
@@ -260,8 +263,8 @@ statement (`abi.md:989-996`) applies per hop and the mask-algebra shape stays,
 since the chain calls the existing per-hop kernel.
 **Does the evidence meet the bar? No.** §20 and §21 were argued with a crossing
 count, bytes written, native allocation, native latency and a red-then-green
-table (`abi.md:1936-1981`). For D there is a crossing count (§1.3) and an upper
-bound on the lifecycle saving (§1.5). There is no native latency for a chain,
+table (`abi.md:1936-1981`). For D there is a crossing count (§1.3) and an
+indicative ratio for the lifecycle share (§1.5). There is no native latency for a chain,
 no allocation figure for `lgj_hop` or a chain, and no disable run, because
 nothing exists to disable.
 
@@ -271,6 +274,21 @@ pattern) and one `Engine` method behind `Abi.requireMinor(15)`. No new public
 Java signature: `Graph` would defer its hops and run them at a terminal, and
 against an older library keep today's per-hop path, as `View.count()` does
 (`abi.md:1927-1934`). `ApiSurfaceTest` is unaffected.
+
+*Lifetime of a deferred graph.* Today `Graph.hop` writes into a new `Mask`, so
+a derived graph stays usable after its source `Graph` closes. A deferred graph
+reads its seed frontier at the terminal, so that property has to be kept
+deliberately. The choice here: a deferred graph holds no reference to its
+source's `Mask`. When a hop is recorded on a graph whose frontier is already
+materialized, the derived graph takes its own copy of that frontier (one
+`lgj_mask_create` plus one `lgj_mask_or` into it, both existing symbols); when
+the source is itself deferred, the derived graph copies the recorded chain,
+which is plain data. `close()` on the source then releases only the source's
+own mask, and `close()` on the derived graph releases only its copy. The copy
+costs two calls per derivation from a materialized frontier, which the crossing
+table in this section does not yet include; a test must close the source first
+and run the derived terminal. Sharing the seed by reference count is the
+alternative and is rejected because it puts lifetime logic in Java.
 
 *Tests.* Rust: the chain byte-identical to k single `lgj_hop` calls for k =
 1..4 with two distinct edge classids (order must matter), both layouts, and
@@ -284,7 +302,10 @@ library built from this commit, and a chain crossing pin in `GraphHopTest`.
 
 *Disable table rows,* each red-then-green with the knob shown to bind
 (`abi.md:1753-1769`): the decode-mode check moved after the first write;
-validation moved into the loop (partial write on a late refusal); the source
+validation moved into the loop together with writing each hop's result into
+`dst` as it completes (so a late refusal leaves a partial write; moving the
+validation alone leaves `dst` untouched and the atomicity test would stay
+green, which is not evidence); the source
 snapshot removed under aliasing; hop order reversed; tail clear after the last
 hop removed; either provenance check removed; the Java version gate removed;
 the Java fallback answering differently from the chain.
@@ -319,8 +340,8 @@ call per query for any k, argues worse than D, and is listed for the record.
 ## 4. Recommendation
 
 Adopt A now; do not implement B2, C or D. A satisfies every rule, and §1.5
-bounds the lifecycle calls a chain makes at about 5 % of the smallest hop
-measured. D is what this repository's doctrine would choose if a fused chain
+puts the lifecycle calls at roughly 5 % of the smallest hop measured, as an
+indicative ratio from separate timings. D is what this repository's doctrine would choose if a fused chain
 were wanted, because C does not fit; but its case rests on a crossing count and
 §20 and §21 set the bar at measured latency, allocation and a disable run. The
 outside rule is not met by D either: D gives 7 calls for every k, and one call
@@ -343,13 +364,17 @@ Evidence missing before anything beyond A, and what would produce it:
 4. The branching `Graph` case of §3.D: one prefix, two continuations, calls and
    wall time, lazy against eager.
 5. The consumer's workload: store sizes, k, request rate. If its stores are small
-   (hundreds of rows) the lifecycle share exceeds the 5 % of §1.5 and the bar
+   (hundreds of rows) the lifecycle share exceeds the roughly 5 % of §1.5 and the bar
    may be met by crossings plus the allocation figure; at the sizes measured
    here it is not.
 
-If 1 to 3 show a difference outside run-to-run noise, D proceeds as its own
+D proceeds only if 1 to 3 show a benefit for the workload of item 5: lower
+latency outside run-to-run noise at the consumer's store sizes and k, with
+allocation per call no higher than k single hops. It then goes ahead as its own
 change with the §22 and disable table above and the board updates a symbol
-change requires. If not, D is closed as "do not add", with §1.3 as the record.
+change requires. A difference in the other direction (a chain that is slower
+or allocates more), or no difference outside noise, closes D as "do not add",
+with §1.3 as the record.
 
 ## 5. Non-goals
 
