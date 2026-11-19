@@ -84,12 +84,18 @@ these parameters, somewhere outside".
   verb, so the rule admits it in principle; but every lane this repo
   serves today is read-only except a mask and the Import exception, and
   stores are generated from a seed. There is nothing to write to.
-- **G11 fence.** `lgj-abi` may import
-  `lance_graph_contract::{canonical_node, class_view, facet, ontology}`
-  and `lance-graph-mask-risc`. `lance-graph-dt64` and `lance-graph-r2il`
-  are outside it. `lance-graph-r2il` also pulls `ogar-loco` and
-  `ogar-r2il` from OGAR by git, a source this crate does not take today
-  outside the optional `ogar-classview` feature.
+- **Dependencies.** Two different rules apply, and neither settles it.
+  The G11 fence limits which `lance_graph_contract` *modules* `lgj-abi`
+  may import (`canonical_node`, `class_view`, `facet`, `ontology`); it
+  says nothing about other crates. The crate-level rule is `CLAUDE.md`
+  ("the full lance-graph ENGINE is never a dependency — blast-radius
+  containment is the point of the contract split"). Today `lgj-abi`
+  depends on `ndarray`, `lance-graph-contract` and
+  `lance-graph-mask-risc`, plus `ogar-class-view` behind an optional
+  feature. `lance-graph-dt64` and `lance-graph-r2il` are not among them.
+  Whether they count as "the engine" is the owner's reading, not this
+  plan's. `lance-graph-r2il` also pulls `ogar-loco` and `ogar-r2il` from
+  OGAR by git.
 
 So only the first kind of execution has a membrane-shaped form. The
 second kind is not a membrane concern at all.
@@ -139,7 +145,8 @@ lgj_method_run(handle, u64 src_mask, out *LgjReceipt) // O(rows)
 This is the only shape found that satisfies §1, §6 and §10 together. It
 is **blocked on five things, none of them this repo's to decide**:
 
-1. the G11 fence (dt64 and r2il are outside it);
+1. the dependency rule: dt64 and r2il are not dependencies of `lgj-abi`,
+   and `CLAUDE.md` keeps the lance-graph engine out;
 2. `lance-graph-r2il` describes itself as an optional reading, not the
    execution path;
 3. who issues an `ExecPermit` "is not decided";
@@ -181,7 +188,7 @@ a method body, a guard, a binding or a permit.
    prepared native plan" and R2IL stay the inspectable reading?
 2. (DT64) Who issues an execution permit in production?
 3. (this repo) Is a method run wanted behind this membrane at all, given
-   the G11 fence?
+   the rule that the engine is never a dependency?
 4. (this repo) If yes: what does an effect write to? A writable field
    lane is a larger change than the two symbols.
 5. (OGAR) Does a hosted foreign stack take arms from the consumer range
