@@ -153,7 +153,8 @@ count and id). Everything except A is computed from §1.1, not measured.
 | B2, a new Java chain method | 7, 8, 9 | 13, 14, 15 |
 | C, if it fitted: count | 4, 4, 4 | 4, 4, 4 |
 | C, if it fitted: id | 7, 7, 7 | 7, 7, 7 |
-| D, chain symbol, distinct src and dst | 7, 7, 7 | 13, 13, 13 |
+| D, chain symbol, distinct src and dst, seed kept without a copy (§D, lifetime) | 7, 7, 7 | 13, 13, 13 |
+| D, same, seed copied at each derivation | 10, 13, 16 | 16, 19, 22 |
 | D, in place (only if `Graph` imported its own seeds) | 5, 5, 5 | 11, 11, 11 |
 
 ### A. Change nothing
@@ -276,19 +277,24 @@ against an older library keep today's per-hop path, as `View.count()` does
 (`abi.md:1927-1934`). `ApiSurfaceTest` is unaffected.
 
 *Lifetime of a deferred graph.* Today `Graph.hop` writes into a new `Mask`, so
-a derived graph stays usable after its source `Graph` closes. A deferred graph
-reads its seed frontier at the terminal, so that property has to be kept
-deliberately. The choice here: a deferred graph holds no reference to its
-source's `Mask`. When a hop is recorded on a graph whose frontier is already
-materialized, the derived graph takes its own copy of that frontier (one
-`lgj_mask_create` plus one `lgj_mask_or` into it, both existing symbols); when
-the source is itself deferred, the derived graph copies the recorded chain,
-which is plain data. `close()` on the source then releases only the source's
-own mask, and `close()` on the derived graph releases only its copy. The copy
-costs two calls per derivation from a materialized frontier, which the crossing
-table in this section does not yet include; a test must close the source first
-and run the derived terminal. Sharing the seed by reference count is the
-alternative and is rejected because it puts lifetime logic in Java.
+a derived graph stays usable after its source `Graph` closes (`Graph.java:158-163`,
+`close()` at `:238-242` releases only its own frontier). A deferred graph reads
+its seed at the terminal, so that property does not come for free, and the way
+it is kept decides whether D saves anything:
+
+| How the seed stays valid | Calls for seed, k hops, terminal | Cost outside this plan |
+|---|---|---|
+| Copy the seed at every derivation (`lgj_mask_create` + `lgj_mask_or`, later one `lgj_close`), from a materialized or a deferred source alike | 3k + 7 | none; but it is 3 more than A at every k, so D saves nothing |
+| Keep the caller's row list in Java until the terminal, and import then | 7 at any k | only for `from(long...)`; a Java array of ids lives as long as the graph (the Import exception of `CLAUDE.md:129-137` stretched over time), and an out-of-range row is refused at the terminal, not at `from` |
+| Share the seed natively between source and derived graphs | 7 at any k | a retain-style lifecycle symbol, since Java may not hold the lifetime logic; needed for `from(Mask)`, which takes ownership of a native mask (`Graph.java:131-140`) |
+| A derived graph does not outlive its source | 7 at any k | a change to documented public behaviour |
+
+A recorded chain is plain data and can always be copied; the seed is the only
+part with a lifetime. So the D rows of the options table that opens §3 hold only
+under the second, third or fourth row here. Under copying, which is the only
+row that needs no further ruling, D costs 3k + 7 against A's 3k + 4. Whichever
+row is chosen, a test must close the source first and then run the derived
+terminal.
 
 *Tests.* Rust: the chain byte-identical to k single `lgj_hop` calls for k =
 1..4 with two distinct edge classids (order must matter), both layouts, and
@@ -344,7 +350,9 @@ puts the lifecycle calls at roughly 5 % of the smallest hop measured, as an
 indicative ratio from separate timings. D is what this repository's doctrine would choose if a fused chain
 were wanted, because C does not fit; but its case rests on a crossing count and
 §20 and §21 set the bar at measured latency, allocation and a disable run. The
-outside rule is not met by D either: D gives 7 calls for every k, and one call
+outside rule is not met by D either: D gives 7 calls for every k at best, and
+3k + 7 if a derived graph keeps the lifetime it has now by copying its seed (§3.D),
+which is worse than A; and one call
 per request needs the seed, the filter and the terminal fused, which is a query
 verb and belongs to the `sql()` direction (`CLAUDE.md:415-556`).
 
@@ -402,3 +410,8 @@ with §1.3 as the record.
    `lgj_plan_eval` (`exports.rs:1689-1691`)?
 6. Are the chain-level pin and the two stale statements of §3.A to be fixed
    whatever Q1 answers?
+7. How does a deferred graph keep its seed valid after its source closes
+   (§3.D, lifetime)? Copying costs more calls than A. The three ways that keep
+   the saving each need a ruling: a row list held in Java until the terminal, a
+   retain-style lifecycle symbol, or a derived graph that may not outlive its
+   source.
