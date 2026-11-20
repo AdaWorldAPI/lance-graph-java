@@ -392,21 +392,31 @@ runs, all green, same JDK `28-beta+16-ea`).
   `copyMemory0` call, `Unsafe.java:1000-1010` in `src.zip`). It is not a black-box
   fact.
 - *Ordering oracle (black-box).* The cleanup, standing in for `lgj_lease_release`,
-  first poisons the last 1 MiB of the source through a never-freed alias and then
-  sets a flag. The copy reads forward. A release during the copy would put poison in
-  the destination.
-- *G1.* 32, 64, 128 and 256 MiB, 20 rounds each, three runs: 240 of 240 rounds
-  overlapped, 0 carried poison, every close returned normally and ran the cleanup
-  once.
-- *G2.* In overlap rounds the median close duration grows with the size (run 1: 2.6,
-  6.9, 13.8, 27.6 ms against standalone copy medians of 2.9, 5.7, 12.0, 27.4 ms;
-  `R14-observed.txt`). The close waits for the in-flight access. Close latency is
-  bounded by the longest single in-flight access.
-- *G3 (red arm, sensitivity).* A "release" from another thread with no close put
-  poison in the destination in 10 of 10 rounds. The oracle can fail.
-- *G4.* A view passed as a segment to a downcall (libc `memcpy`, 256 MiB): a close
-  during the downcall threw `IllegalStateException` 5 of 5 times and the cleanup did
-  not run during it. A close after the downcall succeeded and ran the cleanup once.
+  poisons the last 1 MiB of the source, backward from the last word, through a
+  never-freed alias, and then sets a flag. The copy reads forward. A release that
+  starts while the copy still has words of that region to read puts poison in the
+  destination, unless the copy reads them all before the poison writer reaches
+  them. A release after the copy's last read is not detected and leaves no access
+  to protect. A clean destination is evidence for the timings the oracle can see,
+  not proof for every timing.
+- *G1.* 32, 64, 128 and 256 MiB, 20 rounds each, three runs (recorded set): 238 of
+  240 rounds overlapped; in 2 rounds of one run the 32 MiB copy ended before the
+  close (no overlap, counted separately); 0 carried poison; every close returned
+  normally and ran the cleanup once.
+- *G2.* In overlap rounds the median close duration grows with the size (run 1:
+  3.9, 8.1, 15.0, 28.3 ms against standalone copy medians of 3.3, 6.7, 13.2,
+  26.8 ms; `R14-observed.txt`). The close waits for the in-flight access. These
+  medians are observations on one machine and do not bound close latency.
+- *G3 (red arm, sensitivity).* A "release" from another thread with no close, run
+  only once the copy was confirmed in progress (first destination word written,
+  last not yet), put poison in the destination in 10 of 10 confirmed rounds per
+  run (0 inconclusive). The oracle can fail.
+- *G4.* A view passed as a segment to a downcall (libc `memcpy`, 256 MiB), close
+  attempted while the downcall was confirmed in progress (first destination word
+  written before the close, last still unwritten after it): the close threw
+  `IllegalStateException` in 5 of 5 confirmed rounds per run (0 inconclusive) and
+  the cleanup did not run during it. A close after the downcall succeeded and ran
+  the cleanup once.
 - Every overlapping copy wrote its full destination and still threw. This confirms
   the reader rule below: a thrown copy's destination may be complete and is still
   invalid.
@@ -750,7 +760,9 @@ reads.
 **T1 — Concurrent read/close**
 
 - *Shows.* One thread reads a borrowed view while another closes the owner. No
-  fault. The owner is `closing` until the last lease is released.
+  fault. The memory stays pinned until the last lease is released. (Under B1 the
+  owner is visibly `closing` until then; under B3 the owner handle is stale at
+  once and the pin is visible only in the process-wide count.)
 - *Construction.* Open a row store with a known seed. Borrow a lane; the expected
   values are known from the deterministic generator (`abi.md:731-737`). Start a
   reader thread that loops reads and checks each against the expected value;
@@ -758,14 +770,22 @@ reads.
   `lgj_lease_count(owner)` and `lgj_resource_info(owner)`. Then close the view's
   Arena while the reader is still looping. Repeat for many rounds, as R13 F3 does
   (200 rounds).
-- *Green.* After the owner close: state `closing`, count 1, `lgj_resource_info`
-  returns `PARENT_CLOSED`, every read returns the expected value. After the Arena
-  close: the reader ends with `IllegalStateException`; no read that began with the
-  cleanup's flag already set returned a value (the flag is read before each
-  read, as in R13 F3; no timestamps); count 0; owner handle `INVALID_HANDLE`.
-- *Red.* Run on the `lease-pin-off` library. Borrow does not pin, so the owner
-  close goes straight to reclaimed. The assertions "state is `closing`, count is
-  1" fail with state `INVALID_HANDLE` and count 0. The reader reads leaked,
+- *Green, B3 (recommended).* After the owner close: the owner handle returns
+  `INVALID_HANDLE` from every call, `lgj_lease_count(0, ...)` reads 1, every read
+  returns the expected value. After the Arena close: the reader ends with
+  `IllegalStateException`; no read that began with the cleanup's flag already set
+  returned a value (the flag is read before each read, as in R13 F3; no
+  timestamps); `lgj_lease_count(0, ...)` reads 0. The Rust layer's `Weak` check
+  (§5.4) states the reclamation directly: alive after the owner close, gone after
+  the release.
+- *Green, B1 (fallback only).* After the owner close: state `closing`, count 1,
+  `lgj_resource_info` returns `PARENT_CLOSED` (or the Q1 status), every read
+  returns the expected value. After the Arena close: as for B3, and the owner
+  handle is `INVALID_HANDLE`.
+- *Red.* Run on the `lease-pin-off` library. Borrow does not pin. Under B3 the
+  assertion "`lgj_lease_count(0, ...)` reads 1 after the owner close" fails with 0,
+  and the Rust `Weak` check finds the entry gone; under B1 "state is `closing`,
+  count is 1" fails with `INVALID_HANDLE` and 0. The reader reads leaked,
   still-mapped bytes, so no read touches freed memory. The reader's value checks
   still pass; they are not the guard.
 
@@ -881,17 +901,22 @@ reads.
   view stays valid; a mask operation returns `PARENT_CLOSED` (`abi.md:352`).
   Then, in the mask variant, close the mask itself (it has a lease, so it goes to
   `closing`) and only then close the view's Arena.
-- *Green.* The two checksums are equal after the owner close. The owner is
-  `closing` and native operations on it are refused. In the mask variant: after
-  the parent close the mask view still reads its words and a mask operation
-  returns `PARENT_CLOSED`; after the mask's own close the mask is `closing` with
-  count 1. After the Arena close, in both variants, the release brings the
-  `closing` owner to `reclaimed` and the count to 0. (A release on an owner that
-  is still `open` leaves it open, §3.3, so the mask must be closed before the
-  Arena for the reclamation to be observable.)
+- *Green, B3 (recommended).* The two checksums are equal after the owner close.
+  The owner handle returns `INVALID_HANDLE` and `lgj_lease_count(0, ...)` reads 1.
+  In the mask variant: after the parent close the mask view still reads its words
+  and a mask operation returns `PARENT_CLOSED` (the parent is gone; that status is
+  today's and unchanged); after the mask's own close the mask handle returns
+  `INVALID_HANDLE` and the count still reads 1. After the Arena close, in both
+  variants, the count reads 0 and the Rust `Weak` check finds the entry gone.
+- *Green, B1 (fallback only).* As written before B3: the owner is `closing` and
+  native operations on it are refused with `PARENT_CLOSED` (or the Q1 status);
+  the mask is `closing` with count 1 after its own close; the release brings the
+  `closing` owner to `reclaimed` and the count to 0. (A release on an owner that is
+  still `open` leaves it open, §3.3, so the mask must be closed before the Arena
+  for the reclamation to be observable.)
 - *Red.* Run on `lease-pin-off`. The checksum comparison cannot fail there, because
-  the memory is leaked and mapped. The guard is again the status and count: the
-  assertion "owner is `closing`, count 1 after close" fails. The Rust layer adds
+  the memory is leaked and mapped. The guard is again the count (and, under B1,
+  the status): "count 1 after close" fails (under B1 also "owner is `closing`"). The Rust layer adds
   the direct statement with `Weak`: with the pin on, `is_some()` after the close;
   with the pin off, `is_none()` after the close. Neither dereferences.
 
@@ -917,15 +942,15 @@ they are unverified.
    cleanup throws. Proposal: the cleanup records a non-`OK` status in a counter
    and never throws.
 6. **A bulk copy of the largest realistic view.** Now measured on one machine
-   (R14 G2, 4 vCPU Xeon, `28-beta+16-ea`). A close blocks for up to the longest
-   single in-flight access through the view. In overlap rounds the median close
-   took 2.6 to 3.7 ms at 32 MiB, 6.8 to 7.0 ms at 64 MiB, 13.6 to 13.8 ms at
-   128 MiB and 27.6 to 29.0 ms at 256 MiB (three runs; `R14-observed.txt`), close to
-   the standalone copy times. The largest realistic view size for the Bardioc runtime
-   is **still not chosen**, and no bound is claimed beyond 256 MiB. Proposal
-   (reasoning, not measured): readers copy large views in bounded chunks (for
-   example 8 MiB or less), so close latency stays bounded, because each chunk is a
-   separate scoped access.
+   (R14 G2, 4 vCPU Xeon, `28-beta+16-ea`). A close waits for in-flight accesses
+   through the view. In overlap rounds the median close took about 3.8 to 3.9 ms
+   at 32 MiB, 7.3 to 8.3 ms at 64 MiB, 15.0 to 16.1 ms at 128 MiB and 28.3 to
+   30.4 ms at 256 MiB (three runs; `R14-observed.txt`), close to the standalone copy
+   times. These medians are observations; they do not bound close latency. The
+   largest realistic view size for the Bardioc runtime is **still not chosen**.
+   Proposal (reasoning, not measured): readers copy large views in chunks (for
+   example 8 MiB or less), so each access through the view is shorter. Whether
+   that bounds close latency is not established.
 
 ### 5.4 One more native test, not Java
 
@@ -1045,7 +1070,7 @@ balanced recommendation and who must accept it, caveats, and when to re-evaluate
   `Unsafe.java:1000-1010`, `ScopedMemoryAccess.java:63`). Ran R14
   (`valhalla-lab/reproducers/R14_CloseWaitsForInFlightAccess.java`, output
   `R14-observed.txt`, three runs).
-- *Result.* Close waits (G1: 240 of 240 overlap rounds, no poison, every close
+- *Result.* Close waits (G1: 238 of 240 rounds overlapped, no poison, every close
   returned; G2: close duration tracks copy size; G3: the oracle can fail, 10 of 10
   red rounds). Close throws only when a downcall holds the view (G4, 5 of 5).
 - *Recommendation.* Closed for `28-beta+16-ea`. Carry the corrected mechanism text
@@ -1119,13 +1144,15 @@ balanced recommendation and who must accept it, caveats, and when to re-evaluate
 
 ### 9.6 Close latency
 
-- *Options.* Accept unbounded close latency; bound it by chunked reads.
+- *Options.* Accept whatever close latency large accesses cause; shorten individual
+  accesses by chunked reads.
 - *Done.* R14 G2.
-- *Result.* A close blocks for up to the longest single in-flight access: about
-  27 ms per 256 MiB copy on this machine.
+- *Result.* A close waits for in-flight accesses; observed medians of about 28 to
+  30 ms with a 256 MiB copy in flight on this machine. Not a bound.
 - *Recommendation (reasoning, not measured).* Readers copy large views in chunks of
-  8 MiB or less, so each chunk is a separate scoped access and close latency stays
-  bounded. Accepted by: the owner of the Bardioc design (reader contract).
+  8 MiB or less, so each access through the view is shorter. Whether that bounds
+  close latency is not established. Accepted by: the owner of the Bardioc design
+  (reader contract).
 - *Caveats.* One machine. The chunk size is a proposal, not a measurement. The
   largest realistic view size is not chosen.
 - *Re-evaluate when.* A view larger than 256 MiB is planned; a latency requirement
