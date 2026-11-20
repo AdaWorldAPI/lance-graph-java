@@ -18,6 +18,8 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R7](#r7) | 10^9 projected operations allocate 960 B TOTAL — zero-copy at the endgame scale | **measured, JDK 27 EA** |
 | [R6](#r6) | The cliff is JEP 401 by design (atomicity), not a version gap or a flag | **HotSpot / JEP 401 spec** |
 | [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
+| [R13](#r13) | Closing a shared Arena while another thread reads a view: no close failed, every read ended with an exception; behaviour against an in-flight access not established | **measured, JDK 28-beta+16-ea** |
+| [R14](#r14) | Closing a shared Arena waits for an in-flight bulk copy; in the overlapping copy rounds measured, the poison oracle never saw the release during the copy; a close during a downcall that holds the view throws | **measured, JDK 28-beta+16-ea, plus HotSpot source** |
 
 Environment for every observation below: `openjdk 27-jep401ea3+1-1`, Linux x86-64,
 Intel Xeon @ 2.10 GHz (4 vCPU, AVX-512).
@@ -535,4 +537,104 @@ proposed as the design.
 Note the layout kinds differ: the single-`long` refs are `NON_ATOMIC_FLAT`,
 the multi-field `VarnodeNarrow` is `ATOMIC_FLAT`. Both flatten at element
 size 8; only the tearing guarantee differs.
+
+## R13 — closing a shared Arena while another thread reads a view {#r13}
+
+**File:** `R13_SharedArenaCloseVersusRead.java`. **Observed:** `R13-observed.txt`
+(JDK `28-beta+16-ea`, 4 vCPU Xeon).
+
+**Question.** The native lease contract (`.claude/plans/native-lease-v1.md`)
+releases a native lease from the cleanup of a shared Arena bound to a view. What
+does the JDK do when that Arena is closed while another thread reads the view?
+
+**What it shows.** The backing memory is allocated from `Arena.global()` and is
+never freed; only the view is bound to the shared Arena through
+`MemorySegment.reinterpret(size, arena, cleanup)`.
+
+- **F1** — after close, a read through the view throws `IllegalStateException`.
+- **F2** — the cleanup runs exactly once, at close; a second close throws
+  `IllegalStateException` and does not run it again; the backing memory is untouched.
+- **F3** — 200 rounds of scalar reads against a close: 7,711,808 reads, none that
+  observed the cleanup flag set before starting returned a value; every reader ended with
+  `IllegalStateException`; close never threw.
+- **F4** — 10 rounds of close attempted alongside another thread's one 256 MiB
+  `MemorySegment.copy`: close never threw and always ran the cleanup, returning
+  after about 24-36 ms; all ten copies threw `IllegalStateException`
+  (so their destinations are partly written); no copy that started after the
+  release completed normally. Two things are printed and not asserted: the
+  timings, because a stamp taken after an access returns can be late (one round
+  of an earlier run on this build showed exactly that), and whether each close overlapped its
+  copy, which nothing in R13 establishes.
+
+So on this build no close failed and every access ended with
+`IllegalStateException`. Because overlap is not established, R13 does not show
+what a close does against an access that is already in flight, or that the
+release waits for it.
+
+**What it does not test.** A segment passed to a native downcall while the Arena
+closes. A raw address passed to native as a `long`. Memory owned by lgj's Rust
+allocator. Any JDK build other than the one above. A downcall made from inside the
+cleanup.
+
+## R14 — close waits for an in-flight access {#r14}
+
+**File:** `R14_CloseWaitsForInFlightAccess.java`. **Observed:** `R14-observed.txt`
+(JDK `28-beta+16-ea`, 4 vCPU Xeon, three runs).
+
+**Question.** R13 could not tell whether a close actually overlapped a copy.
+Does a close wait for an access that is already in flight, and can the release
+run while that access is still reading? (Open question Q9 of
+`.claude/plans/native-lease-v1.md`.)
+
+**How overlap becomes observable.** On this build `MemorySegment.copy` runs one
+`@Scoped` method: a liveness check, then one `Unsafe.copyMemory0` call (no
+chunking, `Unsafe.java:1000-1010` in the build's `src.zip`). HotSpot's
+`closeScope0` (`src/hotspot/share/prims/scopedMemoryAccess.cpp` at tag
+`jdk-28+16`; the class names it uses are present in the build's `libjvm.so`)
+handshakes every thread and sends an asynchronous error to a thread found inside
+a `@Scoped` frame that holds the session. It then waits until its counter of such
+errors is zero. The counter drops when the target, stopped at a safepoint poll,
+runs the handshake, just before the error is installed (`:163`, `:168`). So the
+close does not wait for the target to throw or to leave its frame; the cleanup can
+run while the target is still stopped inside it. What the JDK relies on is that
+the target makes no further memory access once resumed (`:137-139`). Only after
+that wait does `MemorySessionImpl.close()` run the cleanup. So a copy that threw `IllegalStateException` after writing every byte
+passed the liveness check before the close and was still inside its access when
+the handshake reached it: that round overlapped. This inference uses that source;
+it is not a black-box fact.
+
+**Ordering oracle (black-box).** The cleanup, standing in for the lease release,
+overwrites the last 1 MiB of the source with a poison pattern, backward from the
+last word (through an alias that is never freed), then sets a flag. The copy
+reads forward. A release that starts while the copy still has words of that
+region to read puts poison into the destination, unless the copy reads them all
+before the poison writer reaches them. A release after the copy's last read is
+not detected and leaves no access to protect. A clean destination is evidence for
+the timings the oracle can see, not proof for every timing.
+
+- **G1** — 4 sizes x 20 rounds x 3 runs (recorded run set): 240 of 240 rounds
+  overlapped; no destination carried poison; every close returned normally and ran
+  the cleanup once. An earlier set had 238 of 240: in 2 rounds the 32 MiB copy
+  ended before the close (no overlap, counted separately).
+- **G2** — median close duration in overlap rounds grew with copy size (run 1:
+  3.8, 9.4, 14.9, 28.8 ms for 32 to 256 MiB) and was close to the standalone copy
+  time. These are observations on one machine; they do not bound close latency.
+- **G3** — sensitivity, red arm: the same "release" run from another thread,
+  without a close, while the copy was confirmed in progress (first destination
+  word written, last not yet), put poison into the destination in 10/10 confirmed
+  rounds per run (0 inconclusive). The oracle can fail.
+- **G4** — the view passed to a downcall (libc `memcpy`), close attempted while
+  the downcall runs: the close threw `IllegalStateException` "Session is acquired
+  by 1 clients" in 5/5 rounds per run and the cleanup had not run at that throw.
+  That message is produced only while the acquire count is above zero
+  (`MemorySessionImpl.alreadyAcquired`), so it is the overlap evidence; a
+  destination progress probe (volatile reads, no JMM visibility guarantee for
+  native memory) only classifies rounds. A close after the downcall succeeded and
+  ran the cleanup once.
+
+**Caveats.** One JDK build. Accesses through JDK scoped paths only; a raw address
+handed to native code is not protected. The overlap inference depends on the
+source structure named above and must be re-checked on a JDK bump. Every
+overlapping copy wrote its whole destination and still threw: a thrown copy's
+destination may be complete and is still invalid.
 

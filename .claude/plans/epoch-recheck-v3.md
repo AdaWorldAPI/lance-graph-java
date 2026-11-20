@@ -7,6 +7,11 @@ Phase 4 this document. The predecessors are retained, not deleted; where
 v3 overrides them it says so. This is the document implementation works
 from.
 
+> **Amended 2026-11-20 (owner decision 1).** §3's "no native lifetime lease"
+> is superseded for borrowed native-memory views by `native-lease-v1.md`.
+> The rest of v3 stands: the liveness probe, the sole-closer contract for
+> unleased windows, W1-W6, and every existing falsifier.
+
 The reviewers found one **blocking** defect in v2 (two of them
 independently), closed one of v2's open questions outright, and corrected
 five factual errors. §8 is the audit ledger.
