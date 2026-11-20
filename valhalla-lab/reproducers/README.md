@@ -18,6 +18,7 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R7](#r7) | 10^9 projected operations allocate 960 B TOTAL — zero-copy at the endgame scale | **measured, JDK 27 EA** |
 | [R6](#r6) | The cliff is JEP 401 by design (atomicity), not a version gap or a flag | **HotSpot / JEP 401 spec** |
 | [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
+| [R13](#r13) | Closing a shared Arena while another thread reads a view: the close waits, the read fails | **measured, JDK 28-beta+16-ea** |
 
 Environment for every observation below: `openjdk 27-jep401ea3+1-1`, Linux x86-64,
 Intel Xeon @ 2.10 GHz (4 vCPU, AVX-512).
@@ -535,4 +536,37 @@ proposed as the design.
 Note the layout kinds differ: the single-`long` refs are `NON_ATOMIC_FLAT`,
 the multi-field `VarnodeNarrow` is `ATOMIC_FLAT`. Both flatten at element
 size 8; only the tearing guarantee differs.
+
+## R13 — closing a shared Arena while another thread reads a view {#r13}
+
+**File:** `R13_SharedArenaCloseVersusRead.java`. **Observed:** `R13-observed.txt`
+(JDK `28-beta+16-ea`, 4 vCPU Xeon).
+
+**Question.** The native lease contract (`.claude/plans/native-lease-v1.md`)
+releases a native lease from the cleanup of a shared Arena bound to a view. What
+does the JDK do when that Arena is closed while another thread reads the view?
+
+**What it shows.** The backing memory is allocated from `Arena.global()` and is
+never freed; only the view is bound to the shared Arena through
+`MemorySegment.reinterpret(size, arena, cleanup)`.
+
+- **F1** — after close, a read through the view throws `IllegalStateException`.
+- **F2** — the cleanup runs exactly once, at close; a second close throws
+  `IllegalStateException` and does not run it again; the backing memory is untouched.
+- **F3** — 200 rounds of scalar reads against a close: 7,428,543 reads, none that
+  began after the cleanup ran returned a value; every reader ended with
+  `IllegalStateException`; close never threw.
+- **F4** — 10 rounds of close while another thread is inside one 256 MiB
+  `MemorySegment.copy`: close never threw, returned after about 21-26 ms (once
+  0.15 ms); the in-flight copy was aborted with `IllegalStateException` in every
+  round (so its destination is partly written); the cleanup ran only after the copy
+  had ended.
+
+So on this build the close waits and the access fails. It is not the close that
+fails.
+
+**What it does not test.** A segment passed to a native downcall while the Arena
+closes. A raw address passed to native as a `long`. Memory owned by lgj's Rust
+allocator. Any JDK build other than the one above. A downcall made from inside the
+cleanup.
 
