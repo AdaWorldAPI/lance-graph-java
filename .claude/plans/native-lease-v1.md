@@ -173,8 +173,8 @@ Arena through `MemorySegment.ofAddress(a).reinterpret(size, arena, cleanup)`
 |---|---|---|
 | F1 | After the shared arena is closed, a read through the view throws `IllegalStateException`. | `R13-observed.txt:8` |
 | F2 | The cleanup runs exactly once, at close, never before. A second close throws `IllegalStateException` and does not run the cleanup again. The backing memory is untouched. | `:6-11` |
-| F3 | 200 rounds, one reader doing scalar reads, main thread closing: 12,873,875 reads; zero reads that began after the cleanup ran returned a value; every reader ended with `IllegalStateException`; close never threw. | `:12-16` |
-| F4 | 10 rounds, close while another thread is inside one 256 MiB `MemorySegment.copy` out of the view: close never threw and always ran the cleanup; it returned after about 21-27 ms; all ten copies threw `IllegalStateException`; no copy that started after the release completed normally. Whether each close overlapped its copy is not established (see below). | `:17-31` |
+| F3 | 200 rounds, one reader doing scalar reads, main thread closing: 7,711,808 reads; zero reads that observed the cleanup flag set before starting their access returned a value; every reader ended with `IllegalStateException`; close never threw. | `:12-16` |
+| F4 | 10 rounds, close attempted alongside another thread's one 256 MiB `MemorySegment.copy` out of the view: close never threw and always ran the cleanup; it returned after about 24-36 ms; all ten copies threw `IllegalStateException`; no copy that started after the release completed normally. Whether each close overlapped its copy is not established (see below). | `:17-31` |
 
 F4's summary line: `copyCompleted=0 copyThrew=10 closeThrew=0
 closeReturnedBeforeCopyEnded=0 cleanupStampBeforeCopyEndStamp=0 of 10`
@@ -191,10 +191,12 @@ Three limits on how to read F3 and F4.
 - **The ordering evidence is one-directional.** The cleanup sets a flag, and the
   reader reads that flag before it starts an access. An access that began with
   the flag already set and still returned a value would mean the release ran
-  while the view was readable. F3 checks this per scalar read (0 of 12,873,875
-  in the recorded run) and F4 per bulk copy (no copy that started after the
-  release completed normally). This shows no read began after the release and
-  succeeded. It does not show the reverse, and it is not a proof of the JDK's
+  while the view was readable. F3 checks this per scalar read (0 of 7,711,808
+  in the recorded run) and F4 per bulk copy (no copy that observed the flag set
+  before starting completed normally). This shows only that no access which saw
+  the release flag set before it began succeeded. An access whose flag check
+  came just before the release, and whose read came just after, is not counted
+  either way. It does not show the reverse, and it is not a proof of the JDK's
   internal rule.
 - **The race is real on the pinned build too.** In the run recorded at commit
   `220d76d`, one F4 round's stamps put the cleanup before the copy's end stamp
@@ -350,13 +352,14 @@ Rules:
 
 **Observed mechanism on this JDK (R13), which replaces the design's wording.**
 
-- Closing the shared Arena while another thread is inside an access does **not**
-  fail. The close returned after about 21-26 ms, and in every round the
-  in-flight copy had been aborted (F4).
+- Closing the shared Arena while another thread's access is attempted alongside
+  it does **not** fail. The close returned after about 24-36 ms, and in every round the copy
+  threw (F4; whether each close overlapped its copy is not established).
 - The **access** fails: the in-flight read, including a bulk copy, ends with
   `IllegalStateException` (F4, F3).
-- No read that began after the cleanup (the lease release) had run returned a
-  value: none of the scalar reads in F3, and no bulk copy in F4. The F4 timings are
+- No read that observed the release flag set before it began returned a value:
+  none of the scalar reads in F3, and no bulk copy in F4. A read whose flag check
+  precedes the release is not covered by this check. The F4 timings are
   not evidence of the order, and whether each close overlapped its copy is not
   established (§2.4).
 

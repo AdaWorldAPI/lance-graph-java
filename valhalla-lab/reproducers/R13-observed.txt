@@ -10,23 +10,23 @@ F1/F2 single thread: close, then access; cleanup count
   ok    second close does not run the cleanup again (count=1)
   ok    the pinned memory itself is untouched (a view close frees nothing)
 F3 concurrent scalar reads vs close, 200 rounds
-  reads=12873875 readerSawISE=200/200 closeThrew=0 cleanups=200
-  ok    no read that began after the release returned a value (violations=0)
+  reads=7711808 readerSawISE=200/200 closeThrew=0 cleanups=200
+  ok    no read that saw the release flag set before it began returned a value (violations=0)
   ok    every reader ended by an IllegalStateException
   ok    each round ran the cleanup once, unless its close threw (cleanups=200, closeThrew=0)
-F4 close while another thread is inside one bulk copy of 256 MiB
-  round 0: copy threw ISE, close returned after 27138 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 1: copy threw ISE, close returned after 22301 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 2: copy threw ISE, close returned after 23678 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 3: copy threw ISE, close returned after 21387 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 4: copy threw ISE, close returned after 25308 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 5: copy threw ISE, close returned after 22510 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 6: copy threw ISE, close returned after 23378 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 7: copy threw ISE, close returned after 22895 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 8: copy threw ISE, close returned after 23253 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
-  round 9: copy threw ISE, close returned after 22034 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+F4 close attempted alongside another thread's one bulk copy of 256 MiB
+  round 0: copy threw ISE, close returned after 27591 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 1: copy threw ISE, close returned after 24962 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 2: copy threw ISE, close returned after 24217 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 3: copy threw ISE, close returned after 25112 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 4: copy threw ISE, close returned after 25592 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 5: copy threw ISE, close returned after 25621 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 6: copy threw ISE, close returned after 25653 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 7: copy threw ISE, close returned after 25081 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 8: copy threw ISE, close returned after 35577 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
+  round 9: copy threw ISE, close returned after 28626 us, close returned after the copy's end stamp, cleanup stamped after the copy's end stamp
   summary: copyCompleted=0 copyThrew=10 closeThrew=0 closeReturnedBeforeCopyEnded=0 cleanupStampBeforeCopyEndStamp=0 of 10 (timings: observations only, not ordering evidence)
-  ok    no copy that started after the release completed normally (completedAfterRelease=0)
+  ok    no copy that saw the release flag set before it began completed normally (completedAfterRelease=0)
   ok    every close that returned ran the cleanup (missing=0)
   ok    close never threw (closeThrew=0)
   observed (overlap unverified): 10 of 10 copies threw IllegalStateException, 0 completed; 10 of 10 readers began before the release

@@ -6,10 +6,12 @@
 //   F1  after close, every access through a segment bound to the arena throws;
 //   F2  the cleanup passed to reinterpret(size, arena, cleanup) runs exactly once, at close,
 //       and never before (a second close does not run it again);
-//   F3  when close races a reader on another thread, no read that STARTED after the cleanup
-//       ran can succeed (the lease is released only once the view is dead);
-//   F4  what close does when another thread is inside a long bulk access (does close wait,
-//       fail, or complete while the bulk access is still reading?).
+//   F3  when close races a reader on another thread, no read that saw the cleanup's flag set
+//       before it began can succeed (the lease is released only once the view is dead; the
+//       check cannot see a read whose flag check came just before the release);
+//   F4  what close does when it is attempted alongside another thread's long bulk access
+//       (does close wait, fail, or complete while the access is still reading?). Whether a
+//       given round's close actually overlapped its copy is not established.
 //
 // What is and is not evidence. A timestamp a thread takes AFTER an access returns can be late
 // (the thread can be descheduled between the return and the stamp), so comparing such a stamp
@@ -137,7 +139,7 @@ public class R13_SharedArenaCloseVersusRead {
         }
         System.out.println("  reads=" + totalReads + " readerSawISE=" + readerSawIse + "/" + rounds
                 + " closeThrew=" + closeThrew + " cleanups=" + cleanupCount);
-        check(violations == 0, "no read that began after the release returned a value (violations="
+        check(violations == 0, "no read that saw the release flag set before it began returned a value (violations="
                 + violations + ")");
         check(readerSawIse == rounds, "every reader ended by an IllegalStateException");
         check(cleanupCount + closeThrew == rounds,
@@ -151,7 +153,7 @@ public class R13_SharedArenaCloseVersusRead {
     // returns, or complete while the copy continues? And does the copy succeed or throw?
     static void f4ConcurrentBulkRead() throws Exception {
         final long bytes = 256L << 20;     // 256 MiB: long enough to be in flight when close runs
-        System.out.println("F4 close while another thread is inside one bulk copy of "
+        System.out.println("F4 close attempted alongside another thread's one bulk copy of "
                 + (bytes >> 20) + " MiB");
         MemorySegment mem = pinned(bytes);
         long[] heap = new long[(int) (bytes / 8)];
@@ -221,7 +223,7 @@ public class R13_SharedArenaCloseVersusRead {
         // The one property the lease contract needs: the release (cleanup) never runs while a
         // read through the view is still in progress. A copy that completed after the cleanup
         // ran would be exactly that.
-        check(completedAfterRelease == 0, "no copy that started after the release completed "
+        check(completedAfterRelease == 0, "no copy that saw the release flag set before it began completed "
                 + "normally (completedAfterRelease=" + completedAfterRelease + ")");
         check(cleanupMissing == 0, "every close that returned ran the cleanup (missing="
                 + cleanupMissing + ")");

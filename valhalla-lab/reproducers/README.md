@@ -553,12 +553,12 @@ never freed; only the view is bound to the shared Arena through
 - **F1** — after close, a read through the view throws `IllegalStateException`.
 - **F2** — the cleanup runs exactly once, at close; a second close throws
   `IllegalStateException` and does not run it again; the backing memory is untouched.
-- **F3** — 200 rounds of scalar reads against a close: 12,873,875 reads, none that
-  began after the cleanup ran returned a value; every reader ended with
+- **F3** — 200 rounds of scalar reads against a close: 7,711,808 reads, none that
+  observed the cleanup flag set before starting returned a value; every reader ended with
   `IllegalStateException`; close never threw.
-- **F4** — 10 rounds of close while another thread is inside one 256 MiB
+- **F4** — 10 rounds of close attempted alongside another thread's one 256 MiB
   `MemorySegment.copy`: close never threw and always ran the cleanup, returning
-  after about 21-27 ms; all ten copies threw `IllegalStateException`
+  after about 24-36 ms; all ten copies threw `IllegalStateException`
   (so their destinations are partly written); no copy that started after the
   release completed normally. Two things are printed and not asserted: the
   timings, because a stamp taken after an access returns can be late (one round
