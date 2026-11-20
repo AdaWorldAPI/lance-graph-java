@@ -689,7 +689,7 @@ they are unverified.
    cleanup throws. Proposal: the cleanup records a non-`OK` status in a counter
    and never throws.
 6. **A bulk copy of the largest realistic view.** R13 used 256 MiB. The close time
-   it saw (about 21-26 ms) depends on the copy still being in flight. No bound is
+   it saw (about 24-36 ms in the recorded run) depends on the copy still being in flight. No bound is
    claimed here.
 
 ### 5.4 One more native test, not Java
