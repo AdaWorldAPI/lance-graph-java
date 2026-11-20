@@ -490,6 +490,15 @@ Q9 (§6) is answered on `28-beta+16-ea`: close does not fail against a scoped Ja
 access, it waits for it, and the release runs after. Close throws only when a
 downcall holds the view. Re-open it on any JDK change (§9).
 
+**Scope of the ordering guarantee.** The ordering above is established for
+`28-beta+16-ea` only. The repository accepts other JDK 28 builds, and on those
+it is **not established** until the same two checks pass there: R14 runs green,
+and `scopedMemoryAccess.cpp` at that build's tag is re-read and still has no
+failure path and still waits. Until then the borrow symbol must not be relied on
+for that build. Q8 is the list of builds to check. Proposal (not decided): the
+Java borrow wrapper refuses to lend a view on a `Runtime.version()` that is not
+on a checked list, and the list is extended only with a recorded R14 run.
+
 **Reader rule.** A reader must treat `IllegalStateException` from any access
 through a borrowed view, a bulk copy included, as "result invalid; destination
 partially written". It must not use a destination that a copy left behind after
@@ -931,7 +940,7 @@ and re-evaluation triggers: §9.
 | Q5 | Do `RowStore.lanes[]` and `Mask.words()` move to leased views, or stay unleased with the v3 probe? This decides when `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` can close (§1.3). **Status: open, owner.** | Repository owner |
 | Q6 | The design forbids reclaiming a leased view by force (§3.4). Does the Bardioc runtime need a force path at shutdown, and if so, where does it live (outside lgj)? **Status: open, owner.** | Owner of the Bardioc design |
 | Q7 | Disable arms as feature-built libraries (this proposal) or as a test-only export (v3 C1 precedent)? **Status: open, owner.** | Repository maintainers |
-| Q8 | Which JDK builds must T1 and T3 pass on (§5.3 item 4)? **Status: open, owner.** R14 and the source reading cover `28-beta+16-ea` only. | Repository owner |
+| Q8 | Which JDK builds must T1, T3 and R14 pass on (§5.3 item 4)? **Status: open, owner.** R14 and the source reading cover `28-beta+16-ea` only, so the ordering guarantee is scoped to that build (§3.5, "Scope of the ordering guarantee") until another build is checked. | Repository owner |
 | Q9 | Does `closeScope0` on the pinned build wait for an in-flight scoped access (release after), or can the handshake "fail" (§3.5)? **Status: answered on `28-beta+16-ea`.** It waits and has no failure path (`scopedMemoryAccess.cpp:265-284` at `jdk-28+16`; R14 G1-G3). The class comment saying it can fail is stale. Close throws only when a downcall holds the view (G4). Re-open on any JDK bump: re-run R14, re-read the file. The HotSpot file is strongly corroborated as the build's, not proven (§3.5). | Implementer; re-checked on every JDK change |
 
 ---
