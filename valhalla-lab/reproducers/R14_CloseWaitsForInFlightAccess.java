@@ -320,8 +320,9 @@ public class R14_CloseWaitsForInFlightAccess {
             });
             caller.start();
             go.await();
-            // memcpy writes dst forward. Overlap is confirmed when the first word was written
-            // before the close attempt and the last word was still unwritten after it returned.
+            // Diagnostic only: memcpy writes dst forward, and the probe reads the first word before
+            // the close and the last word after it. It cannot establish overlap (no visibility
+            // guarantee for native memory); the overlap evidence is the acquired-session exception.
             boolean started = awaitProgress(dst, 1_000_000_000L);
             boolean threw = false, threwAcquired = false;
             try { arena.close(); } catch (IllegalStateException e) {
