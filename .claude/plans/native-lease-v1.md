@@ -466,8 +466,10 @@ HotSpot side, `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
   spin_yield.wait();`. The counter is decremented when the target thread runs the
   asynchronous handshake while stopped at a safepoint poll (line 163), just before
   the exception is installed (line 168); the target then throws without running
-  further code (comment, lines 137-139). So the close waits until every such thread
-  is stopped and marked to throw, not until it has unwound. The comment says it waits "because we will free the memory
+  further code (comment, lines 137-139). So the close waits until the counter is
+  zero, that is, until every such thread has run the handshake while stopped at a
+  safepoint poll. The counter can reach zero before the exception is installed, and
+  the close does not wait for the thread to throw or to leave its frame. The comment says it waits "because we will free the memory
   after this. This guarantees the target thread does not continue to access the
   memory." It returns `void` and has **no failure path**.
 - `SharedSession.justClose()` (`src.zip`, lines 83-93) does throw `alreadyAcquired`
@@ -485,8 +487,10 @@ HotSpot side, `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
   closed arena; a thrown copy's destination is invalid either way.
 
 Together these say: the release runs only after every thread that was inside a
-scoped access through the arena's segments has been stopped at a safepoint poll
-and marked to throw, so it makes no further memory access through the arena.
+scoped access through the arena's segments has run the close's handshake while
+stopped at a safepoint poll (the counter is zero). Such a thread may still be stopped
+inside its frame when the release runs; once resumed it makes no further memory
+access through the arena.
 That is the ordering the contract needs. It is a JDK guarantee, not an lgj one.
 
 Corroboration that this HotSpot file belongs to the pinned build. The pinned build
@@ -815,9 +819,12 @@ reads.
 
 - *Shows.* The lgj side of the ordering: the lease is released only by the view's
   Arena cleanup, never before the Arena close, and the count reflects it. With
-  part (c) it also shows, for a bulk copy, that the release did not run while a
-  copy was still reading (R14's method, §3.5). That claim rests on the overlap
-  signature, which uses the JDK source structure, plus the black-box poison oracle.
+  part (c) it also checks, for a bulk copy that overlapped the close, that no poison
+  reached the destination (R14's method, §3.5). That is evidence against a release
+  during the copy for the timings the poison oracle can see, not proof for every
+  timing: the oracle can miss a release if the copy reads its remaining words before
+  the poison writer reaches them. The conclusion that the release cannot run during
+  an access rests on the HotSpot source reading (§3.5), not on T3.
 - *Construction.* Three parts.
   (a) A borrowed view, one reader thread looping accesses through it, the main
   thread closing the view's Arena. Ten rounds or more. The cleanup sets a flag
