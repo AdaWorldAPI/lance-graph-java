@@ -37,6 +37,7 @@ public final class AllTests {
         suites.put("MaskingOpCompletionTest", MaskingOpCompletionTest::run);
         suites.put("GroupSumTest", GroupSumTest::run);
         suites.put("DescriptorParityTest", DescriptorParityTest::run);
+        suites.put("AlignmentFactsTest", AlignmentFactsTest::run);
 
         if (!NativeRuntime.isAvailable()) {
             // ApiSurfaceTest and DoctrineFenceTest need no native library — the API's shape is a

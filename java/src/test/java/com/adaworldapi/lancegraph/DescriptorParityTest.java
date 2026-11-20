@@ -20,8 +20,10 @@ import java.lang.foreign.MemoryLayout.PathElement;
  * descriptor check goes red for every facet-major lo64 lane, while row-major stays green. Change a
  * literal in {@link #pinStructOffsets} and the struct-offset check goes red.
  *
- * <p>Alignment is deliberately NOT asserted: block offsets are 64-aligned only when n is a
- * multiple of 16 (docs/abi.md §18), and no Java read requires it.
+ * <p>Alignment is deliberately NOT asserted here: block offsets are 64-aligned only when n is a
+ * multiple of 16 (docs/abi.md §18), and no Java read requires it. The three alignment facts
+ * (logical geometry, actual base, per-lane address) are measured and kept apart in
+ * {@link AlignmentFactsTest}.
  */
 public final class DescriptorParityTest {
 
@@ -55,9 +57,10 @@ public final class DescriptorParityTest {
     }
 
     /** Documented geometry of one lane: offset from the raw lane, length, element bytes, stride. */
-    private record Geometry(long offset, long len, int elemBytes, int stride, int kind) {}
+    record Geometry(long offset, long len, int elemBytes, int stride, int kind) {}
 
-    private static Geometry expected(boolean columnar, long n, int lane) {
+    /** Package-private so {@link AlignmentFactsTest} shares the one documented-geometry spelling. */
+    static Geometry expected(boolean columnar, long n, int lane) {
         if (lane == 0) {
             return new Geometry(0, 512 * n, 1, 1, 1);
         }

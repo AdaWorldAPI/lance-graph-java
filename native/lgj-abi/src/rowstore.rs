@@ -568,6 +568,278 @@ mod tests {
         assert_eq!(off1 % 64, 4);
     }
 
+    /// Bits at positions `>= n` of the last mask word are zero.
+    fn tail_is_clear(words: &[u64], n: u64) -> bool {
+        let w = n.div_ceil(64) as usize;
+        if words.len() < w {
+            return false;
+        }
+        let used = (n % 64) as u32;
+        used == 0 || words[w - 1] >> used == 0
+    }
+
+    /// ALIGNMENT IS THREE SEPARATE FACTS, never merged and never inferred from
+    /// the row width (the 512-byte row stride IS 64-aligned; that says nothing
+    /// about where a lane starts):
+    ///
+    /// 1. LOGICAL GEOMETRY: lane offset from the store base, stride, element
+    ///    size, exact covered span `(len-1)*stride + elem`, last element in
+    ///    bounds, span ends at or before `512n`. No address is involved.
+    /// 2. ACTUAL BASE ALIGNMENT: the real `as_ptr()` of the `Arc<[u8]>` modulo
+    ///    8 / 64 / 128. RECORDED, NEVER ASSERTED to a value: the contract
+    ///    promises `u8` alignment only, so a 16- or 64-aligned measured base
+    ///    is an allocator accident and NOT a contract.
+    /// 3. PER-LANE ALIGNMENT: `(base + lane_offset) % elem_bytes` and `% 64`,
+    ///    from the actual address.
+    ///
+    /// Row-major and facet-major are measured separately; one compact table
+    /// per layout is printed (run with `--nocapture`).
+    #[test]
+    fn alignment_is_three_separate_facts_geometry_then_base_then_per_lane() {
+        // The only thing the docs promise about the base.
+        assert_eq!(std::mem::align_of::<u8>(), 1);
+        for layout in [RowLayout::AosRows, RowLayout::FacetMajor] {
+            println!("alignment table, {layout:?} (96 facet lanes; base values are MEASURED, NOT a contract)");
+            println!("  n    | base%8 base%64 base%128 | elem-aligned | 64-aligned (actual addr) | 64-aligned (base-relative)");
+            for n in [16u64, 257, 4096] {
+                let s = RowStore::generate_in(n, 7, layout).unwrap();
+                let base = s.as_bytes().as_ptr() as usize;
+                let (mut elem_ok, mut a64, mut rel64) = (0u32, 0u32, 0u32);
+                let (mut u64_aligned, mut u32_aligned) = (0u32, 0u32);
+                for lane in 1..ROWSTORE_LANE_COUNT {
+                    let (addr, len, kind, stride, _) = s.lane_raw(lane).unwrap();
+                    let (off, dlen, eb, dstride, _, _) = documented_lane(layout, n, lane);
+                    let ctx = format!("{layout:?} n={n} lane={lane}");
+                    let (stride, eb_u) = (u64::from(stride), u64::from(kind.elem_bytes()));
+                    // ---- FACT 1: logical geometry (no address in sight) ----
+                    assert_eq!((len, stride, eb_u), (dlen, dstride, eb), "{ctx}");
+                    let span = (len - 1) * stride + eb_u;
+                    let last_start = off + (len - 1) * stride;
+                    assert_eq!(
+                        last_start + eb_u,
+                        off + span,
+                        "{ctx}: span ends at last elem end"
+                    );
+                    assert!(
+                        off + span <= 512 * n,
+                        "{ctx}: span {off}+{span} inside 512n"
+                    );
+                    assert!(
+                        span < 512 * n,
+                        "{ctx}: one lane never covers the whole store"
+                    );
+                    assert!(stride >= eb_u, "{ctx}: elements do not overlap");
+                    // ---- FACT 3: per-lane alignment, from the ACTUAL address ----
+                    assert_eq!(
+                        addr as usize,
+                        base + off as usize,
+                        "{ctx}: addr = base + off"
+                    );
+                    let abs = addr as usize;
+                    let aligned = abs.is_multiple_of(eb_u as usize);
+                    elem_ok += u32::from(aligned);
+                    a64 += u32::from(abs.is_multiple_of(64));
+                    rel64 += u32::from(off % 64 == 0);
+                    if eb_u == 8 {
+                        u64_aligned += u32::from(aligned);
+                    } else {
+                        u32_aligned += u32::from(aligned);
+                    }
+                    // Layout law: lane offsets are multiples of eb (facet-major,
+                    // and AoS classid/hi32) or == 4 mod 8 (AoS lo64). So element
+                    // alignment is decided by the base, never by n or by 512.
+                    let law = match (layout, eb_u) {
+                        (RowLayout::AosRows, 8) => (off % 8) == 4,
+                        _ => off % eb_u == 0,
+                    };
+                    assert!(law, "{ctx}: offset law");
+                }
+                // The measured base decides element alignment, per field kind.
+                let want_u32 = if base.is_multiple_of(4) { 64 } else { 0 };
+                let want_u64 = match (layout, base % 8) {
+                    (RowLayout::AosRows, 4) | (RowLayout::FacetMajor, 0) => 32,
+                    _ => 0,
+                };
+                assert_eq!(
+                    u32_aligned,
+                    want_u32,
+                    "{layout:?} n={n}: u32 lanes, base%8={}",
+                    base % 8
+                );
+                assert_eq!(
+                    u64_aligned,
+                    want_u64,
+                    "{layout:?} n={n}: u64 lanes, base%8={}",
+                    base % 8
+                );
+                println!(
+                    "  {n:<4} | {:<7}{:<8}{:<8} | {elem_ok:>3}/96       | {a64:>3}/96                   | {rel64:>3}/96",
+                    base % 8,
+                    base % 64,
+                    base % 128
+                );
+                if base.is_multiple_of(16) {
+                    println!(
+                        "    (n={n}: this base happens to be 16/64-aligned; Arc<[u8]> promises u8 only, so that is NOT a contract)"
+                    );
+                }
+                // The "row width is 64-aligned so lanes are" inference is false
+                // from n=257 on facet-major: base-relative 64-alignment of the
+                // facet lanes is partial, while at n=16 it is total.
+                if layout == RowLayout::FacetMajor {
+                    if n % 16 == 0 {
+                        assert_eq!(rel64, 96, "n={n}");
+                    } else {
+                        assert!(rel64 < 96, "n={n}: {rel64} of 96 base-relative 64-aligned");
+                    }
+                }
+                if layout == RowLayout::FacetMajor && n == 257 {
+                    // classid/hi32: f % 16 == 0 -> 2 each; lo64: f % 8 == 0 -> 4.
+                    assert_eq!(
+                        rel64,
+                        2 + 4 + 2,
+                        "n=257 facet-major base-relative 64-aligned lanes"
+                    );
+                }
+            }
+        }
+    }
+
+    /// At n = 257 a store whose base is ODD (copied into a buffer at a shift
+    /// chosen from the buffer's real address) has every u32 lane and every u64
+    /// lane at a NON-element-aligned address in BOTH layouts, and every read
+    /// and every mask is still equal to the aligned original. Unaligned reads
+    /// are `read_unaligned` of the real address; masks go through the ndarray
+    /// strided kernel. Tails (bits >= 257 of word 4) are asserted clear.
+    #[test]
+    fn at_257_an_odd_based_copy_has_misaligned_u32_and_u64_lanes_and_still_reads_equal() {
+        let n = 257u64;
+        for layout in [RowLayout::AosRows, RowLayout::FacetMajor] {
+            let s = RowStore::generate_in(n, 0xA11C_E5ED, layout).unwrap();
+            let orig = s.as_bytes();
+            let mut big = vec![0xEEu8; orig.len() + 16];
+            let shift = (0..8usize)
+                .find(|k| (big.as_ptr() as usize + k) % 8 == 1)
+                .unwrap();
+            big[shift..shift + orig.len()].copy_from_slice(orig);
+            let base = big.as_ptr() as usize + shift;
+            assert_eq!(base % 8, 1, "constructed base is odd by construction");
+            let copy = &big[shift..shift + orig.len()];
+            assert_eq!(copy.as_ptr() as usize, base);
+
+            let (mut mis32, mut mis64) = (0u32, 0u32);
+            for lane in 1..ROWSTORE_LANE_COUNT {
+                let (off, _, eb, stride, _, _) = documented_lane(layout, n, lane);
+                let abs = base + off as usize;
+                if !abs.is_multiple_of(eb as usize) {
+                    if eb == 8 {
+                        mis64 += 1;
+                    } else {
+                        mis32 += 1;
+                    }
+                }
+                // every row of the lane, read unaligned at the real address
+                for row in 0..n {
+                    let at = abs + (row * stride) as usize;
+                    let (facet, field) = (((lane - 1) % 32), (lane - 1) / 32);
+                    let ctx = format!("{layout:?} lane={lane} row={row}");
+                    unsafe {
+                        match field {
+                            0 => assert_eq!(
+                                u32::from_le(std::ptr::read_unaligned(at as *const u32)),
+                                s.classid_at(row, facet),
+                                "{ctx}"
+                            ),
+                            1 => assert_eq!(
+                                u64::from_le(std::ptr::read_unaligned(at as *const u64)),
+                                s.payload_lo64_at(row, facet),
+                                "{ctx}"
+                            ),
+                            _ => assert_eq!(
+                                u32::from_le(std::ptr::read_unaligned(at as *const u32)),
+                                s.payload_hi32_at(row, facet),
+                                "{ctx}"
+                            ),
+                        }
+                    }
+                }
+            }
+            assert!(
+                mis32 >= 1 && mis64 >= 1,
+                "{layout:?}: need a misaligned u32 and u64 lane"
+            );
+            assert_eq!(
+                (mis32, mis64),
+                (64, 32),
+                "{layout:?}: ALL 64 u32 and 32 u64 lanes"
+            );
+            println!("{layout:?} n=257 odd-based copy: base%8=1, misaligned u32 lanes {mis32}/64, u64 lanes {mis64}/32");
+            // masks on the misaligned copy equal the aligned original; tails clear.
+            for facet in 0..ROW_FACETS {
+                let (first, stride) = layout.classid_lane(n, facet);
+                for needle in [0u32, 5] {
+                    let mut want = vec![0u64; 5];
+                    let mut got = vec![0u64; 5];
+                    crate::kernels::simd_rowstore_u32_eq_mask(
+                        orig, first, stride, 257, needle, &mut want,
+                    );
+                    crate::kernels::simd_rowstore_u32_eq_mask(
+                        copy, first, stride, 257, needle, &mut got,
+                    );
+                    assert_eq!(got, want, "{layout:?} facet {facet} needle {needle}");
+                    assert!(tail_is_clear(&got, n), "tail of the misaligned mask");
+                    assert!(tail_is_clear(&want, n), "tail of the aligned mask");
+                }
+            }
+        }
+    }
+
+    /// BYTE ORDER, from bytes: a u32 classid, a u64 lo64 and a u32 hi32 read
+    /// through each layout equal `from_le_bytes` of the DOCUMENTED byte
+    /// positions (computed from `documented_lane`, not from `RowLayout`), and
+    /// the fixture is asymmetric where it matters: the big-endian read of the
+    /// same bytes DIFFERS, so a byte-order mistake could not pass.
+    #[test]
+    fn byte_order_is_little_endian_at_the_documented_positions_in_both_layouts() {
+        let n = 257u64;
+        for layout in [RowLayout::AosRows, RowLayout::FacetMajor] {
+            let s = RowStore::generate_in(n, 0xF00D_CAFE, layout).unwrap();
+            let b = s.as_bytes();
+            let (mut asym_cells, mut cells) = (0u64, 0u64);
+            for f in 0..ROW_FACETS {
+                let (co, _, _, cs, _, _) = documented_lane(layout, n, 1 + f);
+                let (lo, _, _, ls, _, _) = documented_lane(layout, n, 33 + f);
+                let (ho, _, _, hs, _, _) = documented_lane(layout, n, 65 + f);
+                for row in 0..n {
+                    let c = (co + row * cs) as usize;
+                    let l = (lo + row * ls) as usize;
+                    let h = (ho + row * hs) as usize;
+                    let ctx = format!("{layout:?} row={row} facet={f}");
+                    let cle = u32::from_le_bytes(b[c..c + 4].try_into().unwrap());
+                    let lle = u64::from_le_bytes(b[l..l + 8].try_into().unwrap());
+                    let hle = u32::from_le_bytes(b[h..h + 4].try_into().unwrap());
+                    assert_eq!(cle, s.classid_at(row, f), "{ctx} classid");
+                    assert_eq!(lle, s.payload_lo64_at(row, f), "{ctx} lo64");
+                    assert_eq!(hle, s.payload_hi32_at(row, f), "{ctx} hi32");
+                    // classid < 16: its bytes are [c, 0, 0, 0] in LE storage.
+                    assert_eq!(&b[c + 1..c + 4], &[0, 0, 0], "{ctx} classid high bytes");
+                    cells += 1;
+                    let cbe = u32::from_be_bytes(b[c..c + 4].try_into().unwrap());
+                    let lbe = u64::from_be_bytes(b[l..l + 8].try_into().unwrap());
+                    let hbe = u32::from_be_bytes(b[h..h + 4].try_into().unwrap());
+                    if cle != 0 && cbe != cle && lbe != lle && hbe != hle {
+                        asym_cells += 1;
+                    }
+                }
+            }
+            assert!(
+                asym_cells > cells / 2,
+                "{layout:?}: fixture must be asymmetric (BE read differs) on most cells, got {asym_cells}/{cells}"
+            );
+            println!("{layout:?} byte order: {asym_cells}/{cells} cells have BE != LE for classid, lo64 and hi32 together");
+        }
+    }
+
     /// `(offset, len_elems, elem_bytes, stride, kind, contiguous)` of lane
     /// `lane` under `layout`, computed here from the documented geometry
     /// (rowstore.rs `RowLayout` docs; abi.md §11/§18) and NOT from
