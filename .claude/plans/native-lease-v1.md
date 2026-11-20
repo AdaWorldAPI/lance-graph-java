@@ -699,9 +699,11 @@ they are unverified.
    happens to the Arena close if the release returns a non-`OK` status or if the
    cleanup throws. Proposal: the cleanup records a non-`OK` status in a counter
    and never throws.
-6. **A bulk copy of the largest realistic view.** R13 used 256 MiB. The close time
-   it saw (about 24-36 ms in the recorded run) depends on the copy still being in flight. No bound is
-   claimed here.
+6. **A bulk copy of the largest realistic view.** R13 used 256 MiB and saw closes
+   return after about 24-36 ms in the recorded run. What that time depends on is
+   not known: R13 did not establish that the close overlapped the copy, so the
+   time is not evidence that the close waited for an in-flight access. No bound
+   is claimed here; T3's overlap evidence is the prerequisite for measuring one.
 
 ### 5.4 One more native test, not Java
 
