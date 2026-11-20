@@ -157,7 +157,7 @@ public class R13_SharedArenaCloseVersusRead {
         long[] heap = new long[(int) (bytes / 8)];
         final int rounds = 10;
         int copyOk = 0, copyIse = 0, closeThrew = 0, closeBeforeCopyEnd = 0, cleanupBeforeCopyEnd = 0;
-        int completedAfterRelease = 0;
+        int completedAfterRelease = 0, cleanupMissing = 0, startedBeforeRelease = 0;
         for (int round = 0; round < rounds; round++) {
             AtomicLong cleanupAt = new AtomicLong(-1);
             Arena arena = Arena.ofShared();
@@ -192,6 +192,8 @@ public class R13_SharedArenaCloseVersusRead {
             if (!threw && closeEnd < copyEnd.get()) closeBeforeCopyEnd++;
             if (cleanupAt.get() >= 0 && cleanupAt.get() < copyEnd.get()) cleanupBeforeCopyEnd++;
             if (ok.get() && releasedBeforeStart.get()) completedAfterRelease++;
+            if (!threw && cleanupAt.get() < 0) cleanupMissing++;
+            if (!releasedBeforeStart.get()) startedBeforeRelease++;
             System.out.println("  round " + round + ": copy " + (ok.get() ? "completed" : ise.get() ? "threw ISE" : "?")
                     + ", close " + (threw ? "threw ISE" : "returned")
                     + " after " + (closeEnd - closeStart) / 1000 + " us"
@@ -208,8 +210,15 @@ public class R13_SharedArenaCloseVersusRead {
         // ran would be exactly that.
         check(completedAfterRelease == 0, "no copy that started after the release completed "
                 + "normally (completedAfterRelease=" + completedAfterRelease + ")");
-        check(closeThrew == 0 && copyIse == rounds,
-                "observed: close does not fail; the in-flight copy is aborted with "
-                + "IllegalStateException (closeThrew=" + closeThrew + ", copyThrew=" + copyIse + ")");
+        check(cleanupMissing == 0, "every close that returned ran the cleanup (missing="
+                + cleanupMissing + ")");
+        check(closeThrew == 0, "close never threw (closeThrew=" + closeThrew + ")");
+        // Overlap is NOT established. The reader reads the release flag just before it enters
+        // the copy, but nothing marks the moment the copy is actually inside its access, so a
+        // round may have closed before the copy started, or after it finished. The outcome is
+        // therefore reported, not required: a copy that completed before the close is valid.
+        System.out.println("  observed (overlap unverified): " + copyIse + " of " + rounds
+                + " copies threw IllegalStateException, " + copyOk + " completed; "
+                + startedBeforeRelease + " of " + rounds + " readers began before the release");
     }
 }

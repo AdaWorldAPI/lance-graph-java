@@ -10,22 +10,24 @@ F1/F2 single thread: close, then access; cleanup count
   ok    second close does not run the cleanup again (count=1)
   ok    the pinned memory itself is untouched (a view close frees nothing)
 F3 concurrent scalar reads vs close, 200 rounds
-  reads=7037025 readerSawISE=200/200 closeThrew=0 cleanups=200
+  reads=7480315 readerSawISE=200/200 closeThrew=0 cleanups=200
   ok    no read that began after the release returned a value (violations=0)
   ok    every reader ended by an IllegalStateException
   ok    each round ran the cleanup once, unless its close threw (cleanups=200, closeThrew=0)
 F4 close while another thread is inside one bulk copy of 256 MiB
-  round 0: copy threw ISE, close returned after 38165 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 1: copy threw ISE, close returned after 26848 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 2: copy threw ISE, close returned after 25974 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 3: copy threw ISE, close returned after 20674 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 4: copy threw ISE, close returned after 24368 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 5: copy threw ISE, close returned after 25874 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 6: copy threw ISE, close returned after 24690 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 7: copy threw ISE, close returned after 25686 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 8: copy threw ISE, close returned after 26472 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 9: copy threw ISE, close returned after 23081 us, close returned after the copy ended, cleanup ran after the copy ended
-  summary: copyCompleted=0 copyThrew=10 closeThrew=0 closeReturnedBeforeCopyEnded=0 cleanupStampBeforeCopyEndStamp=0 of 10 (timings: observations only, not ordering evidence)
+  round 0: copy threw ISE, close returned after 636 us, close returned BEFORE the copy ended, cleanup ran BEFORE the copy ended
+  round 1: copy threw ISE, close returned after 27995 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 2: copy threw ISE, close returned after 25192 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 3: copy threw ISE, close returned after 26539 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 4: copy threw ISE, close returned after 25273 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 5: copy threw ISE, close returned after 25361 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 6: copy threw ISE, close returned after 24409 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 7: copy threw ISE, close returned after 26490 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 8: copy threw ISE, close returned after 26290 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 9: copy threw ISE, close returned after 24433 us, close returned after the copy ended, cleanup ran after the copy ended
+  summary: copyCompleted=0 copyThrew=10 closeThrew=0 closeReturnedBeforeCopyEnded=1 cleanupStampBeforeCopyEndStamp=1 of 10 (timings: observations only, not ordering evidence)
   ok    no copy that started after the release completed normally (completedAfterRelease=0)
-  ok    observed: close does not fail; the in-flight copy is aborted with IllegalStateException (closeThrew=0, copyThrew=10)
+  ok    every close that returned ran the cleanup (missing=0)
+  ok    close never threw (closeThrew=0)
+  observed (overlap unverified): 10 of 10 copies threw IllegalStateException, 0 completed; 10 of 10 readers began before the release
 RESULT: all observations as expected

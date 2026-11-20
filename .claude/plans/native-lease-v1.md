@@ -173,11 +173,11 @@ Arena through `MemorySegment.ofAddress(a).reinterpret(size, arena, cleanup)`
 |---|---|---|
 | F1 | After the shared arena is closed, a read through the view throws `IllegalStateException`. | `R13-observed.txt:8` |
 | F2 | The cleanup runs exactly once, at close, never before. A second close throws `IllegalStateException` and does not run the cleanup again. The backing memory is untouched. | `:6-11` |
-| F3 | 200 rounds, one reader doing scalar reads, main thread closing: 7,428,543 reads; zero reads that began after the cleanup ran returned a value; every reader ended with `IllegalStateException`; close never threw. | `:12-16` |
-| F4 | 10 rounds, close while another thread is inside one 256 MiB `MemorySegment.copy` out of the view: close never threw; it returned after about 21-26 ms (once 0.15 ms); in every round the in-flight copy was aborted with `IllegalStateException`; no copy that started after the release completed normally. The timings put the cleanup after the copy's end in every round, but that is an observation only (see below). | `:17-31` |
+| F3 | 200 rounds, one reader doing scalar reads, main thread closing: 7,480,315 reads; zero reads that began after the cleanup ran returned a value; every reader ended with `IllegalStateException`; close never threw. | `:12-16` |
+| F4 | 10 rounds, close while another thread is inside one 256 MiB `MemorySegment.copy` out of the view: close never threw and always ran the cleanup; it returned after about 24-28 ms in nine rounds and after 0.6 ms in one; all ten copies threw `IllegalStateException`; no copy that started after the release completed normally. Whether each close overlapped its copy is not established (see below). | `:17-31` |
 
 F4's summary line: `copyCompleted=0 copyThrew=10 closeThrew=0
-closeReturnedBeforeCopyEnded=0 cleanupStampBeforeCopyEndStamp=0 of 10`
+closeReturnedBeforeCopyEnded=1 cleanupStampBeforeCopyEndStamp=1 of 10`
 (`R13-observed.txt`).
 
 Three limits on how to read F3 and F4.
@@ -191,11 +191,21 @@ Three limits on how to read F3 and F4.
 - **The ordering evidence is one-directional.** The cleanup sets a flag, and the
   reader reads that flag before it starts an access. An access that began with
   the flag already set and still returned a value would mean the release ran
-  while the view was readable. F3 checks this per scalar read (0 of 7,037,025
+  while the view was readable. F3 checks this per scalar read (0 of 7,480,315
   in the recorded run) and F4 per bulk copy (no copy that started after the
   release completed normally). This shows no read began after the release and
   succeeded. It does not show the reverse, and it is not a proof of the JDK's
   internal rule.
+- **The race is real on the pinned build too.** In the recorded run one F4
+  round's stamps put the cleanup before the copy's end stamp (round 0, where the
+  close returned after 0.6 ms). Under the old assertion that round would have been
+  reported as a release during a read, although the copy had thrown and no access
+  succeeded after the release.
+- **Overlap is not established.** The reader reads the release flag just before it
+  enters the copy, but nothing marks the moment the copy is inside its access. A
+  round can close before the copy has started or after it has finished. So "the
+  in-flight copy was aborted" is the likely reading of the ten
+  `IllegalStateException`s, not a demonstrated one, and R13 does not require it.
 - **An aborted bulk copy leaves a partial destination.**
 
 What R13 did **not** test is listed in §5.3 as prerequisites.
@@ -341,9 +351,9 @@ Rules:
 - The **access** fails: the in-flight read, including a bulk copy, ends with
   `IllegalStateException` (F4, F3).
 - No read that began after the cleanup (the lease release) had run returned a
-  value: none of the scalar reads in F3, and no bulk copy in F4. The F4 timings
-  also put the cleanup after the copy's end, but they are not evidence of the
-  order (§2.4).
+  value: none of the scalar reads in F3, and no bulk copy in F4. The F4 timings are
+  not evidence of the order, and whether each close overlapped its copy is not
+  established (§2.4).
 
 The property the contract needs holds: the release does not run while an access
 through the view is in progress. The mechanism differs from the design's rule 4(a)
@@ -634,10 +644,16 @@ reads.
   a mask, close the mask's parent (which has no lease and so reclaims at once),
   then read the mask view. The mask owns its words (`registry.rs:54-58`), so the
   view stays valid; a mask operation returns `PARENT_CLOSED` (`abi.md:352`).
+  Then, in the mask variant, close the mask itself (it has a lease, so it goes to
+  `closing`) and only then close the view's Arena.
 - *Green.* The two checksums are equal after the owner close. The owner is
-  `closing` (or, in the mask variant, the mask is open with an orphaned parent) and
-  native operations on it are refused. After the Arena close the memory is
-  reclaimed and the count is 0.
+  `closing` and native operations on it are refused. In the mask variant: after
+  the parent close the mask view still reads its words and a mask operation
+  returns `PARENT_CLOSED`; after the mask's own close the mask is `closing` with
+  count 1. After the Arena close, in both variants, the release brings the
+  `closing` owner to `reclaimed` and the count to 0. (A release on an owner that
+  is still `open` leaves it open, §3.3, so the mask must be closed before the
+  Arena for the reclamation to be observable.)
 - *Red.* Run on `lease-pin-off`. The checksum comparison cannot fail there, because
   the memory is leaked and mapped. The guard is again the status and count: the
   assertion "owner is `closing`, count 1 after close" fails. The Rust layer adds

@@ -553,16 +553,17 @@ never freed; only the view is bound to the shared Arena through
 - **F1** — after close, a read through the view throws `IllegalStateException`.
 - **F2** — the cleanup runs exactly once, at close; a second close throws
   `IllegalStateException` and does not run it again; the backing memory is untouched.
-- **F3** — 200 rounds of scalar reads against a close: 7,428,543 reads, none that
+- **F3** — 200 rounds of scalar reads against a close: 7,480,315 reads, none that
   began after the cleanup ran returned a value; every reader ended with
   `IllegalStateException`; close never threw.
 - **F4** — 10 rounds of close while another thread is inside one 256 MiB
-  `MemorySegment.copy`: close never threw, returned after about 21-26 ms (once
-  0.15 ms); the in-flight copy was aborted with `IllegalStateException` in every
-  round (so its destination is partly written); no copy that started after the
-  release completed normally. The timings put the cleanup after the copy's end,
-  but a stamp taken after an access returns can be late, so they are printed as
-  observations and not asserted.
+  `MemorySegment.copy`: close never threw and always ran the cleanup, returning
+  after about 24-28 ms (once 0.6 ms); all ten copies threw `IllegalStateException`
+  (so their destinations are partly written); no copy that started after the
+  release completed normally. Two things are printed and not asserted: the
+  timings, because a stamp taken after an access returns can be late (one round
+  in the recorded run shows exactly that), and whether each close overlapped its
+  copy, which nothing in R13 establishes.
 
 So on this build the close waits and the access fails. It is not the close that
 fails.
