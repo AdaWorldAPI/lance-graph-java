@@ -223,9 +223,10 @@ public class R13_SharedArenaCloseVersusRead {
                 + " closeThrew=" + closeThrew + " closeReturnedBeforeCopyEnded=" + closeBeforeCopyEnd
                 + " cleanupStampBeforeCopyEndStamp=" + cleanupBeforeCopyEnd + " of " + rounds
                 + " (timings: observations only, not ordering evidence)");
-        // The one property the lease contract needs: the release (cleanup) never runs while a
-        // read through the view is still in progress. A copy that completed after the cleanup
-        // ran would be exactly that.
+        // The lease contract needs the release (cleanup) never to run while a read through the
+        // view is still in progress. F4 cannot show that (overlap is not established). What it
+        // checks is narrower: a copy that saw the release flag set before it began must not
+        // complete.
         check(completedAfterRelease == 0, "no copy that saw the release flag set before it began completed "
                 + "normally (completedAfterRelease=" + completedAfterRelease + ")");
         check(cleanupMissing == 0, "every close that returned ran the cleanup (missing="
