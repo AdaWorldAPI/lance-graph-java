@@ -10,8 +10,8 @@
 //! `all_512_codes_agree_in_codec9_and_lut9`) to be written in the same change.
 //!
 //! The scan covers non-test production code: files under a `tests` directory
-//! are skipped, each file is cut at its first `#[cfg(test)]` that opens a
-//! `mod`, and comment-only lines are ignored (the documentation may name these
+//! are skipped, every `#[cfg(test)] mod` is removed up to its closing brace
+//! (scanning resumes after it), and comment-only lines are ignored (the documentation may name these
 //! words; only code may not use them). The anti-vacuity half asserts the scan
 //! really saw `ndarray::simd` in use.
 
@@ -34,26 +34,52 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Production code lines of `text`: cut at the first `#[cfg(test)]` directly
-/// followed by a `mod`, drop comment-only lines.
+/// Production code lines of `text`: every `#[cfg(test)]` directly followed by
+/// a `mod` is removed up to the brace that closes that module (or only its
+/// own line for `mod name;`), and scanning RESUMES after it, so production
+/// code placed below a test module is still seen. Comment-only lines are
+/// dropped. Braces are counted textually, which is exact for this crate's
+/// formatted sources (a test module containing an unbalanced brace inside a
+/// string literal would end the skip early or late; the first makes the fence
+/// stricter, and the regression tests below pin the ordinary shapes).
 fn production_code(text: &str) -> Vec<&str> {
     let lines: Vec<&str> = text.lines().collect();
-    let mut end = lines.len();
-    for i in 0..lines.len() {
-        if lines[i].trim() == "#[cfg(test)]"
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let opens_test_mod = lines[i].trim() == "#[cfg(test)]"
             && lines
                 .get(i + 1)
-                .is_some_and(|n| n.trim_start().starts_with("mod "))
-        {
-            end = i;
-            break;
+                .is_some_and(|n| n.trim_start().starts_with("mod "));
+        if opens_test_mod {
+            let mut depth = 0i64;
+            let mut opened = false;
+            i += 1;
+            while i < lines.len() {
+                for ch in lines[i].chars() {
+                    match ch {
+                        '{' => {
+                            depth += 1;
+                            opened = true;
+                        }
+                        '}' => depth -= 1,
+                        _ => {}
+                    }
+                }
+                let declaration_only = !opened && lines[i].trim_end().ends_with(';');
+                i += 1;
+                if (opened && depth <= 0) || declaration_only {
+                    break;
+                }
+            }
+            continue;
         }
+        if !lines[i].trim_start().starts_with("//") {
+            out.push(lines[i]);
+        }
+        i += 1;
     }
-    lines[..end]
-        .iter()
-        .copied()
-        .filter(|l| !l.trim_start().starts_with("//"))
-        .collect()
+    out
 }
 
 fn scan() -> (Vec<String>, usize) {
@@ -99,4 +125,32 @@ fn lgj_calls_no_simd_stride_lut9_lut_u8_or_codec9_so_dr512_parity_is_not_applica
     assert!(production_code(&kernels)
         .iter()
         .any(|l| l.contains("ndarray::simd::eq_u32_strided_to_mask")));
+}
+
+fn uses_not_adopted(text: &str) -> bool {
+    production_code(text)
+        .iter()
+        .any(|l| NOT_ADOPTED.iter().any(|w| l.contains(w)))
+}
+
+#[test]
+fn production_code_below_a_test_module_is_still_scanned() {
+    let text = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        let _ = 1;\n    }\n}\nuse ndarray::simd_stride;\n";
+    assert!(uses_not_adopted(text));
+    // Same shape with an out-of-line test module declaration.
+    let text = "#[cfg(test)]\nmod tests;\nuse ndarray::simd_stride::lut9;\n";
+    assert!(uses_not_adopted(text));
+    // And with two test modules, the forbidden use between them.
+    let text = "#[cfg(test)]\nmod a {\n}\nfn f() { lut_u8(); }\n#[cfg(test)]\nmod b {\n}\n";
+    assert!(uses_not_adopted(text));
+}
+
+#[test]
+fn an_identifier_only_inside_a_test_module_or_a_comment_is_not_a_violation() {
+    let text = "fn a() {}\n#[cfg(test)]\nmod tests {\n    use ndarray::simd_stride::lut9;\n    fn t() {\n        lut9();\n    }\n}\nfn b() {}\n";
+    assert!(!uses_not_adopted(text));
+    assert_eq!(production_code(text), vec!["fn a() {}", "fn b() {}"]);
+    assert!(!uses_not_adopted(
+        "// codec9 is named in prose only\nfn a() {}\n"
+    ));
 }
