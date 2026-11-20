@@ -211,9 +211,11 @@ Three limits on how to read F3 and F4.
 - **Overlap is not established.** The reader reads the release flag just before it
   enters the copy, but nothing marks the moment the copy is inside its access. A
   round can close before the copy has started or after it has finished. So "the
-  in-flight copy was aborted" is the likely reading of the ten
+  in-flight copy was aborted" is one possible reading of the ten
   `IllegalStateException`s, not a demonstrated one, and R13 does not require it.
-- **An aborted bulk copy leaves a partial destination.**
+  In particular R13 does not establish that close waits for an in-flight access,
+  or that the release cannot run while one is still reading.
+- **A bulk copy that throws may leave a partial destination.**
 
 What R13 did **not** test is listed in §5.3 as prerequisites.
 
@@ -350,22 +352,24 @@ Rules:
 | both at once | serialized by §3.7; whichever runs second performs the reclaim, exactly once |
 | view Arena never closes | owner stays `closing`; a pinned leak (§3.4) |
 
-**Observed mechanism on this JDK (R13), which replaces the design's wording.**
+**What R13 observed on this JDK, and what it did not establish.**
 
-- Closing the shared Arena while another thread's access is attempted alongside
-  it does **not** fail. The close returned after about 24-36 ms, and in every round the copy
-  threw (F4; whether each close overlapped its copy is not established).
-- The **access** fails: the in-flight read, including a bulk copy, ends with
-  `IllegalStateException` (F4, F3).
-- No read that observed the release flag set before it began returned a value:
-  none of the scalar reads in F3, and no bulk copy in F4. A read whose flag check
-  precedes the release is not covered by this check. The F4 timings are
-  not evidence of the order, and whether each close overlapped its copy is not
-  established (§2.4).
+- Observed: in every round the close returned normally (it never threw), after
+  about 24-36 ms in F4, and every reader's access ended with
+  `IllegalStateException` (F3, F4).
+- Observed: no access that saw the release flag set before it began returned a
+  value, in F3 or F4. An access whose flag check came just before the release is
+  not covered by this check (§2.4).
+- **Not established:** that any F4 close overlapped a copy that was inside its
+  access, and therefore what close does when it races an in-flight access
+  (waits, fails, or completes) and whether the release can run while such an
+  access is still reading. A copy that threw may have started after the close.
 
-The property the contract needs holds: the release does not run while an access
-through the view is in progress. The mechanism differs from the design's rule 4(a)
-(§7, departure 1).
+So R13 neither confirms nor refutes the design's rule 4(a). The property the
+contract needs, that the release does not run while an access through the view
+is in progress, is **not yet established**. It is a requirement on the
+implementation, and T3 (§5.2) must establish it with evidence of overlap; until
+then the contract does not rely on any observed mechanism (§7, departure 1).
 
 **Reader rule.** A reader must treat `IllegalStateException` from any access
 through a borrowed view, a bulk copy included, as "result invalid; destination
@@ -580,8 +584,15 @@ reads.
 **T3 — Release ordering**
 
 - *Shows.* No path releases a lease while a segment bound to the result's Arena is
-  still readable. A close that races an in-flight read completes after it, and the
-  release runs after the read has ended.
+  still readable, including when the close races a read that is already inside
+  its access. This is the test that must establish the ordering; R13 does not
+  (§2.4, §3.5).
+- *Overlap evidence required.* A single `MemorySegment.copy` cannot show that the
+  close landed inside the access. The reader therefore copies in chunks and
+  publishes a progress count after each chunk; the main thread closes only after
+  the count shows the loop is under way and before it reaches the total. A round
+  in which the count reached the total before the close, or never moved, has no
+  overlap and is discarded, not counted as a pass.
 - *Construction.* Two parts.
   (a) The R13 F4 shape on a real borrowed view: one thread inside one long
   `MemorySegment.copy` out of a view as large as the store allows; the main thread
@@ -724,19 +735,22 @@ it.
 
 1. **Rule 4(a), the mechanism (`:534-537`).** The design says "a close that races
    an in-flight access fails instead of completing (to be confirmed by test,
-   below)". R13 observed the opposite on JDK `28-beta+16-ea`: close completes
-   after the in-flight access stops, and the **access** fails with
-   `IllegalStateException` (F3, F4). The property the contract needs, that the
-   release runs only after the in-flight access has ended, holds. Correct the
-   wording. A bulk copy aborted this way leaves a partly written destination.
+   below)". The design should not state a mechanism yet. R13 found no close that
+   failed and every access ending with `IllegalStateException`, but it did not
+   establish that any close overlapped an in-flight access, so it neither
+   confirms nor refutes the rule. Replace the rule with the requirement (the
+   release never runs while an access through the view is in progress) and leave
+   the mechanism to T3.
 2. **Release-ordering test row (`:563`).** "an arena close that races an in-flight
-   read does not complete, and the lease is not released by it". Correct to: the
-   close completes after the read has ended; the read fails; the lease is released
-   by the cleanup, after the read.
+   read does not complete, and the lease is not released by it". This states a
+   mechanism the evidence does not support. Correct to the requirement, and add
+   that the test must show overlap (T3).
 3. **The untested paragraph (`:568-571`).** It says the shared-arena close
-   behaviour "was not tested for this document (not established)". R13 now
-   establishes it for one JDK build, with the limits in §5.3. Update the paragraph
-   and cite R13.
+   behaviour "was not tested for this document (not established)". R13 now covers
+   the single-thread behaviour (F1, F2) and the absence of successful reads after
+   the release flag (F3, F4) for one JDK build. Close behaviour against an
+   in-flight access is still not established. Update the paragraph and cite R13
+   with that limit.
 4. **Five versus six tests.** The J1 row (`:2226`) lists "the five tests of 6.5".
    The §6.5 table lists six (`:557-566`). This contract keeps six.
 5. **Raw addresses (added).** The design is silent on native code that receives a

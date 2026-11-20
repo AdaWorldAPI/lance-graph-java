@@ -18,7 +18,7 @@ Each reproducer is a single self-contained file with its command line in the hea
 | [R7](#r7) | 10^9 projected operations allocate 960 B TOTAL — zero-copy at the endgame scale | **measured, JDK 27 EA** |
 | [R6](#r6) | The cliff is JEP 401 by design (atomicity), not a version gap or a flag | **HotSpot / JEP 401 spec** |
 | [R5](#r5) | A classid-dependent layout has no static spelling in Panama or Valhalla | **Panama + Valhalla (by construction)** |
-| [R13](#r13) | Closing a shared Arena while another thread reads a view: the close waits, the read fails | **measured, JDK 28-beta+16-ea** |
+| [R13](#r13) | Closing a shared Arena while another thread reads a view: no close failed, every read ended with an exception; behaviour against an in-flight access not established | **measured, JDK 28-beta+16-ea** |
 
 Environment for every observation below: `openjdk 27-jep401ea3+1-1`, Linux x86-64,
 Intel Xeon @ 2.10 GHz (4 vCPU, AVX-512).
@@ -565,8 +565,10 @@ never freed; only the view is bound to the shared Arena through
   of an earlier run on this build showed exactly that), and whether each close overlapped its
   copy, which nothing in R13 establishes.
 
-So on this build the close waits and the access fails. It is not the close that
-fails.
+So on this build no close failed and every access ended with
+`IllegalStateException`. Because overlap is not established, R13 does not show
+what a close does against an access that is already in flight, or that the
+release waits for it.
 
 **What it does not test.** A segment passed to a native downcall while the Arena
 closes. A raw address passed to native as a `long`. Memory owned by lgj's Rust

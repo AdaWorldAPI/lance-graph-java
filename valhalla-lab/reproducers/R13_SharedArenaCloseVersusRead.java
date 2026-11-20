@@ -149,10 +149,13 @@ public class R13_SharedArenaCloseVersusRead {
 
     // F4 ----------------------------------------------------------------------------------------
     // A reader thread performs ONE long bulk copy out of the view. The main thread closes the
-    // arena while that copy is in progress. Observed: does close throw, block until the copy
-    // returns, or complete while the copy continues? And does the copy succeed or throw?
+    // arena about 5 ms after the reader started. Nothing marks the moment the copy is inside its
+    // access, so a round may close before the copy started or after it ended: overlap is NOT
+    // established, and F4 does not show what close does against an in-flight access. It records
+    // whether close throws, whether the copy completes or throws, and the one-directional flag
+    // check (no copy that saw the release flag set before it began may complete).
     static void f4ConcurrentBulkRead() throws Exception {
-        final long bytes = 256L << 20;     // 256 MiB: long enough to be in flight when close runs
+        final long bytes = 256L << 20;     // 256 MiB: chosen to make overlap likely, not to prove it
         System.out.println("F4 close attempted alongside another thread's one bulk copy of "
                 + (bytes >> 20) + " MiB");
         MemorySegment mem = pinned(bytes);
