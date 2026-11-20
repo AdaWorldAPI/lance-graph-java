@@ -1,0 +1,48 @@
+# java --enable-preview --enable-native-access=ALL-UNNAMED -Xmx2g -cp out R14_CloseWaitsForInFlightAccess
+# 4 vCPU, Intel(R) Xeon(R) Processor @ 2.10GHz
+# run 1 of 3, full output:
+java.version=28-beta vm=28-beta+16-ea
+G1/G2 close vs in-flight copy, 20 rounds per size, close 1.0 ms after the reader's start signal
+  size   32 MiB: standalone copy median 2.9 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 2.6 ms
+  ok    size 32 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  ok    size 32 MiB: every close returned normally and ran the cleanup exactly once
+  size   64 MiB: standalone copy median 5.7 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 6.9 ms
+  ok    size 64 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  ok    size 64 MiB: every close returned normally and ran the cleanup exactly once
+  size  128 MiB: standalone copy median 12.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 13.8 ms
+  ok    size 128 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  ok    size 128 MiB: every close returned normally and ran the cleanup exactly once
+  size  256 MiB: standalone copy median 27.4 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 27.6 ms
+  ok    size 256 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  ok    size 256 MiB: every close returned normally and ran the cleanup exactly once
+  ok    overlap rounds observed: 80 (copy threw ISE after writing every byte)
+  ok    close duration in overlap rounds grows with copy size: [2.598198, 6.900703, 13.813147, 27.583255] ms
+G3 sensitivity: release without close, during the copy, 10 rounds
+  rounds in which poison reached the destination: 10/10
+  ok    the oracle detects a release that runs during a copy
+G4 view passed to a downcall (memcpy), close during the downcall
+  closes attempted during the downcall that threw: 5/5; cleanup ran during: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
+  ok    a close during a downcall that holds the view throws
+  ok    the cleanup does not run while the downcall holds the view
+  ok    after the downcall the close succeeds and the cleanup runs once
+RESULT: all observations as expected
+
+# runs 2 and 3, per-size lines and verdicts:
+# run 2
+  size   32 MiB: standalone copy median 3.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.7 ms
+  size   64 MiB: standalone copy median 6.4 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 7.0 ms
+  size  128 MiB: standalone copy median 13.2 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 13.8 ms
+  size  256 MiB: standalone copy median 25.6 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 27.6 ms
+  ok    close duration in overlap rounds grows with copy size: [3.652852, 6.953949, 13.783509, 27.600032] ms
+  rounds in which poison reached the destination: 10/10
+  closes attempted during the downcall that threw: 5/5; cleanup ran during: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
+RESULT: all observations as expected
+# run 3
+  size   32 MiB: standalone copy median 3.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.7 ms
+  size   64 MiB: standalone copy median 5.8 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 6.8 ms
+  size  128 MiB: standalone copy median 13.5 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 13.6 ms
+  size  256 MiB: standalone copy median 28.4 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 29.0 ms
+  ok    close duration in overlap rounds grows with copy size: [3.675694, 6.802276, 13.641087, 29.023632] ms
+  rounds in which poison reached the destination: 10/10
+  closes attempted during the downcall that threw: 5/5; cleanup ran during: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
+RESULT: all observations as expected

@@ -1,0 +1,11 @@
+[package]
+name = "lease-model"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Executable model of the native lease contract's Choice B variants (not lgj code, no ABI)"
+
+# Stand-alone: not a member of native/'s workspace.
+[workspace]
+
+[dependencies]

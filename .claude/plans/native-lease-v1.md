@@ -35,9 +35,11 @@ contract carries:
 
 The JDK-side facts the contract relies on come from the new reproducer
 `valhalla-lab/reproducers/R13_SharedArenaCloseVersusRead.java` and its output
-`R13-observed.txt` (JDK `28-beta+16-ea`, 4 vCPU Xeon, `R13-observed.txt:1-3`).
-§2.4 states them. They differ from the design's wording in one place, which
-matters (§7, departure 1).
+`R13-observed.txt` (JDK `28-beta+16-ea`, 4 vCPU Xeon, `R13-observed.txt:1-3`), and
+from the later reproducer `R14_CloseWaitsForInFlightAccess.java` with the HotSpot
+source reading (§3.5). §2.4 states R13's. They differ from the design's wording in
+one place, which matters (§7, departure 1). The open decisions were tested and
+balanced on 2026-11-20; the record is §9.
 
 ---
 
@@ -287,10 +289,21 @@ Status each operation returns, by state. Existing codes are from `abi.md:229-249
 
 Notes on the table.
 
+- **The two tables above describe Choice B1** (§4.4). Under the recommended B3,
+  `closing` is not a slot state. Close is exactly today's `registry::close`: the
+  owner handle is `INVALID_HANDLE` from the close request on, and the memory is
+  pinned by the leases' `Arc` clones until the last lease is released. The
+  "closing" columns and rows then do not occur, `PARENT_CLOSED` is not used for an
+  owner's own handle, and a closed owner's count cannot be read per owner (§4.4).
+  The "reclaimed" generation advance happens at the close request. The
+  one-reclaim-exactly-once rule holds by `Arc` drop.
 - `PARENT_CLOSED` in `closing` is the design's choice (`:527`). Its documented
   meaning is "child (mask) outlived its parent resource" (`abi.md:239`), so on an
-  owner's own handle it is a stretch. Whether to keep it or add a status is
-  open question Q1.
+  owner's own handle it is a stretch. Java also maps it to `ClosedResourceException`
+  with the message "... was called on a mask whose parent resource is closed (ABI
+  status PARENT_CLOSED = -7)" (`Status.java:128-131`), which is misleading for an
+  owner's own handle. Whether to keep it or add a status is open question Q1; B3
+  dissolves it.
 - With no outstanding lease the machine is today's behaviour: close goes straight
   to reclaimed, and `closing` is never entered. No existing caller holds a lease,
   so no existing behaviour changes.
@@ -360,20 +373,51 @@ Rules:
 - Observed: no access that saw the release flag set before it began returned a
   value, in F3 or F4. An access whose flag check came just before the release is
   not covered by this check (§2.4).
-- **Not established:** that any F4 close overlapped a copy that was inside its
-  access, and therefore what close does when it races an in-flight access
-  (waits, fails, or completes) and whether the release can run while such an
-  access is still reading. A copy that threw may have started after the close.
+- **Not established by R13:** that any F4 close overlapped a copy that was inside
+  its access. A copy that threw may have started after the close. R14 closes
+  this gap (below).
 
-So R13 neither confirms nor refutes the design's rule 4(a). The property the
-contract needs, that the release does not run while an access through the view
-is in progress, is **not established by any test**, and a black-box Java test
-cannot establish it: Java has no way to observe that another thread is inside a
-segment access at a given moment (a progress count shows only that a loop has
-started, not that an access is in flight when the close runs).
+So R13 alone neither confirms nor refutes the design's rule 4(a). R13 could not
+tell whether a close overlapped an access. R14 (below) adds a per-round overlap
+signature, and the HotSpot source settles the mechanism on this build.
 
-**What the property rests on instead: the JDK's close mechanism, read in source.**
-Read in `lib/src.zip` of the pinned build (`28-beta+16-ea`), not tested:
+**What R14 observed** (`valhalla-lab/reproducers/R14_CloseWaitsForInFlightAccess.java`,
+output `valhalla-lab/reproducers/R14-observed.txt`, README section "## R14"; three
+runs, all green, same JDK `28-beta+16-ea`).
+
+- *Overlap signature.* A copy that threw `IllegalStateException` **and** left every
+  source byte in the destination passed the liveness check before the close and was
+  still inside its access when the handshake reached it: that round overlapped.
+  This inference uses the JDK source structure (`Unsafe.copyMemory` is one
+  `copyMemory0` call, `Unsafe.java:1000-1010` in `src.zip`). It is not a black-box
+  fact.
+- *Ordering oracle (black-box).* The cleanup, standing in for `lgj_lease_release`,
+  first poisons the last 1 MiB of the source through a never-freed alias and then
+  sets a flag. The copy reads forward. A release during the copy would put poison in
+  the destination.
+- *G1.* 32, 64, 128 and 256 MiB, 20 rounds each, three runs: 240 of 240 rounds
+  overlapped, 0 carried poison, every close returned normally and ran the cleanup
+  once.
+- *G2.* In overlap rounds the median close duration grows with the size (run 1: 2.6,
+  6.9, 13.8, 27.6 ms against standalone copy medians of 2.9, 5.7, 12.0, 27.4 ms;
+  `R14-observed.txt`). The close waits for the in-flight access. Close latency is
+  bounded by the longest single in-flight access.
+- *G3 (red arm, sensitivity).* A "release" from another thread with no close put
+  poison in the destination in 10 of 10 rounds. The oracle can fail.
+- *G4.* A view passed as a segment to a downcall (libc `memcpy`, 256 MiB): a close
+  during the downcall threw `IllegalStateException` 5 of 5 times and the cleanup did
+  not run during it. A close after the downcall succeeded and ran the cleanup once.
+- Every overlapping copy wrote its full destination and still threw. This confirms
+  the reader rule below: a thrown copy's destination may be complete and is still
+  invalid.
+
+Limits: one JDK build, one 4 vCPU machine, a bulk-copy access only (a scalar access
+is not a distinct case in the source reading, but R14 did not run one).
+
+**What the property rests on: the JDK's close mechanism, read in source (Q9).**
+Two readings, both of the pinned build `28-beta+16-ea`:
+
+Java side, `lib/src.zip` (not tested by itself):
 
 - `MemorySessionImpl.close()` is `justClose(); resourceList.cleanup();`. The
   cleanup actions, which include the one passed to
@@ -391,23 +435,60 @@ Read in `lib/src.zip` of the pinned build (`28-beta+16-ea`), not tested:
   with this arena is being accessed concurrently, e.g. by a downcall method
   handle".
 
-Together these say: the release runs after a handshake that leaves no thread in
-the middle of a scoped access through the arena's segments. That is the ordering
-the contract needs, and it is a JDK guarantee, not an lgj one.
+HotSpot side, `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
+`jdk-28+16` (commit `f0747596dea3e6a1c852dc227a0eb10ddbf5b015`).
+`ScopedMemoryAccess_closeScope` is at lines 265-284, its closures at 140-258:
 
-Two things weaken it, and both are recorded rather than smoothed over:
+- `Handshake::execute` runs a closure against every thread. A thread with no Java
+  frames, or already about to throw an async exception, is skipped.
+- A thread found inside a `@Scoped` method frame whose locals hold the session gets
+  an **asynchronous** handshake installed. It throws `ScopedAccessError`, which the
+  `@Scoped` method turns into `IllegalStateException`, the next time the thread
+  stops at a safepoint poll. The comment (lines 133-139) says it is "only run when
+  the target thread is itself stopped at a safepoint poll, and not when the thread
+  is actively executing code, such as a memory access".
+- A thread stopped in compiled code outside a `@Scoped` frame, whose nmethod has
+  scoped access, is deoptimized so it redoes the liveness check.
+- `closeScope0` then **waits**: `while (async_exceptions.load_acquire() > 0)
+  spin_yield.wait();`. The comment says it waits "because we will free the memory
+  after this. This guarantees the target thread does not continue to access the
+  memory." It returns `void` and has **no failure path**.
+- `SharedSession.justClose()` (`src.zip`, lines 83-93) does throw `alreadyAcquired`
+  when the acquire count is above 0. That is the downcall case (a segment passed to
+  a downcall acquires the session) and matches `Arena.close`'s specification
+  sentence about downcalls. R14 G4 observed it.
+- `Unsafe.copyMemory` is one non-chunked `copyMemory0` call. A bulk copy is one
+  non-interruptible VM call, so the handshake reaches that thread only after the
+  call returns. That is why close latency follows the copy time (G2).
 
-- The same class comment says that if a thread "is found accessing" the session
-  "the handshake fails, and the session will not be closed". In the pinned build
-  `closeScope0` returns `void` and `justClose()` has no failure path after it, and
-  R13 never saw a close throw. The comment and the code disagree; which describes
-  this build is not established without reading the HotSpot side of `closeScope0`.
-- The guarantee covers accesses made through the JDK's scoped access paths. It
-  says nothing about native code that was handed a raw address (§3.6), which is
-  why §3.6 forbids that.
+Together these say: the release runs after a handshake that waits until every
+thread inside a scoped access through the arena's segments has been made to throw.
+That is the ordering the contract needs. It is a JDK guarantee, not an lgj one.
 
-This is open question Q9 (§6): confirm the HotSpot behaviour of `closeScope0` on
-the pinned build before the implementation relies on it.
+Corroboration that this HotSpot file belongs to the pinned build. The pinned build
+is Temurin `28-beta+16-ea`. Its `src.zip` copies of `SharedSession.java` and
+`MemorySessionImpl.java` are byte-identical to the tag's. Its `libjvm.so` contains
+the class names `CloseScopedMemoryHandshakeClosure` and
+`ScopedAsyncExceptionHandshakeClosure` and the string "must process to avoid hang".
+The exact HotSpot commit of the build could not be fetched (Temurin's SOURCE field
+is a short SHA that GitHub would not resolve). So "the HotSpot file is the build's"
+is strongly corroborated, **not proven**.
+
+The earlier weakness, now resolved: the `ScopedMemoryAccess` class comment says
+that if a thread "is found accessing" the session "the handshake fails, and the
+session will not be closed" (`ScopedMemoryAccess.java:63` in `src.zip`). On this
+build that comment is **stale**. `scopedMemoryAccess.cpp:265-284` has no failure
+path; it waits. R13 and R14 never saw a close throw against a Java access.
+
+One weakness stays, recorded and not smoothed over: the guarantee covers accesses
+made through the JDK's scoped access paths. It says nothing about native code that
+was handed a raw address (§3.6), which is why §3.6 forbids that. The overlap
+inference in R14 also depends on the JDK source structure and would need to be
+re-read on another build.
+
+Q9 (§6) is answered on `28-beta+16-ea`: close does not fail against a scoped Java
+access, it waits for it, and the release runs after. Close throws only when a
+downcall holds the view. Re-open it on any JDK change (§9).
 
 **Reader rule.** A reader must treat `IllegalStateException` from any access
 through a borrowed view, a bulk copy included, as "result invalid; destination
@@ -426,8 +507,17 @@ rethrows `ClosedResourceException` with that sentence in the message.
 
 A Java segment bound to an Arena protects only reads made through that segment in
 Java. It does not protect native code that was handed the address. R13 did not test
-a segment passed to a downcall, and it did not test a raw address passed as a
-`long`.
+a segment passed to a downcall, and neither R13 nor R14 tested a raw address passed
+as a `long`.
+
+R14 G4 observed one half. A view passed **as a segment** to a downcall is protected
+by the session's acquire count: a close during the downcall threw
+`IllegalStateException` 5 of 5 times, the cleanup did not run during it, and a close
+after the downcall succeeded and ran the cleanup once. A raw `long` is not
+protected, because nothing acquires the session. Consequence for the facade: the
+result object's `close()` can throw `IllegalStateException` if someone violated the
+rule and a segment is still in a downcall. That exception must propagate. It must
+not be swallowed, because a swallowed one hides a view whose release has not run.
 
 Therefore:
 
@@ -471,13 +561,21 @@ written only on `OK`.
 |---|---|
 | `i32 lgj_lane_borrow(u64 handle, u32 lane_id, LgjLaneDesc* out_desc, u64* out_lease)` | In one critical section: resolve `handle`, require `open`, fill the lane descriptor exactly as `lgj_lane_describe` / `lgj_mask_describe` do, increment the count, create the lease. A mask handle returns its word lane when `lane_id` is 0, else `INVALID_LANE`. Statuses as the §3.3 table, plus `NULL_ARGUMENT`, `INVALID_LANE`, `ALLOCATION_FAILED` (`-12`) if a lease cannot be created or the count would overflow. |
 | `i32 lgj_lease_release(u64 lease)` | Resolve the lease (kind check), remove it, decrement the owner's count, reclaim if the owner is `closing` and the count is 0. A stale handle returns `INVALID_HANDLE`. A non-lease handle returns `WRONG_RESOURCE_KIND`. |
-| `i32 lgj_lease_count(u64 resource, u64* out_live, u32* out_state)` | `resource == 0` reports the process-wide live lease count and state 0 (handle 0 never resolves, `registry.rs:17-18`, so 0 is free to mean "all"). A live owner reports its own count and its state, 0 open or 1 closing, and is the one call that resolves a `closing` owner. A reclaimed handle returns `INVALID_HANDLE`. |
+| `i32 lgj_lease_count(u64 resource, u64* out_live, u32* out_state)` (**B1 form, the fallback**) | `resource == 0` reports the process-wide live lease count and state 0 (handle 0 never resolves, `registry.rs:17-18`, so 0 is free to mean "all"). A live owner reports its own count and its state, 0 open or 1 closing, and is the one call that resolves a `closing` owner. A reclaimed handle returns `INVALID_HANDLE`. |
+| `i32 lgj_lease_count(u64 resource, u64* out_live)` (**changed under B3, the recommendation**) | `resource == 0` reports the process-wide live lease count. A live owner reports its own count. A closed owner returns `INVALID_HANDLE`. No `out_state`: there is no closing state. The count is a snapshot; assert on it only after quiescence. |
+
+Which `lgj_lease_count` form applies depends on Choice B (§4.4). Q2 proposes it as a
+regular production symbol under either form.
 
 `LgjLaneDesc` is unchanged (56 bytes, `abi.md:407-420`). No manifest field is added.
 `lgj_close` keeps its signature and its `OK` and `INVALID_HANDLE` meanings; only
 the §3.3 behaviour on a leased owner is new.
 
 ### 4.2 `lgj_close` on a resource with leases
+
+This describes B1. Under B3, `lgj_close` is unchanged in every case: it takes the
+entry out and bumps the generation as today, and the leases' `Arc` clones keep the
+memory alive.
 
 - Count 0: as today, straight to reclaimed (`registry.rs:322-345`).
 - Count above 0: return `OK`, set `closing`, retain the entry in its slot, do not
@@ -500,9 +598,20 @@ the §3.3 behaviour on a leased owner is new.
   must yield `AbiMismatchException` naming minor 15. A minor of 15 or more must
   borrow, release and read the count back to zero. Both directions are required,
   as the existing legs do.
-- **Status.** No new status code is required.
+- **Status.** No new status code is required under B3. Under B1, Q1 proposes
+  `LGJ_ERR_RESOURCE_CLOSING = -19`.
 
 ### 4.4 Two real choices
+
+The recommendations below are proposals for the owner, not decisions. The evidence
+and the re-evaluation triggers are in §9.
+
+An executable model of Choice B exists: `valhalla-lab/lease-model/`, a stand-alone
+cargo crate (not lgj code, no ABI; `cargo test --manifest-path
+valhalla-lab/lease-model/Cargo.toml`). It mirrors `registry.rs` (slots with
+generation, entries in `Arc`, close takes the entry and bumps the generation) with
+variants B1, B2 and B3. Caveat: it is a model with one mutex, not the real
+`RwLock` registry. It tests the logic of each variant, not the implementation.
 
 **Choice A — how a borrow is shaped.**
 
@@ -514,23 +623,63 @@ the §3.3 behaviour on a leased owner is new.
 Recommendation: A1. The descriptor and the lease cannot diverge, there is one
 crossing per view, and there is no state in which a lease exists and the describe
 is refused. A2 adds one symbol of the same count but leaves a gap between acquire
-and describe in which a close request makes describe return `PARENT_CLOSED` after
-the lease was taken, and Java must then release. A2's one merit is that it reuses
-the describe code unchanged.
+and describe in which a close request makes describe return an error after the
+lease was taken, and Java must then release. A2's one merit is that it reuses the
+describe code unchanged. **Model result:** with a two-step borrow, a lease can be
+live while describe is refused, under every B variant. So A2 always needs an
+error-path release in Java. A1 has no such state.
 
-**Choice B — when the generation advances.**
+**Choice B — what close does while a lease is live.**
 
-- B1 (recommended, follows the design's table): the generation advances at
-  `reclaimed`; `closing` retains the entry and answers `PARENT_CLOSED` (§3.3).
-- B2: `lgj_close` bumps the generation at once; the lease holds the entry alive,
-  and the owner handle is `INVALID_HANDLE` from the close request.
+- B1 (the design's table): closing state kept in the slot; the generation advances
+  at `reclaimed`; `closing` retains the entry and answers `PARENT_CLOSED` (§3.3).
+- B2: `lgj_close` bumps the generation at once and leaves the entry in the slot; the
+  lease holds the entry alive, and the owner handle is `INVALID_HANDLE` from the
+  close request. The earlier text of this section said "B2 changes only `close`".
+  **That is false.** The model shows that after a close with a live lease, a handle
+  forged with the slot's current generation resolves under B2 and only B2, because
+  the slot's generation advanced while the entry stayed. B2 therefore also needs a
+  closing check in `resolve`. B2 as written is rejected.
+- **B3 (new): close is exactly today's `registry::close`; each lease holds an `Arc`
+  clone of the owner's entry.** The memory lives until the last lease is released.
+  There is no closing state in the slot. This reuses the mechanism that already
+  protects in-flight native calls (`registry.rs:340-343`, "Other in-flight calls
+  may still hold clones").
 
-Recommendation: B1, because it is the approved text and it keeps `closing`
-observable by status and by `lgj_lease_count`. The cost of B1 is one check in
-`resolve` (`registry.rs:276`) and one in the parent lookup (`registry.rs:307-312`);
-those two cover all 40 call sites. B2 changes only `close` and keeps today's
-statuses exactly. Choose B2 only if the audit of those call sites finds a path
-that cannot be made to test the `closing` state.
+Model results (6 tests, all pass): all four close/release orders reclaim exactly
+once with the count back to 0, and a never-closed view is a visible pinned leak (all
+variants). A 2000-iteration concurrent close versus release reclaims exactly once
+(all variants). No new lease and no operation on a closed owner (B1 returns
+`PARENT_CLOSED`, B2 and B3 return `INVALID_HANDLE`). A double release is refused.
+
+Code facts. Only five registry lock sites exist: `registry.rs:250` insert, `:278`
+resolve, `:307` parent lookup, `:323` close, `:506` slot_count. Call sites in
+`exports.rs` and `kernels.rs`: `resolve` 7, `resolve_kind` 13,
+`resolve_mask_with_parent` 20 (the 40 of §2.1). `resolve_kind` and
+`resolve_mask_with_parent` both go through `resolve`.
+
+Recommendation: **B3, with B1 as the acceptable fallback; B2 rejected as written.**
+Reasons for B3:
+
+- It reuses an existing mechanism that lgj already relies on.
+- It adds no slot state, and none of the 40 call sites change.
+- Reclaim happens exactly once, by `Arc` drop.
+- Forged handles are refused by today's generation rule.
+- Q1 dissolves: a closed owner is `INVALID_HANDLE`, whose Java message is accurate.
+
+Costs of B3, stated plainly:
+
+- It departs from the approved design's table (`:527` wants `closing` observable as
+  `PARENT_CLOSED`).
+- A closed owner's lease count can no longer be queried per owner, only globally.
+  Q4's debug tag would be the way to attribute a pinned leak.
+- The slot is reused while the memory is still pinned, so slot-based accounting
+  (`slot_count`, `registry.rs:506`) under-reports pinned memory.
+
+B1 stays the choice if the Bardioc design needs per-owner `closing` visibility. B1's
+cost is one check in `resolve` (`registry.rs:276`) and one in the parent lookup
+(`registry.rs:307-312`). Those two cover all 40 call sites, provided the audit finds
+no path that bypasses them.
 
 ---
 
@@ -622,11 +771,11 @@ reads.
 **T3 — Release ordering**
 
 - *Shows.* The lgj side of the ordering: the lease is released only by the view's
-  Arena cleanup, never before the Arena close, and the count reflects it. It does
-  **not** show that the release cannot run while another thread is inside an
-  access; no black-box Java test can (§3.5). That part rests on the JDK close
-  mechanism read in source (§3.5) and on open question Q9.
-- *Construction.* Two parts.
+  Arena cleanup, never before the Arena close, and the count reflects it. With
+  part (c) it also shows, for a bulk copy, that the release did not run while a
+  copy was still reading (R14's method, §3.5). That claim rests on the overlap
+  signature, which uses the JDK source structure, plus the black-box poison oracle.
+- *Construction.* Three parts.
   (a) A borrowed view, one reader thread looping accesses through it, the main
   thread closing the view's Arena. Ten rounds or more. The cleanup sets a flag
   and releases the lease; the reader reads that flag immediately before each
@@ -635,19 +784,32 @@ reads.
   (b) A source fence: `Engine.leaseRelease` has exactly one call site, inside the
   borrow wrapper's cleanup lambda, and the lease handle is not returned or stored.
   This is the `DoctrineFenceTest` pattern (`epoch-recheck-v3.md:260-268`).
+  (c) The R14 bulk-copy case on a real borrowed view. One thread does one large
+  `MemorySegment.copy` out of the view; the main thread closes the Arena about 1 ms
+  after the copy's start signal. The cleanup (the real release, plus a test hook
+  that poisons the last 1 MiB of the source through a never-freed alias) sets a flag
+  after poisoning. Classify each round by R14's signature: copy threw
+  `IllegalStateException` **and** the destination holds every source byte means
+  overlap. Run at least 20 rounds per size. Add a G3-style red arm (below).
 - *Green.* In every round the count is 1 before the close and 0 after. No access
   that saw the flag set before it began returned a value (this check cannot see an
   access whose flag check came just before the release; no timestamps are used).
   An access that threw `IllegalStateException` is treated as partial and its result
-  is not used. The fence finds one call site.
+  is not used. The fence finds one call site. Part (c): overlap rounds exist, and in
+  none of them does poison reach the destination.
 - *Red.* A test-source variant of the borrow wrapper that releases **before**
   closing the Arena (build-time file swap, the pattern of `LaneProbe`,
   `RowStore.java:453-455`). The owner stays open, so a release to count 0 reclaims
   nothing. The assertion "count is 1 while the view is still readable" fails. The
-  fence assertion also fails on a second call site.
-- *Not covered, stated.* A release during an in-flight access by a correct
-  wrapper would require the JDK to break the mechanism in §3.5. T3 cannot detect
-  that; Q9 is where it is checked.
+  fence assertion also fails on a second call site. Part (c) red arm (G3-style): run
+  the release from another thread during the copy with no Arena close. Poison
+  reaches the destination, so the oracle is shown able to fail. The backing memory
+  is never freed in this arm.
+- *Not covered, stated.* Raw native access to the address (§3.6): the Arena protects
+  nothing there. A scalar-access overlap is not separately tested. The overlap
+  inference in (c) depends on the JDK source structure (one `copyMemory0` call, the
+  handshake design), so on another JDK build it must be re-read, not only re-run.
+  R14 on `28-beta+16-ea` is the evidence that this holds there (Q9).
 
 **T4 — Stale handles**
 
@@ -718,8 +880,9 @@ reads.
 The implementation must establish each of these before it relies on it. Until then
 they are unverified.
 
-1. **A segment passed to a native downcall while the Arena closes.** Not tested.
-   The contract avoids the case (§3.6): segments are not passed to downcalls.
+1. **A segment passed to a native downcall while the Arena closes.** Tested once by
+   R14 G4 (libc `memcpy`, 256 MiB, 5 rounds): close throws, cleanup waits. Not
+   tested with an lgj downcall. The contract still avoids the case (§3.6).
 2. **A raw address passed to native as a `long`.** Not tested, and forbidden by the
    contract. The fence in §3.6 is the check.
 3. **Memory owned by lgj's Rust allocator.** R13 used `Arena.global()`. The
@@ -733,13 +896,16 @@ they are unverified.
    happens to the Arena close if the release returns a non-`OK` status or if the
    cleanup throws. Proposal: the cleanup records a non-`OK` status in a counter
    and never throws.
-6. **A bulk copy of the largest realistic view.** R13 used 256 MiB and saw closes
-   return after about 24-36 ms in the recorded run. What that time depends on is
-   not known: R13 did not establish that the close overlapped the copy, so the
-   time is not evidence that the close waited for an in-flight access. No bound
-   is claimed here. No test in this contract establishes overlap (T3 states it
-   does not cover it), so measuring such a bound needs access-lifecycle
-   instrumentation on the JDK side (Q9).
+6. **A bulk copy of the largest realistic view.** Now measured on one machine
+   (R14 G2, 4 vCPU Xeon, `28-beta+16-ea`). A close blocks for up to the longest
+   single in-flight access through the view. In overlap rounds the median close
+   took 2.6 to 3.7 ms at 32 MiB, 6.8 to 7.0 ms at 64 MiB, 13.6 to 13.8 ms at
+   128 MiB and 27.6 to 29.0 ms at 256 MiB (three runs; `R14-observed.txt`), close to
+   the standalone copy times. The largest realistic view size for the Bardioc runtime
+   is **still not chosen**, and no bound is claimed beyond 256 MiB. Proposal
+   (reasoning, not measured): readers copy large views in bounded chunks (for
+   example 8 MiB or less), so close latency stays bounded, because each chunk is a
+   separate scoped access.
 
 ### 5.4 One more native test, not Java
 
@@ -753,17 +919,20 @@ twice, both observed through `Weak` and the count, with no dereference.
 
 ## 6. Open questions
 
+Status words below are proposals for the owner, not decisions. Reasoning, evidence
+and re-evaluation triggers: §9.
+
 | # | Question | Who decides |
 |---|---|---|
-| Q1 | Keep `PARENT_CLOSED` for operations on a `closing` owner (the design's text, but defined for children, `abi.md:239`), or add a status such as `RESOURCE_CLOSING` (next free value after `-18`)? | Repository owner (ABI statuses) |
-| Q2 | Is `lgj_lease_count` a regular exported symbol (this proposal, because a leak must be visible in production) or a test-only counter (the design says "exposed to tests", `:2326`)? | Owner of the Bardioc design, with the ABI owner |
-| Q3 | Choice A and Choice B in §4.4. This document recommends A1 and B1. | Repository owner, at the implementation review |
-| Q4 | Should a lease carry a debug owner tag (which result, which thread) so a pinned leak can be traced? It adds state. | Implementation author, reviewed by the ABI owner |
-| Q5 | Do `RowStore.lanes[]` and `Mask.words()` move to leased views, or stay unleased with the v3 probe? This decides when `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` can close (§1.3). | Repository owner |
-| Q6 | The design forbids reclaiming a leased view by force (§3.4). Does the Bardioc runtime need a force path at shutdown, and if so, where does it live (outside lgj)? | Owner of the Bardioc design |
-| Q7 | Disable arms as feature-built libraries (this proposal) or as a test-only export (v3 C1 precedent)? | Repository maintainers |
-| Q8 | Which JDK builds must T1 and T3 pass on (§5.3 item 4)? | Repository owner |
-| Q9 | Does `closeScope0` on the pinned build stop every thread before its liveness check or after its access, as the `ScopedMemoryAccess` comment's main description says, or can the handshake "fail" as the same comment's later sentence says (§3.5)? The release ordering rests on the first. Read the HotSpot side, or ask the JDK owners. | Implementer; confirmed before the borrow symbol is added |
+| Q1 | Keep `PARENT_CLOSED` for operations on a `closing` owner (the design's text, but defined for children, `abi.md:239`), or add a status such as `RESOURCE_CLOSING`? **Status: proposal.** Under B3 there is no closing state, so no new status. If B1 is chosen: add `LGJ_ERR_RESOURCE_CLOSING = -19` (existing codes run to -18, plus -99; -19 is free) with its own Java mapping, because `PARENT_CLOSED`'s Java message says "on a mask" (`Status.java:128-131`). Compatible: an older Java maps an unknown code to `NativeCallException` "UNKNOWN_STATUS" (`Status.java:117-120`), and a minor-14 Java cannot borrow. | Repository owner (ABI statuses) |
+| Q2 | Is `lgj_lease_count` a regular exported symbol or a test-only counter (the design says "exposed to tests", `:2326`)? **Status: proposal: regular production symbol** (a pinned leak must be visible in production; read-only, no lifetime risk; cost: permanent ABI surface). Under B3 the signature is `i32 lgj_lease_count(u64 resource, u64* out_live)` (§4.1). Caveat: the count is a snapshot. | Owner of the Bardioc design, with the ABI owner |
+| Q3 | Choice A and Choice B in §4.4. **Status: proposal: A1 and B3**, B1 as acceptable fallback, B2 rejected as written. | Repository owner, at the implementation review |
+| Q4 | Should a lease carry a debug owner tag (which result, which thread) so a pinned leak can be traced? It adds state. **Status: open, owner.** Under B3 it is the only way to attribute a pinned leak to an owner. | Implementation author, reviewed by the ABI owner |
+| Q5 | Do `RowStore.lanes[]` and `Mask.words()` move to leased views, or stay unleased with the v3 probe? This decides when `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` can close (§1.3). **Status: open, owner.** | Repository owner |
+| Q6 | The design forbids reclaiming a leased view by force (§3.4). Does the Bardioc runtime need a force path at shutdown, and if so, where does it live (outside lgj)? **Status: open, owner.** | Owner of the Bardioc design |
+| Q7 | Disable arms as feature-built libraries (this proposal) or as a test-only export (v3 C1 precedent)? **Status: open, owner.** | Repository maintainers |
+| Q8 | Which JDK builds must T1 and T3 pass on (§5.3 item 4)? **Status: open, owner.** R14 and the source reading cover `28-beta+16-ea` only. | Repository owner |
+| Q9 | Does `closeScope0` on the pinned build wait for an in-flight scoped access (release after), or can the handshake "fail" (§3.5)? **Status: answered on `28-beta+16-ea`.** It waits and has no failure path (`scopedMemoryAccess.cpp:265-284` at `jdk-28+16`; R14 G1-G3). The class comment saying it can fail is stale. Close throws only when a downcall holds the view (G4). Re-open on any JDK bump: re-run R14, re-read the file. The HotSpot file is strongly corroborated as the build's, not proven (§3.5). | Implementer; re-checked on every JDK change |
 
 ---
 
@@ -774,25 +943,27 @@ it.
 
 1. **Rule 4(a), the mechanism (`:534-537`).** The design says "a close that races
    an in-flight access fails instead of completing (to be confirmed by test,
-   below)". The design should not state a mechanism yet. A test cannot confirm it
-   either way; the ordering rests on the JDK close mechanism read in source (§3.5,
-   Q9). R13 found no close that
-   failed and every access ending with `IllegalStateException`, but it did not
-   establish that any close overlapped an in-flight access, so it neither
-   confirms nor refutes the rule. Replace the rule with the requirement (the
-   release never runs while an access through the view is in progress) and leave
-   the mechanism to the JDK source reading and Q9. T3 checks only the lgj side.
+   below)". On `28-beta+16-ea` this is wrong. Corrected mechanism text the design
+   should carry, scoped to this build: *a close that races an in-flight scoped
+   access waits for that access, which is made to throw `IllegalStateException`,
+   and then completes; the cleanup, and so the lease release, runs after.* Close
+   throws only when a downcall holds the view (the session's acquire count).
+   Evidence: `scopedMemoryAccess.cpp:265-284` at `jdk-28+16` (the close waits and
+   has no failure path) and R14 G1-G4. State the requirement too: the release never
+   runs while an access through the view is in progress. Re-check on any JDK change
+   (§9).
 2. **Release-ordering test row (`:563`).** "an arena close that races an in-flight
-   read does not complete, and the lease is not released by it". This states a
-   mechanism the evidence does not support. Correct to the requirement. A test
-   cannot show overlap with an access; the row should say that T3 covers the lgj
-   side only and that the ordering itself rests on §3.5 and Q9.
+   read does not complete, and the lease is not released by it". The first half is
+   wrong on this build: the close completes, after the read has been made to throw.
+   Correct the row to: the close waits for the in-flight access and the lease is
+   released only after it. T3 part (c) now checks this for a bulk copy with R14's
+   method; its overlap inference rests on the JDK source structure (§3.5).
 3. **The untested paragraph (`:568-571`).** It says the shared-arena close
    behaviour "was not tested for this document (not established)". R13 now covers
    the single-thread behaviour (F1, F2) and the absence of successful reads after
-   the release flag (F3, F4) for one JDK build. Close behaviour against an
-   in-flight access is still not established. Update the paragraph and cite R13
-   with that limit.
+   the release flag (F3, F4) for one JDK build. R14 now covers close against an
+   in-flight bulk copy and a downcall on the same build. Update the paragraph and
+   cite R13 and R14 with the one-build limit.
 4. **Five versus six tests.** The J1 row (`:2226`) lists "the five tests of 6.5".
    The §6.5 table lists six (`:557-566`). This contract keeps six.
 5. **Raw addresses (added).** The design is silent on native code that receives a
@@ -821,8 +992,14 @@ it.
 
 - Whether `lgj_lane_borrow` taking the registry write lock costs anything under
   contention. Nothing here is measured.
-- The JDK's internal rule behind F3 and F4. The contract uses the observed
-  behaviour only.
+- The JDK's internal rule behind F3 and F4. It is now read in source
+  (`scopedMemoryAccess.cpp` at `jdk-28+16`, and `src.zip` of the pinned build, §3.5)
+  and observed by R14 on `28-beta+16-ea`. The HotSpot file is strongly corroborated
+  as the build's, not proven. The exact HotSpot commit of the build was not
+  fetched.
+- That B3 works in the real `RwLock` registry. Only a one-mutex model was run
+  (`valhalla-lab/lease-model/`).
+- A scalar access overlapping a close. R14 covers a bulk copy and a downcall.
 - Behaviour on a JDK build other than `28-beta+16-ea`.
 - That a feature-built native library can be loaded by the Java test runner. The
   existing `-Dlgj.oldlibrary` route suggests it can; it was not exercised here.
@@ -830,3 +1007,141 @@ it.
   predate later edits. The citations above are to the files as read on this
   branch. For example v3 cites `registry.rs:331-338` for the generation bump,
   while `close` is now at `registry.rs:322-345`.
+
+---
+
+## 9. Decision record (2026-11-20)
+
+For later sessions. Every recommendation here is a **proposal for the owner, not a
+decision**. Each item gives the options, what was tested or read, the result, the
+balanced recommendation and who must accept it, caveats, and when to re-evaluate.
+
+### 9.1 Q9: does close fail or wait against an in-flight scoped access?
+
+- *Options.* Close fails (the stale `ScopedMemoryAccess` class comment and the
+  design's rule 4(a)); close waits and completes.
+- *Done.* Read `scopedMemoryAccess.cpp` at `jdk-28+16` (lines 133-139, 140-258,
+  265-284) and the pinned build's `src.zip` (`SharedSession.java:83-93`,
+  `Unsafe.java:1000-1010`, `ScopedMemoryAccess.java:63`). Ran R14
+  (`valhalla-lab/reproducers/R14_CloseWaitsForInFlightAccess.java`, output
+  `R14-observed.txt`, three runs).
+- *Result.* Close waits (G1: 240 of 240 overlap rounds, no poison, every close
+  returned; G2: close duration tracks copy size; G3: the oracle can fail, 10 of 10
+  red rounds). Close throws only when a downcall holds the view (G4, 5 of 5).
+- *Recommendation.* Closed for `28-beta+16-ea`. Carry the corrected mechanism text
+  of §7 item 1 into the design. Accepted by: the owner of the Bardioc design (text
+  change); the implementer (reliance).
+- *Caveats.* The HotSpot file is strongly corroborated as the build's, not proven
+  (§3.5). The overlap signature uses JDK source structure. One machine, one build,
+  bulk copy and one libc downcall only.
+- *Re-evaluate when.* Any JDK bump; a change of vendor build; a view access path
+  that is not `MemorySegment.copy` or a plain scoped read; JVMTI agents in
+  production (with agents loaded the stack walk takes another path,
+  `scopedMemoryAccess.cpp:58-69` and `:83-89`; not tested).
+
+### 9.2 Choice B: what close does while a lease is live
+
+- *Options.* B1 closing state in the slot; B2 bump at close, entry left in the
+  slot; B3 close unchanged, leases hold `Arc` clones.
+- *Done.* Executable model `valhalla-lab/lease-model/` (6 tests, all pass). Code
+  facts in §4.4 (five lock sites; 7, 13 and 20 call sites).
+- *Result.* All variants reclaim exactly once in all four orders and under a
+  2000-iteration concurrent run, and make a never-closed view a visible pinned
+  leak. B2 as written is wrong: a handle forged with the slot's current generation
+  resolves after close with a live lease, under B2 only. B3 needs no slot state and
+  no change at the 40 call sites.
+- *Recommendation.* B3; B1 as fallback; B2 rejected as written (§4.4). Accepted by:
+  the repository owner, at the implementation review, with the owner of the Bardioc
+  design because B3 departs from the design's table (`:527`).
+- *Caveats.* One-mutex model, not the real `RwLock` registry. B3 costs: no per-owner
+  `closing` visibility; a closed owner's count is global only; slot-based accounting
+  under-reports pinned memory.
+- *Re-evaluate when.* Bardioc needs per-owner `closing` visibility (then B1); the
+  registry moves off the `RwLock` or to a lock-free word (§3.7); a new registry
+  lock site or resolve path appears; slot accounting becomes a memory-limit input.
+
+### 9.3 Q1: the status for operations on a closing owner
+
+- *Options.* Reuse `PARENT_CLOSED`; add `LGJ_ERR_RESOURCE_CLOSING = -19`; none.
+- *Done.* Read `Status.java:117-131` and the status list in `abi.md` (codes to -18,
+  plus -99).
+- *Result.* `PARENT_CLOSED` maps to `ClosedResourceException` whose message says "on
+  a mask whose parent resource is closed", which is misleading for an owner's own
+  handle. An unknown code maps to `NativeCallException` "UNKNOWN_STATUS".
+- *Recommendation.* Under B3 no new status (closed owner is `INVALID_HANDLE`). Under
+  B1 add `-19` with its own Java mapping; an older Java sees UNKNOWN_STATUS, and a
+  minor-14 Java cannot borrow. Accepted by: the repository owner (ABI statuses).
+- *Re-evaluate when.* B1 is chosen; a second status is requested for the same
+  state.
+
+### 9.4 Q2: `lgj_lease_count` as a production symbol
+
+- *Options.* Regular exported symbol; test-only counter.
+- *Done.* Reasoning only, against `:2326` of the design.
+- *Result.* Not measured. A pinned leak is only useful if production can see it.
+- *Recommendation.* Regular symbol, read-only; under B3
+  `i32 lgj_lease_count(u64 resource, u64* out_live)`: resource 0 is process-wide, a
+  live owner its own count, a closed owner `INVALID_HANDLE`. Accepted by: the owner
+  of the Bardioc design with the ABI owner.
+- *Caveats.* Permanent ABI surface. The count is a snapshot; assert on it only after
+  quiescence.
+- *Re-evaluate when.* The ABI owner objects to the surface; B1 is chosen (then the
+  `out_state` form of §4.1).
+
+### 9.5 Choice A: one-step or two-step borrow
+
+- *Options.* A1 `lgj_lane_borrow`; A2 acquire then describe.
+- *Done.* The same model.
+- *Result.* Under every B variant, a two-step borrow can leave a lease live while
+  describe is refused, so Java needs an error-path release. A1 has no such state.
+- *Recommendation.* Keep A1. Accepted by: the repository owner.
+- *Re-evaluate when.* Reuse of the describe code unchanged becomes the priority.
+
+### 9.6 Close latency
+
+- *Options.* Accept unbounded close latency; bound it by chunked reads.
+- *Done.* R14 G2.
+- *Result.* A close blocks for up to the longest single in-flight access: about
+  27 ms per 256 MiB copy on this machine.
+- *Recommendation (reasoning, not measured).* Readers copy large views in chunks of
+  8 MiB or less, so each chunk is a separate scoped access and close latency stays
+  bounded. Accepted by: the owner of the Bardioc design (reader contract).
+- *Caveats.* One machine. The chunk size is a proposal, not a measurement. The
+  largest realistic view size is not chosen.
+- *Re-evaluate when.* A view larger than 256 MiB is planned; a latency requirement
+  on close is stated; the copy path changes (for example a vectorised native copy).
+
+### 9.7 §3.6: raw addresses and downcalls
+
+- *Options.* Handles only; allow segments in downcalls; allow raw `long`.
+- *Done.* R14 G4.
+- *Result.* A segment in a downcall is protected by the acquire count (close throws,
+  cleanup waits). A raw `long` is not protected.
+- *Recommendation.* Keep the handles-only rule. The result object's `close()` may
+  throw `IllegalStateException` after a violation and must propagate it. Accepted
+  by: the repository owner.
+- *Re-evaluate when.* An lgj native function starts to accept an address.
+
+### 9.8 Identity reading (cross-reference only)
+
+The owner wrote "indexed recorder". Reading it as "indexed reorder" is corroborated
+by Lance-graph's own seal design: `docs/lotus/rp-seal-v1/B1.md:234-243` ("completion
+order is fixed to canonical order at WRITE time ... Any locality-driven physical
+reordering must happen after the seal, as a separate compaction pass") and
+`A3.md:199-201` ("binary copy is strictly file concatenation, not permutation").
+"Recorder" has no matching concept in the code. Owner confirmation is still
+requested; the risk is low. This is not a subject of this contract.
+
+### 9.9 How to re-run the evidence
+
+- R14, from `valhalla-lab/reproducers/` (commands from the file's header):
+  `javac --release 28 --enable-preview -d out R14_CloseWaitsForInFlightAccess.java`
+  then `java --enable-preview --enable-native-access=ALL-UNNAMED -cp out
+  R14_CloseWaitsForInFlightAccess`. The recorded runs used `-Xmx2g`. Compare with
+  `R14-observed.txt`.
+- R13: its own header in `R13_SharedArenaCloseVersusRead.java`.
+- The Choice B model: `cargo test --manifest-path valhalla-lab/lease-model/Cargo.toml`.
+- The HotSpot source: `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
+  `jdk-28+16` (commit `f0747596dea3e6a1c852dc227a0eb10ddbf5b015`), lines 133-284. On
+  a new JDK read the file at that JDK's tag, and compare the build's `src.zip` copies
+  of `SharedSession.java` and `MemorySessionImpl.java` with the tag's.
