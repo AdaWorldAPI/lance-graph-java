@@ -19,7 +19,7 @@ G1/G2 close vs in-flight copy, 20 rounds per size, close 1.0 ms after the reader
   ok    close duration in overlap rounds grows with copy size: [3.764037, 9.400732, 14.941277, 28.821573] ms
 G3 sensitivity: release without close, during the copy, 10 rounds
   rounds with the copy confirmed in progress when the release ran: 10 (inconclusive 0); poison reached the destination in 10/10
-  ok    the oracle detects a release that runs while the copy is in progress
+  ok    in every confirmed round, the oracle detected the release (sensitivity for these timings only)
 G4 view passed to a downcall (memcpy), close during the downcall
   closes that threw "Session is acquired" (downcall holding the view): 5/5; progress probe classified 5 as in progress (inconclusive 0), of those close threw 5, succeeded 0; cleanup ran at an acquired-throw: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
   ok    a close while a downcall holds the view throws "Session is acquired"

@@ -287,7 +287,7 @@ public class R14_CloseWaitsForInFlightAccess {
                 + confirmed + " (inconclusive " + inconclusive + "); poison reached the destination in "
                 + poison + "/" + confirmed);
         check(confirmed > 0 && poison == confirmed,
-                "the oracle detects a release that runs while the copy is in progress");
+                "in every confirmed round, the oracle detected the release (sensitivity for these timings only)");
     }
 
     // G4 ----------------------------------------------------------------------------------------
