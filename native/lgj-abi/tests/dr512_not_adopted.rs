@@ -9,11 +9,14 @@
 //! (the lane on Lance-backed memory against ndarray's
 //! `all_512_codes_agree_in_codec9_and_lut9`) to be written in the same change.
 //!
-//! The scan covers non-test production code: files under a `tests` directory
-//! are skipped, every `#[cfg(test)] mod` is removed up to its closing brace
-//! (scanning resumes after it), and comment-only lines are ignored (the documentation may name these
-//! words; only code may not use them). The anti-vacuity half asserts the scan
-//! really saw `ndarray::simd` in use.
+//! The scan covers EVERY Rust file under `src/`, test modules and test
+//! directories included, and ignores only comment-only lines (documentation
+//! may name these words; code may not use them). It deliberately does not try
+//! to tell test code from production code: that needs a Rust lexer (braces in
+//! string literals, trailing comments), and no code under `src/` uses these
+//! names today, so the stricter rule costs nothing. A test that later needs
+//! one of them is the moment to write the parity work, too. The anti-vacuity
+//! half asserts the scan really saw `ndarray::simd` in use.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,9 +27,6 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
         if p.is_dir() {
-            if p.file_name().is_some_and(|n| n == "tests") {
-                continue;
-            }
             rust_files(&p, out);
         } else if p.extension().is_some_and(|x| x == "rs") {
             out.push(p);
@@ -34,52 +34,11 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Production code lines of `text`: every `#[cfg(test)]` directly followed by
-/// a `mod` is removed up to the brace that closes that module (or only its
-/// own line for `mod name;`), and scanning RESUMES after it, so production
-/// code placed below a test module is still seen. Comment-only lines are
-/// dropped. Braces are counted textually, which is exact for this crate's
-/// formatted sources (a test module containing an unbalanced brace inside a
-/// string literal would end the skip early or late; the first makes the fence
-/// stricter, and the regression tests below pin the ordinary shapes).
-fn production_code(text: &str) -> Vec<&str> {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < lines.len() {
-        let opens_test_mod = lines[i].trim() == "#[cfg(test)]"
-            && lines
-                .get(i + 1)
-                .is_some_and(|n| n.trim_start().starts_with("mod "));
-        if opens_test_mod {
-            let mut depth = 0i64;
-            let mut opened = false;
-            i += 1;
-            while i < lines.len() {
-                for ch in lines[i].chars() {
-                    match ch {
-                        '{' => {
-                            depth += 1;
-                            opened = true;
-                        }
-                        '}' => depth -= 1,
-                        _ => {}
-                    }
-                }
-                let declaration_only = !opened && lines[i].trim_end().ends_with(';');
-                i += 1;
-                if (opened && depth <= 0) || declaration_only {
-                    break;
-                }
-            }
-            continue;
-        }
-        if !lines[i].trim_start().starts_with("//") {
-            out.push(lines[i]);
-        }
-        i += 1;
-    }
-    out
+/// Code lines of `text`: everything except comment-only lines.
+fn code_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect()
 }
 
 fn scan() -> (Vec<String>, usize) {
@@ -90,7 +49,7 @@ fn scan() -> (Vec<String>, usize) {
     let (mut violations, mut simd_paths) = (Vec::new(), 0usize);
     for f in &files {
         let text = fs::read_to_string(f).unwrap();
-        for (i, line) in production_code(&text).iter().enumerate() {
+        for (i, line) in code_lines(&text).iter().enumerate() {
             simd_paths += line.matches("ndarray::simd::").count();
             for word in NOT_ADOPTED {
                 if line.contains(word) {
@@ -122,35 +81,46 @@ fn lgj_calls_no_simd_stride_lut9_lut_u8_or_codec9_so_dr512_parity_is_not_applica
     );
     let kernels =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/kernels.rs")).unwrap();
-    assert!(production_code(&kernels)
+    assert!(code_lines(&kernels)
         .iter()
         .any(|l| l.contains("ndarray::simd::eq_u32_strided_to_mask")));
 }
 
 fn uses_not_adopted(text: &str) -> bool {
-    production_code(text)
+    code_lines(text)
         .iter()
         .any(|l| NOT_ADOPTED.iter().any(|w| l.contains(w)))
 }
 
 #[test]
-fn production_code_below_a_test_module_is_still_scanned() {
-    let text = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        let _ = 1;\n    }\n}\nuse ndarray::simd_stride;\n";
-    assert!(uses_not_adopted(text));
-    // Same shape with an out-of-line test module declaration.
-    let text = "#[cfg(test)]\nmod tests;\nuse ndarray::simd_stride::lut9;\n";
-    assert!(uses_not_adopted(text));
-    // And with two test modules, the forbidden use between them.
-    let text = "#[cfg(test)]\nmod a {\n}\nfn f() { lut_u8(); }\n#[cfg(test)]\nmod b {\n}\n";
-    assert!(uses_not_adopted(text));
+fn a_use_anywhere_in_code_is_reported_whatever_surrounds_it() {
+    // Below an inline test module.
+    assert!(uses_not_adopted(
+        "#[cfg(test)]\nmod tests {\n    fn t() {}\n}\nuse ndarray::simd_stride;\n"
+    ));
+    // Below a test module whose body holds a brace in a string literal.
+    assert!(uses_not_adopted(
+        "#[cfg(test)]\nmod tests {\n    fn t() { let _ = \"{\"; }\n}\nuse ndarray::simd_stride;\n"
+    ));
+    // Below an out-of-line declaration with a trailing comment.
+    assert!(uses_not_adopted(
+        "#[cfg(test)]\nmod tests; // unit tests\nuse ndarray::simd_stride::lut9;\n"
+    ));
+    // Inside a test module: also reported, by design.
+    assert!(uses_not_adopted(
+        "#[cfg(test)]\nmod tests {\n    fn t() { lut_u8(); }\n}\n"
+    ));
+    // After code on the same line as a trailing comment.
+    assert!(uses_not_adopted("let x = codec9::f(); // note\n"));
 }
 
 #[test]
-fn an_identifier_only_inside_a_test_module_or_a_comment_is_not_a_violation() {
-    let text = "fn a() {}\n#[cfg(test)]\nmod tests {\n    use ndarray::simd_stride::lut9;\n    fn t() {\n        lut9();\n    }\n}\nfn b() {}\n";
-    assert!(!uses_not_adopted(text));
-    assert_eq!(production_code(text), vec!["fn a() {}", "fn b() {}"]);
+fn a_name_in_a_comment_only_line_is_not_a_violation() {
     assert!(!uses_not_adopted(
-        "// codec9 is named in prose only\nfn a() {}\n"
+        "// codec9 is named in prose only\n    /// lut9 too\n//! simd_stride\nfn a() {}\n"
     ));
+    assert_eq!(
+        code_lines("// c\nfn a() {}\n    // d\nfn b() {}\n"),
+        vec!["fn a() {}", "fn b() {}"]
+    );
 }

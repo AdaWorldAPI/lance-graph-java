@@ -63,6 +63,70 @@ fn pairs(row0: &[u8; 16]) -> Vec<(&'static str, [u8; 16], [u8; 16])> {
     ]
 }
 
+/// B1a. Each of the sixteen positions in isolation. Care is 0xFF on exactly one
+/// byte k. The classid's bytes 1..3 are zero in every generated row, so the
+/// other fixtures never constrain one of them alone; here each position is
+/// the only cared byte. For every facet and every k: the kernel equals the
+/// byte-wise oracle and row 0 matches; flipping a cared bit of the pattern
+/// stops row 0 matching (and still equals the oracle); flipping a bit of an
+/// uncared byte leaves the mask unchanged.
+#[test]
+fn each_of_the_sixteen_positions_is_matched_in_isolation() {
+    let n = 257u64;
+    let store = RowStore::generate_in(n, SEED, RowLayout::AosRows).unwrap();
+    let bytes = store.as_bytes();
+    let run = |first: usize, pattern: &[u8; 16], care: &[u8; 16]| {
+        let mut got = words(n);
+        ndarray::simd::ternary_match_strided16_to_mask(
+            bytes,
+            first,
+            ROW_BYTES as usize,
+            n as usize,
+            pattern,
+            care,
+            &mut got,
+        );
+        let mut want = words(n);
+        for row in 0..n as usize {
+            let o = first + row * ROW_BYTES as usize;
+            if (0..16).all(|j| (bytes[o + j] ^ pattern[j]) & care[j] == 0) {
+                want[row / 64] |= 1u64 << (row % 64);
+            }
+        }
+        assert_eq!(got, want, "first={first} care={care:?}: kernel vs oracle");
+        got
+    };
+    for f in 0..ROW_FACETS {
+        let first = (u64::from(f) * FACET_BYTES) as usize;
+        let row0: [u8; 16] = bytes[first..first + 16].try_into().unwrap();
+        for k in 0..16usize {
+            let mut care = [0u8; 16];
+            care[k] = 0xFF;
+            let base = run(first, &row0, &care);
+            assert_eq!(
+                base[0] & 1,
+                1,
+                "facet={f} k={k}: row 0 matches its own byte"
+            );
+            let mut flipped = row0;
+            flipped[k] ^= 0x01;
+            let miss = run(first, &flipped, &care);
+            assert_eq!(
+                miss[0] & 1,
+                0,
+                "facet={f} k={k}: a cared bit flip unmatches row 0"
+            );
+            let mut uncared = row0;
+            uncared[(k + 1) % 16] ^= 0x80;
+            assert_eq!(
+                run(first, &uncared, &care),
+                base,
+                "facet={f} k={k}: an uncared bit flip changes nothing"
+            );
+        }
+    }
+}
+
 /// B1. `ternary_match_strided16_to_mask` over the ROW-MAJOR store: every facet
 /// (`first_offset = f*16`, `stride = 512`), n in {16, 257, 4096}, four
 /// (pattern, care) pairs, against a byte-wise oracle over bytes 0..16. One
