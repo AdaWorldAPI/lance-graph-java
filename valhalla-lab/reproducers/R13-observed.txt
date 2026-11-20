@@ -10,23 +10,22 @@ F1/F2 single thread: close, then access; cleanup count
   ok    second close does not run the cleanup again (count=1)
   ok    the pinned memory itself is untouched (a view close frees nothing)
 F3 concurrent scalar reads vs close, 200 rounds
-  reads=7428543 readerSawISE=200/200 closeThrew=0 cleanups=200
+  reads=7037025 readerSawISE=200/200 closeThrew=0 cleanups=200
   ok    no read that began after the release returned a value (violations=0)
   ok    every reader ended by an IllegalStateException
   ok    each round ran the cleanup once, unless its close threw (cleanups=200, closeThrew=0)
 F4 close while another thread is inside one bulk copy of 256 MiB
-  round 0: copy threw ISE, close returned after 154 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 1: copy threw ISE, close returned after 23490 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 2: copy threw ISE, close returned after 24023 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 3: copy threw ISE, close returned after 24679 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 4: copy threw ISE, close returned after 21146 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 5: copy threw ISE, close returned after 22191 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 6: copy threw ISE, close returned after 25850 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 7: copy threw ISE, close returned after 24993 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 8: copy threw ISE, close returned after 22604 us, close returned after the copy ended, cleanup ran after the copy ended
-  round 9: copy threw ISE, close returned after 23864 us, close returned after the copy ended, cleanup ran after the copy ended
-  summary: copyCompleted=0 copyThrew=10 closeThrew=0 closeReturnedBeforeCopyEnded=0 cleanupBeforeCopyEnded=0 of 10
-  ok    the cleanup never ran before the in-flight copy ended (cleanupBeforeCopyEnded=0)
-  ok    observed: close does not fail; it waits, and the in-flight copy is aborted with IllegalStateException (closeThrew=0, copyThrew=10)
-  ok    the cleanup never ran before a copy that then COMPLETED (cleanupBeforeCopyEnded=0, copyCompleted=0)
+  round 0: copy threw ISE, close returned after 38165 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 1: copy threw ISE, close returned after 26848 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 2: copy threw ISE, close returned after 25974 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 3: copy threw ISE, close returned after 20674 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 4: copy threw ISE, close returned after 24368 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 5: copy threw ISE, close returned after 25874 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 6: copy threw ISE, close returned after 24690 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 7: copy threw ISE, close returned after 25686 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 8: copy threw ISE, close returned after 26472 us, close returned after the copy ended, cleanup ran after the copy ended
+  round 9: copy threw ISE, close returned after 23081 us, close returned after the copy ended, cleanup ran after the copy ended
+  summary: copyCompleted=0 copyThrew=10 closeThrew=0 closeReturnedBeforeCopyEnded=0 cleanupStampBeforeCopyEndStamp=0 of 10 (timings: observations only, not ordering evidence)
+  ok    no copy that started after the release completed normally (completedAfterRelease=0)
+  ok    observed: close does not fail; the in-flight copy is aborted with IllegalStateException (closeThrew=0, copyThrew=10)
 RESULT: all observations as expected

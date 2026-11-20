@@ -174,16 +174,29 @@ Arena through `MemorySegment.ofAddress(a).reinterpret(size, arena, cleanup)`
 | F1 | After the shared arena is closed, a read through the view throws `IllegalStateException`. | `R13-observed.txt:8` |
 | F2 | The cleanup runs exactly once, at close, never before. A second close throws `IllegalStateException` and does not run the cleanup again. The backing memory is untouched. | `:6-11` |
 | F3 | 200 rounds, one reader doing scalar reads, main thread closing: 7,428,543 reads; zero reads that began after the cleanup ran returned a value; every reader ended with `IllegalStateException`; close never threw. | `:12-16` |
-| F4 | 10 rounds, close while another thread is inside one 256 MiB `MemorySegment.copy` out of the view: close never threw; it returned after about 21-26 ms (once 0.15 ms); in every round the in-flight copy was aborted with `IllegalStateException`; the cleanup ran only after the copy had ended. | `:17-31` |
+| F4 | 10 rounds, close while another thread is inside one 256 MiB `MemorySegment.copy` out of the view: close never threw; it returned after about 21-26 ms (once 0.15 ms); in every round the in-flight copy was aborted with `IllegalStateException`; no copy that started after the release completed normally. The timings put the cleanup after the copy's end in every round, but that is an observation only (see below). | `:17-31` |
 
 F4's summary line: `copyCompleted=0 copyThrew=10 closeThrew=0
-closeReturnedBeforeCopyEnded=0 cleanupBeforeCopyEnd=0` (`:28`).
+closeReturnedBeforeCopyEnded=0 cleanupStampBeforeCopyEndStamp=0 of 10`
+(`R13-observed.txt`).
 
-Two limits on how to read F3 and F4. The timestamps in F4 order the cleanup
-against the copy's end only as `System.nanoTime` records them
-(`R13_...java:153-188`). That is an observation, not a proof of the JDK's
-internal rule. And the abort of a bulk copy means the destination holds a
-partial result.
+Three limits on how to read F3 and F4.
+
+- **The F4 timings are not ordering evidence.** The reader takes its end stamp
+  after the copy returns, so a reader descheduled between the return and the
+  stamp records a late end, and a cleanup that legally ran after the access had
+  stopped then looks early. Codex reproduced exactly that false report on a
+  different JDK (25.0.2) during review of this document. R13 therefore prints
+  the timings and asserts nothing on them.
+- **The ordering evidence is one-directional.** The cleanup sets a flag, and the
+  reader reads that flag before it starts an access. An access that began with
+  the flag already set and still returned a value would mean the release ran
+  while the view was readable. F3 checks this per scalar read (0 of 7,037,025
+  in the recorded run) and F4 per bulk copy (no copy that started after the
+  release completed normally). This shows no read began after the release and
+  succeeded. It does not show the reverse, and it is not a proof of the JDK's
+  internal rule.
+- **An aborted bulk copy leaves a partial destination.**
 
 What R13 did **not** test is listed in §5.3 as prerequisites.
 
@@ -323,13 +336,14 @@ Rules:
 **Observed mechanism on this JDK (R13), which replaces the design's wording.**
 
 - Closing the shared Arena while another thread is inside an access does **not**
-  fail. The close completes after the in-flight access has stopped (F4, close
-  returned after about 21-26 ms and after the copy ended).
+  fail. The close returned after about 21-26 ms, and in every round the
+  in-flight copy had been aborted (F4).
 - The **access** fails: the in-flight read, including a bulk copy, ends with
   `IllegalStateException` (F4, F3).
-- The cleanup, which is the lease release, ran only after the in-flight access
-  had ended, in every observed round (F4: `cleanupBeforeCopyEnd=0`). No read that
-  began after the cleanup ran returned a value (F3).
+- No read that began after the cleanup (the lease release) had run returned a
+  value: none of the scalar reads in F3, and no bulk copy in F4. The F4 timings
+  also put the cleanup after the copy's end, but they are not evidence of the
+  order (§2.4).
 
 The property the contract needs holds: the release does not run while an access
 through the view is in progress. The mechanism differs from the design's rule 4(a)
@@ -517,8 +531,9 @@ reads.
   (200 rounds).
 - *Green.* After the owner close: state `closing`, count 1, `lgj_resource_info`
   returns `PARENT_CLOSED`, every read returns the expected value. After the Arena
-  close: the reader ends with `IllegalStateException`; no read that began after the
-  cleanup stamp returned a value; count 0; owner handle `INVALID_HANDLE`.
+  close: the reader ends with `IllegalStateException`; no read that began with the
+  cleanup's flag already set returned a value (the flag is read before each
+  read, as in R13 F3; no timestamps); count 0; owner handle `INVALID_HANDLE`.
 - *Red.* Run on the `lease-pin-off` library. Borrow does not pin, so the owner
   close goes straight to reclaimed. The assertions "state is `closing`, count is
   1" fail with state `INVALID_HANDLE` and count 0. The reader reads leaked,
@@ -552,14 +567,17 @@ reads.
 - *Construction.* Two parts.
   (a) The R13 F4 shape on a real borrowed view: one thread inside one long
   `MemorySegment.copy` out of a view as large as the store allows; the main thread
-  closes the view's Arena; the cleanup records a timestamp and releases the lease.
+  closes the view's Arena; the cleanup sets a flag and releases the lease, and the
+  reader reads that flag immediately before it starts each access.
   Ten rounds. Immediately before `arena.close()` read the count; immediately after
   it returns read the count.
   (b) A source fence: `Engine.leaseRelease` has exactly one call site, inside the
   borrow wrapper's cleanup lambda, and the lease handle is not returned or stored.
   This is the `DoctrineFenceTest` pattern (`epoch-recheck-v3.md:260-268`).
-- *Green.* In every round the count is 1 before the close and 0 after. The cleanup
-  stamp is not earlier than the copy's end stamp. A copy that threw
+- *Green.* In every round the count is 1 before the close and 0 after. No access
+  that began with the flag already set returned a value (timestamps are not used:
+  a stamp taken after an access returns can be late, so it cannot order the access
+  against the release). A copy that threw
   `IllegalStateException` is treated as partial and its destination is not used. The
   fence finds one call site.
 - *Red.* A test-source variant of the borrow wrapper that releases **before**

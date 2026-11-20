@@ -559,8 +559,10 @@ never freed; only the view is bound to the shared Arena through
 - **F4** — 10 rounds of close while another thread is inside one 256 MiB
   `MemorySegment.copy`: close never threw, returned after about 21-26 ms (once
   0.15 ms); the in-flight copy was aborted with `IllegalStateException` in every
-  round (so its destination is partly written); the cleanup ran only after the copy
-  had ended.
+  round (so its destination is partly written); no copy that started after the
+  release completed normally. The timings put the cleanup after the copy's end,
+  but a stamp taken after an access returns can be late, so they are printed as
+  observations and not asserted.
 
 So on this build the close waits and the access fails. It is not the close that
 fails.

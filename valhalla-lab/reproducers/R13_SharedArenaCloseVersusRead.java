@@ -11,6 +11,14 @@
 //   F4  what close does when another thread is inside a long bulk access (does close wait,
 //       fail, or complete while the bulk access is still reading?).
 //
+// What is and is not evidence. A timestamp a thread takes AFTER an access returns can be late
+// (the thread can be descheduled between the return and the stamp), so comparing such a stamp
+// with the cleanup's stamp says nothing reliable about the order of the access and the release.
+// F4 prints those timings as observations only and asserts nothing on them. The ordering
+// evidence is one-directional and sound: a flag the cleanup sets, read by the reader BEFORE it
+// starts an access. If the flag was already set and the access still returned a value, the
+// release ran while the view was readable (F3 per scalar read; F4 per bulk copy).
+//
 // The backing memory stands in for lgj's native, lease-pinned memory: it is allocated from
 // Arena.global(), so it is NEVER freed here. Only the VIEW is bound to the shared arena. That is
 // exactly the shape the contract prescribes (native memory pinned by a lease; the Java view's
@@ -149,6 +157,7 @@ public class R13_SharedArenaCloseVersusRead {
         long[] heap = new long[(int) (bytes / 8)];
         final int rounds = 10;
         int copyOk = 0, copyIse = 0, closeThrew = 0, closeBeforeCopyEnd = 0, cleanupBeforeCopyEnd = 0;
+        int completedAfterRelease = 0;
         for (int round = 0; round < rounds; round++) {
             AtomicLong cleanupAt = new AtomicLong(-1);
             Arena arena = Arena.ofShared();
@@ -156,10 +165,12 @@ public class R13_SharedArenaCloseVersusRead {
                     .reinterpret(bytes, arena, s -> cleanupAt.set(System.nanoTime()));
             AtomicLong copyEnd = new AtomicLong();
             AtomicBoolean ok = new AtomicBoolean(), ise = new AtomicBoolean();
+            AtomicBoolean releasedBeforeStart = new AtomicBoolean();
             CountDownLatch started = new CountDownLatch(1);
             Thread reader = new Thread(() -> {
                 started.countDown();
                 try {
+                    releasedBeforeStart.set(cleanupAt.get() >= 0);
                     MemorySegment.copy(view, ValueLayout.JAVA_LONG, 0, heap, 0, heap.length);
                     ok.set(true);
                 } catch (IllegalStateException e) {
@@ -180,6 +191,7 @@ public class R13_SharedArenaCloseVersusRead {
             if (threw) closeThrew++;
             if (!threw && closeEnd < copyEnd.get()) closeBeforeCopyEnd++;
             if (cleanupAt.get() >= 0 && cleanupAt.get() < copyEnd.get()) cleanupBeforeCopyEnd++;
+            if (ok.get() && releasedBeforeStart.get()) completedAfterRelease++;
             System.out.println("  round " + round + ": copy " + (ok.get() ? "completed" : ise.get() ? "threw ISE" : "?")
                     + ", close " + (threw ? "threw ISE" : "returned")
                     + " after " + (closeEnd - closeStart) / 1000 + " us"
@@ -189,17 +201,15 @@ public class R13_SharedArenaCloseVersusRead {
         }
         System.out.println("  summary: copyCompleted=" + copyOk + " copyThrew=" + copyIse
                 + " closeThrew=" + closeThrew + " closeReturnedBeforeCopyEnded=" + closeBeforeCopyEnd
-                + " cleanupBeforeCopyEnded=" + cleanupBeforeCopyEnd + " of " + rounds);
+                + " cleanupStampBeforeCopyEndStamp=" + cleanupBeforeCopyEnd + " of " + rounds
+                + " (timings: observations only, not ordering evidence)");
         // The one property the lease contract needs: the release (cleanup) never runs while a
         // read through the view is still in progress. A copy that completed after the cleanup
         // ran would be exactly that.
-        check(cleanupBeforeCopyEnd == 0, "the cleanup never ran before the in-flight copy ended "
-                + "(cleanupBeforeCopyEnded=" + cleanupBeforeCopyEnd + ")");
+        check(completedAfterRelease == 0, "no copy that started after the release completed "
+                + "normally (completedAfterRelease=" + completedAfterRelease + ")");
         check(closeThrew == 0 && copyIse == rounds,
-                "observed: close does not fail; it waits, and the in-flight copy is aborted with "
+                "observed: close does not fail; the in-flight copy is aborted with "
                 + "IllegalStateException (closeThrew=" + closeThrew + ", copyThrew=" + copyIse + ")");
-        check(cleanupBeforeCopyEnd == 0 || copyOk == 0,
-                "the cleanup never ran before a copy that then COMPLETED (cleanupBeforeCopyEnded="
-                + cleanupBeforeCopyEnd + ", copyCompleted=" + copyOk + ")");
     }
 }
