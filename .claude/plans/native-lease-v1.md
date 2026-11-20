@@ -737,7 +737,9 @@ they are unverified.
    return after about 24-36 ms in the recorded run. What that time depends on is
    not known: R13 did not establish that the close overlapped the copy, so the
    time is not evidence that the close waited for an in-flight access. No bound
-   is claimed here; T3's overlap evidence is the prerequisite for measuring one.
+   is claimed here. No test in this contract establishes overlap (T3 states it
+   does not cover it), so measuring such a bound needs access-lifecycle
+   instrumentation on the JDK side (Q9).
 
 ### 5.4 One more native test, not Java
 
@@ -779,11 +781,12 @@ it.
    establish that any close overlapped an in-flight access, so it neither
    confirms nor refutes the rule. Replace the rule with the requirement (the
    release never runs while an access through the view is in progress) and leave
-   the mechanism to T3.
+   the mechanism to the JDK source reading and Q9. T3 checks only the lgj side.
 2. **Release-ordering test row (`:563`).** "an arena close that races an in-flight
    read does not complete, and the lease is not released by it". This states a
-   mechanism the evidence does not support. Correct to the requirement, and add
-   that the test must show overlap (T3).
+   mechanism the evidence does not support. Correct to the requirement. A test
+   cannot show overlap with an access; the row should say that T3 covers the lgj
+   side only and that the ordering itself rests on §3.5 and Q9.
 3. **The untested paragraph (`:568-571`).** It says the shared-arena close
    behaviour "was not tested for this document (not established)". R13 now covers
    the single-thread behaviour (F1, F2) and the absence of successful reads after
