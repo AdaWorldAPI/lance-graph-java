@@ -399,24 +399,27 @@ runs, all green, same JDK `28-beta+16-ea`).
   them. A release after the copy's last read is not detected and leaves no access
   to protect. A clean destination is evidence for the timings the oracle can see,
   not proof for every timing.
-- *G1.* 32, 64, 128 and 256 MiB, 20 rounds each, three runs (recorded set): 238 of
-  240 rounds overlapped; in 2 rounds of one run the 32 MiB copy ended before the
-  close (no overlap, counted separately); 0 carried poison; every close returned
-  normally and ran the cleanup once.
+- *G1.* 32, 64, 128 and 256 MiB, 20 rounds each, three runs (recorded set): 240 of
+  240 rounds overlapped, 0 carried poison, every close returned normally and ran the
+  cleanup once. An earlier set of three runs had 238 of 240: in 2 rounds the 32 MiB
+  copy ended before the close (no overlap, counted separately). Overlap at the
+  smallest size is therefore not guaranteed by the 1 ms delay.
 - *G2.* In overlap rounds the median close duration grows with the size (run 1:
-  3.9, 8.1, 15.0, 28.3 ms against standalone copy medians of 3.3, 6.7, 13.2,
-  26.8 ms; `R14-observed.txt`). The close waits for the in-flight access. These
+  3.8, 9.4, 14.9, 28.8 ms against standalone copy medians of 2.7, 7.1, 14.8,
+  26.3 ms; `R14-observed.txt`). The close waits for the in-flight access. These
   medians are observations on one machine and do not bound close latency.
 - *G3 (red arm, sensitivity).* A "release" from another thread with no close, run
   only once the copy was confirmed in progress (first destination word written,
   last not yet), put poison in the destination in 10 of 10 confirmed rounds per
   run (0 inconclusive). The oracle can fail.
 - *G4.* A view passed as a segment to a downcall (libc `memcpy`, 256 MiB), close
-  attempted while the downcall was confirmed in progress (first destination word
-  written before the close, last still unwritten after it): the close threw
-  `IllegalStateException` in 5 of 5 confirmed rounds per run (0 inconclusive) and
-  the cleanup did not run during it. A close after the downcall succeeded and ran
-  the cleanup once.
+  attempted while the downcall runs: the close threw `IllegalStateException`
+  "Session is acquired by 1 clients" in 5 of 5 rounds per run, and the cleanup had
+  not run at that throw. That message is produced only while the acquire count is
+  above zero (`MemorySessionImpl.alreadyAcquired`), so it is the overlap evidence.
+  A destination progress probe (volatile reads; the Java memory model gives no
+  visibility guarantee for native memory) only classifies rounds. A close after the
+  downcall succeeded and ran the cleanup once.
 - Every overlapping copy wrote its full destination and still threw. This confirms
   the reader rule below: a thrown copy's destination may be complete and is still
   invalid.
@@ -899,8 +902,9 @@ reads.
   a mask, close the mask's parent (which has no lease and so reclaims at once),
   then read the mask view. The mask owns its words (`registry.rs:54-58`), so the
   view stays valid; a mask operation returns `PARENT_CLOSED` (`abi.md:352`).
-  Then, in the mask variant, close the mask itself (it has a lease, so it goes to
-  `closing`) and only then close the view's Arena.
+  Then, in the mask variant, close the mask itself (it has a lease, so under B1 it
+  goes to `closing`; under B3 its handle becomes `INVALID_HANDLE` and the lease keeps
+  the words alive) and only then close the view's Arena.
 - *Green, B3 (recommended).* The two checksums are equal after the owner close.
   The owner handle returns `INVALID_HANDLE` and `lgj_lease_count(0, ...)` reads 1.
   In the mask variant: after the parent close the mask view still reads its words
@@ -943,9 +947,9 @@ they are unverified.
    and never throws.
 6. **A bulk copy of the largest realistic view.** Now measured on one machine
    (R14 G2, 4 vCPU Xeon, `28-beta+16-ea`). A close waits for in-flight accesses
-   through the view. In overlap rounds the median close took about 3.8 to 3.9 ms
-   at 32 MiB, 7.3 to 8.3 ms at 64 MiB, 15.0 to 16.1 ms at 128 MiB and 28.3 to
-   30.4 ms at 256 MiB (three runs; `R14-observed.txt`), close to the standalone copy
+   through the view. In overlap rounds the median close took about 3.6 to 3.8 ms
+   at 32 MiB, 7.5 to 9.4 ms at 64 MiB, 14.9 to 15.2 ms at 128 MiB and 28.8 to
+   29.3 ms at 256 MiB (three runs; `R14-observed.txt`), close to the standalone copy
    times. These medians are observations; they do not bound close latency. The
    largest realistic view size for the Bardioc runtime is **still not chosen**.
    Proposal (reasoning, not measured): readers copy large views in chunks (for
@@ -1070,7 +1074,8 @@ balanced recommendation and who must accept it, caveats, and when to re-evaluate
   `Unsafe.java:1000-1010`, `ScopedMemoryAccess.java:63`). Ran R14
   (`valhalla-lab/reproducers/R14_CloseWaitsForInFlightAccess.java`, output
   `R14-observed.txt`, three runs).
-- *Result.* Close waits (G1: 238 of 240 rounds overlapped, no poison, every close
+- *Result.* Close waits (G1: 240 of 240 rounds overlapped in the recorded set, 238 of
+  240 in an earlier set; no poison; every close
   returned; G2: close duration tracks copy size; G3: the oracle can fail, 10 of 10
   red rounds). Close throws only when a downcall holds the view (G4, 5 of 5).
 - *Recommendation.* Closed for `28-beta+16-ea`. Carry the corrected mechanism text

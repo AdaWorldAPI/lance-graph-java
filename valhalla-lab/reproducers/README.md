@@ -612,23 +612,25 @@ before the poison writer reaches them. A release after the copy's last read is
 not detected and leaves no access to protect. A clean destination is evidence for
 the timings the oracle can see, not proof for every timing.
 
-- **G1** — 4 sizes x 20 rounds x 3 runs (recorded run set): 238 of 240 rounds
-  overlapped; in 2 rounds of one run the 32 MiB copy ended before the close (no
-  overlap, counted separately); no destination carried poison; every close
-  returned normally and ran the cleanup once.
+- **G1** — 4 sizes x 20 rounds x 3 runs (recorded run set): 240 of 240 rounds
+  overlapped; no destination carried poison; every close returned normally and ran
+  the cleanup once. An earlier set had 238 of 240: in 2 rounds the 32 MiB copy
+  ended before the close (no overlap, counted separately).
 - **G2** — median close duration in overlap rounds grew with copy size (run 1:
-  3.9, 8.1, 15.0, 28.3 ms for 32 to 256 MiB) and was close to the standalone copy
+  3.8, 9.4, 14.9, 28.8 ms for 32 to 256 MiB) and was close to the standalone copy
   time. These are observations on one machine; they do not bound close latency.
 - **G3** — sensitivity, red arm: the same "release" run from another thread,
   without a close, while the copy was confirmed in progress (first destination
   word written, last not yet), put poison into the destination in 10/10 confirmed
   rounds per run (0 inconclusive). The oracle can fail.
 - **G4** — the view passed to a downcall (libc `memcpy`), close attempted while
-  the downcall was confirmed in progress (first destination word written before
-  the close, last still unwritten after it): the close threw
-  `IllegalStateException` in 5/5 confirmed rounds per run (0 inconclusive), the
-  cleanup did not run during it, and a close after the downcall succeeded and ran
-  the cleanup once.
+  the downcall runs: the close threw `IllegalStateException` "Session is acquired
+  by 1 clients" in 5/5 rounds per run and the cleanup had not run at that throw.
+  That message is produced only while the acquire count is above zero
+  (`MemorySessionImpl.alreadyAcquired`), so it is the overlap evidence; a
+  destination progress probe (volatile reads, no JMM visibility guarantee for
+  native memory) only classifies rounds. A close after the downcall succeeded and
+  ran the cleanup once.
 
 **Caveats.** One JDK build. Accesses through JDK scoped paths only; a raw address
 handed to native code is not protected. The overlap inference depends on the

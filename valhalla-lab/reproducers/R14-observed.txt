@@ -3,46 +3,50 @@
 # run 1 of 3, full output:
 java.version=28-beta vm=28-beta+16-ea
 G1/G2 close vs in-flight copy, 20 rounds per size, close 1.0 ms after the reader's start signal
-  size   32 MiB: standalone copy median 3.3 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.9 ms
-  ok    size 32 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  size   32 MiB: standalone copy median 2.7 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.8 ms
+  ok    size 32 MiB: no destination carries poison
   ok    size 32 MiB: every close returned normally and ran the cleanup exactly once
-  size   64 MiB: standalone copy median 6.7 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 8.1 ms
-  ok    size 64 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  size   64 MiB: standalone copy median 7.1 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 9.4 ms
+  ok    size 64 MiB: no destination carries poison
   ok    size 64 MiB: every close returned normally and ran the cleanup exactly once
-  size  128 MiB: standalone copy median 13.2 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 15.0 ms
-  ok    size 128 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  size  128 MiB: standalone copy median 14.8 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 14.9 ms
+  ok    size 128 MiB: no destination carries poison
   ok    size 128 MiB: every close returned normally and ran the cleanup exactly once
-  size  256 MiB: standalone copy median 26.8 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 28.3 ms
-  ok    size 256 MiB: no destination carries poison (the release never ran while a copy was still reading)
+  size  256 MiB: standalone copy median 26.3 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 28.8 ms
+  ok    size 256 MiB: no destination carries poison
   ok    size 256 MiB: every close returned normally and ran the cleanup exactly once
   ok    overlap rounds observed: 80 (copy threw ISE after writing every byte)
-  ok    close duration in overlap rounds grows with copy size: [3.897117, 8.115083, 15.038079, 28.282473] ms
+  ok    close duration in overlap rounds grows with copy size: [3.764037, 9.400732, 14.941277, 28.821573] ms
 G3 sensitivity: release without close, during the copy, 10 rounds
   rounds with the copy confirmed in progress when the release ran: 10 (inconclusive 0); poison reached the destination in 10/10
   ok    the oracle detects a release that runs while the copy is in progress
 G4 view passed to a downcall (memcpy), close during the downcall
-  rounds with the downcall confirmed in progress across the close: 5 (inconclusive 0); of those, close threw: 5, close succeeded: 0; cleanup ran during: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
-  ok    a close during a confirmed in-progress downcall that holds the view throws
-  ok    the cleanup does not run while the downcall holds the view
+  closes that threw "Session is acquired" (downcall holding the view): 5/5; progress probe classified 5 as in progress (inconclusive 0), of those close threw 5, succeeded 0; cleanup ran at an acquired-throw: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
+  ok    a close while a downcall holds the view throws "Session is acquired"
+  ok    no close succeeded in a round the progress probe classified as in progress
+  ok    the cleanup had not run when the close threw "Session is acquired"
   ok    after the downcall the close succeeds and the cleanup runs once
 RESULT: all observations as expected
 
 # runs 2 and 3, per-size lines and verdicts:
 # run 2
-  size   32 MiB: standalone copy median 3.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.8 ms
-  size   64 MiB: standalone copy median 6.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 7.3 ms
-  size  128 MiB: standalone copy median 15.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 16.1 ms
-  size  256 MiB: standalone copy median 30.5 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 29.1 ms
-  ok    close duration in overlap rounds grows with copy size: [3.799178, 7.310559, 16.131481, 29.132894] ms
+  size   32 MiB: standalone copy median 3.4 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.7 ms
+  size   64 MiB: standalone copy median 7.5 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 7.5 ms
+  size  128 MiB: standalone copy median 15.1 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 15.2 ms
+  size  256 MiB: standalone copy median 28.9 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 29.2 ms
+  ok    close duration in overlap rounds grows with copy size: [3.661751, 7.541209, 15.186401, 29.24576] ms
   rounds with the copy confirmed in progress when the release ran: 10 (inconclusive 0); poison reached the destination in 10/10
-  rounds with the downcall confirmed in progress across the close: 5 (inconclusive 0); of those, close threw: 5, close succeeded: 0; cleanup ran during: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
+  closes that threw "Session is acquired" (downcall holding the view): 5/5; progress probe classified 5 as in progress (inconclusive 0), of those close threw 5, succeeded 0; cleanup ran at an acquired-throw: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
 RESULT: all observations as expected
 # run 3
-  size   32 MiB: standalone copy median 3.2 ms | rounds: overlap 18, copy-after-close 0, copy-ended-first 2, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.8 ms
-  size   64 MiB: standalone copy median 6.8 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 8.3 ms
-  size  128 MiB: standalone copy median 15.6 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 15.3 ms
-  size  256 MiB: standalone copy median 25.0 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 30.4 ms
-  ok    close duration in overlap rounds grows with copy size: [3.810262, 8.25053, 15.282144, 30.420915] ms
+  size   32 MiB: standalone copy median 2.8 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 3.6 ms
+  size   64 MiB: standalone copy median 5.9 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 8.0 ms
+  size  128 MiB: standalone copy median 12.7 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 15.0 ms
+  size  256 MiB: standalone copy median 26.3 ms | rounds: overlap 20, copy-after-close 0, copy-ended-first 0, poison 0, other 0 | close threw 0, cleanup count != 1 in 0 | close duration median in overlap rounds 29.3 ms
+  ok    close duration in overlap rounds grows with copy size: [3.614783, 7.991069, 15.016257, 29.312247] ms
   rounds with the copy confirmed in progress when the release ran: 10 (inconclusive 0); poison reached the destination in 10/10
-  rounds with the downcall confirmed in progress across the close: 5 (inconclusive 0); of those, close threw: 5, close succeeded: 0; cleanup ran during: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
+  closes that threw "Session is acquired" (downcall holding the view): 5/5; progress probe classified 5 as in progress (inconclusive 0), of those close threw 5, succeeded 0; cleanup ran at an acquired-throw: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
 RESULT: all observations as expected
+
+# An earlier set of three runs (before the G4 classification change) had 238 of 240
+# overlap rounds: in one run, 2 of the 20 32 MiB rounds were "copy-ended-first".

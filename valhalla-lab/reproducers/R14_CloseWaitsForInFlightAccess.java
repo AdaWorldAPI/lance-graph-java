@@ -45,9 +45,11 @@
 //       is not an oracle that cannot fail. Rounds without that confirmation are inconclusive;
 //   G4  a view passed to a downcall (libc memcpy) acquires the session: a close during that
 //       downcall throws IllegalStateException and does not run the cleanup; after the downcall,
-//       close succeeds and runs it once. A round counts only when the downcall is confirmed in
-//       progress across the close (first destination word written before it, last word still
-//       unwritten after it); other rounds are inconclusive.
+//       close succeeds and runs it once. The overlap evidence is the exception message
+//       ("Session is acquired by N clients", MemorySessionImpl.alreadyAcquired), which is only
+//       produced while the acquire count is above zero. A progress probe on the destination
+//       (volatile reads; the JMM gives no visibility guarantee for native memory) only
+//       classifies rounds and is not relied on.
 //
 // Memory safety: all backing memory comes from Arena.global() and is never freed. Only the VIEW
 // is bound to the shared arena. No arm can read freed memory; the poison is ordinary data.
@@ -98,12 +100,23 @@ public class R14_CloseWaitsForInFlightAccess {
         for (long i = n - 1; i >= n - TAIL / 8; i--) src.setAtIndex(ValueLayout.JAVA_LONG, i, POISON);
     }
 
+    // Progress probes use volatile reads. The Java memory model gives no visibility guarantee
+    // for native memory written by another thread or by native code, so these probes only
+    // CLASSIFY rounds; they are never the evidence a check rests on. G4's evidence is the
+    // exception itself (see g4).
+    static final java.lang.invoke.VarHandle LONG_AT =
+            ValueLayout.JAVA_LONG.arrayElementVarHandle();
+
+    static long volatileLong(MemorySegment seg, long index) {
+        return (long) LONG_AT.getVolatile(seg, 0L, index);
+    }
+
     static boolean firstWordWritten(MemorySegment dst) {
-        return dst.getAtIndex(ValueLayout.JAVA_LONG, 0) != 0;
+        return volatileLong(dst, 0) != 0;
     }
 
     static boolean lastWordWritten(MemorySegment dst, long bytes) {
-        return dst.getAtIndex(ValueLayout.JAVA_LONG, bytes / 8 - 1) != 0;
+        return volatileLong(dst, bytes / 8 - 1) != 0;
     }
 
     /** Spin until the copy has visibly started writing the destination, or give up. */
@@ -222,8 +235,7 @@ public class R14_CloseWaitsForInFlightAccess {
                     + " overlap rounds %.1f ms%n",
                     bytes >> 20, median(copyNs, copyNs.length), overlap, after, normal, poison,
                     other, closeThrew, cleanupMissing, medClose[si]);
-            check(poison == 0, "size " + (bytes >> 20) + " MiB: no destination carries poison"
-                    + " (the release never ran while a copy was still reading)");
+            check(poison == 0, "size " + (bytes >> 20) + " MiB: no destination carries poison");
             check(cleanupMissing == 0 && closeThrew == 0, "size " + (bytes >> 20)
                     + " MiB: every close returned normally and ran the cleanup exactly once");
         }
@@ -289,7 +301,8 @@ public class R14_CloseWaitsForInFlightAccess {
         MemorySegment dst = Arena.global().allocate(bytes, 64);
         final int rounds = 5;
         int closeThrewDuring = 0, cleanupDuring = 0, laterCloseOk = 0, cleanupOnce = 0,
-            confirmed = 0, inconclusive = 0, closedDuringConfirmed = 0, threwAny = 0;
+            confirmed = 0, inconclusive = 0, closedDuringConfirmed = 0, threwAny = 0,
+            acquiredThrows = 0;
         for (int r = 0; r < rounds; r++) {
             dst.fill((byte) 0);
             AtomicInteger cleanups = new AtomicInteger();
@@ -308,17 +321,24 @@ public class R14_CloseWaitsForInFlightAccess {
             // memcpy writes dst forward. Overlap is confirmed when the first word was written
             // before the close attempt and the last word was still unwritten after it returned.
             boolean started = awaitProgress(dst, 1_000_000_000L);
-            boolean threw = false;
-            try { arena.close(); } catch (IllegalStateException e) { threw = true; }
+            boolean threw = false, threwAcquired = false;
+            try { arena.close(); } catch (IllegalStateException e) {
+                threw = true;
+                // MemorySessionImpl.alreadyAcquired: "Session is acquired by %d clients". This
+                // message is only produced when the acquire count is above zero at the close,
+                // i.e. while the downcall holds the session: it is the overlap evidence.
+                threwAcquired = String.valueOf(e.getMessage()).startsWith("Session is acquired by");
+            }
             int cleanupsAtClose = cleanups.get();
             boolean overlap = started && !lastWordWritten(dst, bytes);
             caller.join();
             if (threw) threwAny++;
+            if (threwAcquired) acquiredThrows++;
+            if (threwAcquired && cleanupsAtClose != 0) cleanupDuring++;
             if (overlap) {
                 confirmed++;
                 if (threw) closeThrewDuring++;
                 else closedDuringConfirmed++;
-                if (cleanupsAtClose != 0) cleanupDuring++;
             } else {
                 inconclusive++;
             }
@@ -329,15 +349,18 @@ public class R14_CloseWaitsForInFlightAccess {
             }
             if (cleanups.get() == 1) cleanupOnce++;
         }
-        System.out.println("  rounds with the downcall confirmed in progress across the close: "
-                + confirmed + " (inconclusive " + inconclusive + "); of those, close threw: "
-                + closeThrewDuring + ", close succeeded: " + closedDuringConfirmed
-                + "; cleanup ran during: " + cleanupDuring
+        System.out.println("  closes that threw \"Session is acquired\" (downcall holding the view): "
+                + acquiredThrows + "/" + rounds + "; progress probe classified " + confirmed
+                + " as in progress (inconclusive " + inconclusive + "), of those close threw "
+                + closeThrewDuring + ", succeeded " + closedDuringConfirmed
+                + "; cleanup ran at an acquired-throw: " + cleanupDuring
                 + "; close after the downcall succeeded: " + laterCloseOk
                 + "; cleanup ran exactly once overall: " + cleanupOnce);
-        check(confirmed > 0 && closeThrewDuring == confirmed,
-                "a close during a confirmed in-progress downcall that holds the view throws");
-        check(cleanupDuring == 0, "the cleanup does not run while the downcall holds the view");
+        check(acquiredThrows > 0,
+                "a close while a downcall holds the view throws \"Session is acquired\"");
+        check(closedDuringConfirmed == 0,
+                "no close succeeded in a round the progress probe classified as in progress");
+        check(cleanupDuring == 0, "the cleanup had not run when the close threw \"Session is acquired\"");
         check(laterCloseOk == threwAny && cleanupOnce == rounds,
                 "after the downcall the close succeeds and the cleanup runs once");
     }
