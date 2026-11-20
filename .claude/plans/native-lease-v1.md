@@ -450,7 +450,11 @@ HotSpot side, `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
 - A thread stopped in compiled code outside a `@Scoped` frame, whose nmethod has
   scoped access, is deoptimized so it redoes the liveness check.
 - `closeScope0` then **waits**: `while (async_exceptions.load_acquire() > 0)
-  spin_yield.wait();`. The comment says it waits "because we will free the memory
+  spin_yield.wait();`. The counter is decremented when the target thread runs the
+  asynchronous handshake while stopped at a safepoint poll (line 163), just before
+  the exception is installed (line 168); the target then throws without running
+  further code (comment, lines 137-139). So the close waits until every such thread
+  is stopped and marked to throw, not until it has unwound. The comment says it waits "because we will free the memory
   after this. This guarantees the target thread does not continue to access the
   memory." It returns `void` and has **no failure path**.
 - `SharedSession.justClose()` (`src.zip`, lines 83-93) does throw `alreadyAcquired`
@@ -461,8 +465,9 @@ HotSpot side, `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
   non-interruptible VM call, so the handshake reaches that thread only after the
   call returns. That is why close latency follows the copy time (G2).
 
-Together these say: the release runs after a handshake that waits until every
-thread inside a scoped access through the arena's segments has been made to throw.
+Together these say: the release runs only after every thread that was inside a
+scoped access through the arena's segments has been stopped at a safepoint poll
+and marked to throw, so it makes no further memory access through the arena.
 That is the ordering the contract needs. It is a JDK guarantee, not an lgj one.
 
 Corroboration that this HotSpot file belongs to the pinned build. The pinned build

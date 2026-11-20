@@ -9,8 +9,9 @@
 // Unsafe.copyMemory0 (no chunking in Java, Unsafe.java:1000-1010), then return. HotSpot's
 // closeScope0 (scopedMemoryAccess.cpp, jdk-28+16) handshakes every thread; a thread found inside a
 // @Scoped frame holding the session gets an asynchronous ScopedAccessError, which the @Scoped
-// method turns into IllegalStateException; closeScope0 then WAITS until every such exception has
-// been delivered before it returns, and only then does MemorySessionImpl.close() run the cleanup.
+// method turns into IllegalStateException; closeScope0 then WAITS until every such thread has been
+// stopped at a safepoint poll and marked to throw (it then makes no further memory access) before
+// it returns, and only then does MemorySessionImpl.close() run the cleanup.
 // Hence, for one round:
 //
 //   copy threw ISE AND the destination holds every source byte

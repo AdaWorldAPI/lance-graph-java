@@ -592,8 +592,9 @@ chunking, `Unsafe.java:1000-1010` in the build's `src.zip`). HotSpot's
 `closeScope0` (`src/hotspot/share/prims/scopedMemoryAccess.cpp` at tag
 `jdk-28+16`; the class names it uses are present in the build's `libjvm.so`)
 handshakes every thread, sends an asynchronous error to a thread found inside a
-`@Scoped` frame that holds the session, and waits until every such error has been
-delivered before it returns. Only then does `MemorySessionImpl.close()` run the
+`@Scoped` frame that holds the session, and waits until every such thread has
+been stopped at a safepoint poll and marked to throw (after which it makes no
+further memory access) before it returns. Only then does `MemorySessionImpl.close()` run the
 cleanup. So a copy that threw `IllegalStateException` after writing every byte
 passed the liveness check before the close and was still inside its access when
 the handshake reached it: that round overlapped. This inference uses that source;
