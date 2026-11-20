@@ -1,9 +1,12 @@
 # native-lease-v1 — the native lifetime lease contract (work package J1)
 
-**Status: PROPOSED contract (2026-11-20).** It amends `epoch-recheck-v3.md` §3
-for borrowed native-memory views. It is a contract only. No ABI symbol, Rust
-code, Java code or build file changes with this document. Implementation is a
-later, separate change, and it starts only after the owner accepts this one.
+**Status: ACCEPTED contract (owner, 2026-11-20).** The owner accepted every
+recommendation of §9 ("accept all recommendations"); §9.10 records what that
+covers, what stays open, and how to re-open a decision. It amends
+`epoch-recheck-v3.md` §3 for borrowed native-memory views. It is a contract only.
+No ABI symbol, Rust code, Java code or build file changes with this document.
+Implementation (J1) is a later, separate change that may now start, under the
+accepted choices and the build scope of §3.5.
 
 The owner's standing rule governs the order of work: *"Do not add new ABI
 symbols before their native capabilities and lifetime contracts have been
@@ -657,7 +660,7 @@ variants B1, B2 and B3. Caveat: it is a model with one mutex, not the real
 - A2: `lgj_lease_acquire(handle, &lease)` pins the owner, and the existing describe
   symbols fill the descriptor afterwards.
 
-Recommendation: A1. The descriptor and the lease cannot diverge, there is one
+Recommendation: A1 (**accepted by the owner, 2026-11-20**, §9.10). The descriptor and the lease cannot diverge, there is one
 crossing per view, and there is no state in which a lease exists and the describe
 is refused. A2 adds one symbol of the same count but leaves a gap between acquire
 and describe in which a close request makes describe return an error after the
@@ -696,6 +699,7 @@ resolve, `:307` parent lookup, `:323` close, `:506` slot_count. Call sites in
 `resolve_mask_with_parent` both go through `resolve`.
 
 Recommendation: **B3, with B1 as the acceptable fallback; B2 rejected as written.**
+**Accepted by the owner, 2026-11-20** (§9.10): J1 implements B3.
 Reasons for B3:
 
 - It reuses an existing mechanism that lgj already relies on.
@@ -980,14 +984,14 @@ and re-evaluation triggers: §9.
 
 | # | Question | Who decides |
 |---|---|---|
-| Q1 | Keep `PARENT_CLOSED` for operations on a `closing` owner (the design's text, but defined for children, `abi.md:239`), or add a status such as `RESOURCE_CLOSING`? **Status: proposal.** Under B3 there is no closing state, so no new status. If B1 is chosen: add `LGJ_ERR_RESOURCE_CLOSING = -19` (existing codes run to -18, plus -99; -19 is free) with its own Java mapping, because `PARENT_CLOSED`'s Java message says "on a mask" (`Status.java:128-131`). Compatible: an older Java maps an unknown code to `NativeCallException` "UNKNOWN_STATUS" (`Status.java:117-120`), and a minor-14 Java cannot borrow. | Repository owner (ABI statuses) |
-| Q2 | Is `lgj_lease_count` a regular exported symbol or a test-only counter (the design says "exposed to tests", `:2326`)? **Status: proposal: regular production symbol** (a pinned leak must be visible in production; read-only, no lifetime risk; cost: permanent ABI surface). Under B3 the signature is `i32 lgj_lease_count(u64 resource, u64* out_live)` (§4.1). Caveat: the count is a snapshot. | Owner of the Bardioc design, with the ABI owner |
-| Q3 | Choice A and Choice B in §4.4. **Status: proposal: A1 and B3**, B1 as acceptable fallback, B2 rejected as written. | Repository owner, at the implementation review |
+| Q1 | Keep `PARENT_CLOSED` for operations on a `closing` owner (the design's text, but defined for children, `abi.md:239`), or add a status such as `RESOURCE_CLOSING`? **Status: accepted (owner, 2026-11-20): no new status, because B3 is accepted.** Under B3 there is no closing state, so no new status. If B1 is chosen: add `LGJ_ERR_RESOURCE_CLOSING = -19` (existing codes run to -18, plus -99; -19 is free) with its own Java mapping, because `PARENT_CLOSED`'s Java message says "on a mask" (`Status.java:128-131`). Compatible: an older Java maps an unknown code to `NativeCallException` "UNKNOWN_STATUS" (`Status.java:117-120`), and a minor-14 Java cannot borrow. | Repository owner (ABI statuses) |
+| Q2 | Is `lgj_lease_count` a regular exported symbol or a test-only counter (the design says "exposed to tests", `:2326`)? **Status: accepted (owner, 2026-11-20): regular production symbol** (a pinned leak must be visible in production; read-only, no lifetime risk; cost: permanent ABI surface). Under B3 the signature is `i32 lgj_lease_count(u64 resource, u64* out_live)` (§4.1). Caveat: the count is a snapshot. | Owner of the Bardioc design, with the ABI owner |
+| Q3 | Choice A and Choice B in §4.4. **Status: accepted (owner, 2026-11-20): A1 and B3**; B1 stays the documented fallback, B2 rejected as written. | Repository owner, at the implementation review |
 | Q4 | Should a lease carry a debug owner tag (which result, which thread) so a pinned leak can be traced? It adds state. **Status: open, owner.** Under B3 it is the only way to attribute a pinned leak to an owner. | Implementation author, reviewed by the ABI owner |
 | Q5 | Do `RowStore.lanes[]` and `Mask.words()` move to leased views, or stay unleased with the v3 probe? This decides when `ISS-LGJ-CACHED-DESCRIPTOR-CROSS-THREAD-WINDOW` can close (§1.3). **Status: open, owner.** | Repository owner |
 | Q6 | The design forbids reclaiming a leased view by force (§3.4). Does the Bardioc runtime need a force path at shutdown, and if so, where does it live (outside lgj)? **Status: open, owner.** | Owner of the Bardioc design |
 | Q7 | Disable arms as feature-built libraries (this proposal) or as a test-only export (v3 C1 precedent)? **Status: open, owner.** | Repository maintainers |
-| Q8 | Which JDK builds must T1, T3 and R14 pass on (§5.3 item 4)? **Status: open, owner.** R14 and the source reading cover `28-beta+16-ea` only, so the ordering guarantee is scoped to that build (§3.5, "Scope of the ordering guarantee") until another build is checked. | Repository owner |
+| Q8 | Which JDK builds must T1, T3 and R14 pass on (§5.3 item 4)? **Status: accepted (owner, 2026-11-20): checked builds only, with the borrow wrapper's `Runtime.version()` gate.** Which further builds to check stays an owner call per build. R14 and the source reading cover `28-beta+16-ea` only, so the ordering guarantee is scoped to that build (§3.5, "Scope of the ordering guarantee") until another build is checked. | Repository owner |
 | Q9 | Does `closeScope0` on the pinned build wait for an in-flight scoped access (release after), or can the handshake "fail" (§3.5)? **Status: answered on `28-beta+16-ea`.** It waits and has no failure path (`scopedMemoryAccess.cpp:265-284` at `jdk-28+16`; R14 G1-G3). The class comment saying it can fail is stale. Close throws only when a downcall holds the view (G4). Re-open on any JDK bump: re-run R14, re-read the file. The HotSpot file is strongly corroborated as the build's, not proven (§3.5). | Implementer; re-checked on every JDK change |
 
 ---
@@ -1075,9 +1079,11 @@ it.
 
 ## 9. Decision record (2026-11-20)
 
-For later sessions. Every recommendation here is a **proposal for the owner, not a
-decision**. Each item gives the options, what was tested or read, the result, the
-balanced recommendation and who must accept it, caveats, and when to re-evaluate.
+For later sessions. Each item gives the options, what was tested or read, the
+result, the balanced recommendation and who must accept it, caveats, and when to
+re-evaluate. **The owner accepted every recommendation in 9.1-9.8 on 2026-11-20**
+(§9.10). The reasoning, caveats and triggers below are kept so a later session can
+re-evaluate a decision on evidence rather than re-derive it.
 
 ### 9.1 Q9: does close fail or wait against an in-flight scoped access?
 
@@ -1211,3 +1217,34 @@ requested; the risk is low. This is not a subject of this contract.
   `jdk-28+16` (commit `f0747596dea3e6a1c852dc227a0eb10ddbf5b015`), lines 133-284. On
   a new JDK read the file at that JDK's tag, and compare the build's `src.zip` copies
   of `SharedSession.java` and `MemorySessionImpl.java` with the tag's.
+
+### 9.10 Acceptance (owner, 2026-11-20) and how to re-open
+
+The owner's words, after reviewing the table of decisions, recommendations,
+caveats and solutions: "accept all recommendations, merge #105 / document the
+reasoning for later reeval if necessary".
+
+Accepted, binding for J1:
+
+| Item | Accepted decision | Rests on | Re-open when (any one) |
+|---|---|---|---|
+| Q9 | On `28-beta+16-ea`, close waits for an in-flight scoped access (handshake counter at zero) and releases after; it throws only when a downcall holds the view | `scopedMemoryAccess.cpp:265-284` at `jdk-28+16`; R14 G1-G4 | JDK bump or vendor change; JVMTI agents in production; a new view access path |
+| B | B3: `lgj_close` unchanged; each lease holds an `Arc` of the owner's entry. B1 is the documented fallback; B2 rejected | `valhalla-lab/lease-model/` (6 tests; B2 forged-handle finding); `registry.rs:340-343` | Bardioc needs per-owner `closing` visibility (switch to B1); registry leaves the `RwLock`; a new resolve path appears; slot accounting becomes a memory-limit input |
+| Q1 | No new status (follows from B3). If B1 is ever adopted: `LGJ_ERR_RESOURCE_CLOSING = -19` with its own Java mapping | `Status.java:117-131` | B1 adopted |
+| Q2 | `lgj_lease_count` is a regular, read-only production symbol: `i32 lgj_lease_count(u64 resource, u64* out_live)`, resource 0 = process-wide | §4.1; design `:2326` | ABI owner objects; B1 adopted (adds `out_state`) |
+| A | A1: `lgj_lane_borrow` fills the descriptor and takes the lease in one call | lease model, A2-gap test | Reusing the describe code unchanged becomes the priority |
+| Q8 | The ordering guarantee is claimed only for checked builds (`28-beta+16-ea` today); the Java borrow wrapper refuses to lend a view on an unchecked `Runtime.version()`; a build is added only with a recorded green R14 run and a re-read of its `scopedMemoryAccess.cpp` | §3.5 "Scope of the ordering guarantee" | Any new JDK build to support |
+| Close latency | Reader contract: copy large views in chunks of at most 8 MiB. Medians are observations, not a bound | R14 G2 | A view above 256 MiB planned; a close-latency requirement stated; copy path changes |
+| §3.6 | Handles only; no raw address to native code; the result object's `close()` propagates `IllegalStateException` | R14 G4 | An lgj native function needs an address |
+| Identity | "indexed recorder" is read as "indexed reorder" | Lance-graph `rp-seal-v1/B1.md:234-243`, `A3.md:199-201` | The owner corrects the reading |
+
+Still open (not part of the accepted set): Q4 (debug owner tag; under B3 the only
+way to attribute a pinned leak to an owner), Q5 (`RowStore.lanes[]` and
+`Mask.words()` move to leased views or stay unleased), Q6 (a forced-reclaim path at
+Bardioc shutdown, outside lgj), Q7 (red arms as feature-built libraries or a
+test-only export).
+
+How to re-open an accepted decision: re-run the evidence of 9.9; state which trigger
+in the table above fired and what the new evidence shows; propose the change with
+its caveats in the same form as 9.1-9.8. An accepted decision changes only by a new
+owner decision; it is not re-derived silently during implementation.
