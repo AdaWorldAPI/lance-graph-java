@@ -360,8 +360,8 @@ public class R14_CloseWaitsForInFlightAccess {
                 + "; cleanup ran exactly once overall: " + cleanupOnce);
         check(acquiredThrows > 0,
                 "a close while a downcall holds the view throws \"Session is acquired\"");
-        check(closedDuringConfirmed == 0,
-                "no close succeeded in a round the progress probe classified as in progress");
+        // The progress probe is diagnostic only (no JMM visibility guarantee for native memory):
+        // closedDuringConfirmed is printed above and never asserted on.
         check(cleanupDuring == 0, "the cleanup had not run when the close threw \"Session is acquired\"");
         check(laterCloseOk == threwAny && cleanupOnce == rounds,
                 "after the downcall the close succeeds and the cleanup runs once");

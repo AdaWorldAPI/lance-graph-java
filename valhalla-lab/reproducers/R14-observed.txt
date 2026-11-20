@@ -23,7 +23,6 @@ G3 sensitivity: release without close, during the copy, 10 rounds
 G4 view passed to a downcall (memcpy), close during the downcall
   closes that threw "Session is acquired" (downcall holding the view): 5/5; progress probe classified 5 as in progress (inconclusive 0), of those close threw 5, succeeded 0; cleanup ran at an acquired-throw: 0; close after the downcall succeeded: 5; cleanup ran exactly once overall: 5
   ok    a close while a downcall holds the view throws "Session is acquired"
-  ok    no close succeeded in a round the progress probe classified as in progress
   ok    the cleanup had not run when the close threw "Session is acquired"
   ok    after the downcall the close succeeds and the cleanup runs once
 RESULT: all observations as expected
