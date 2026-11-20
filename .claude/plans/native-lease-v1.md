@@ -367,9 +367,47 @@ Rules:
 
 So R13 neither confirms nor refutes the design's rule 4(a). The property the
 contract needs, that the release does not run while an access through the view
-is in progress, is **not yet established**. It is a requirement on the
-implementation, and T3 (§5.2) must establish it with evidence of overlap; until
-then the contract does not rely on any observed mechanism (§7, departure 1).
+is in progress, is **not established by any test**, and a black-box Java test
+cannot establish it: Java has no way to observe that another thread is inside a
+segment access at a given moment (a progress count shows only that a loop has
+started, not that an access is in flight when the close runs).
+
+**What the property rests on instead: the JDK's close mechanism, read in source.**
+Read in `lib/src.zip` of the pinned build (`28-beta+16-ea`), not tested:
+
+- `MemorySessionImpl.close()` is `justClose(); resourceList.cleanup();`. The
+  cleanup actions, which include the one passed to
+  `MemorySegment.reinterpret(size, arena, cleanup)` and so the lease release, run
+  only after `justClose()` has returned.
+- `SharedSession.justClose()` marks the session closed and then calls
+  `ScopedMemoryAccess.closeScope(...)`.
+- The `ScopedMemoryAccess` class comment describes that call: it "initiates
+  thread-local handshakes with all the other VM threads", relying on "the idea
+  that accessing memory is atomic with respect to checking the validity of the
+  session", so that "a thread that wants to perform memory access will be
+  suspended either *before* a liveness check or *after* the memory access".
+- `Arena.close()`'s specification: if it completes normally, the segments "can no
+  longer be accessed"; it throws `IllegalStateException` "if a segment associated
+  with this arena is being accessed concurrently, e.g. by a downcall method
+  handle".
+
+Together these say: the release runs after a handshake that leaves no thread in
+the middle of a scoped access through the arena's segments. That is the ordering
+the contract needs, and it is a JDK guarantee, not an lgj one.
+
+Two things weaken it, and both are recorded rather than smoothed over:
+
+- The same class comment says that if a thread "is found accessing" the session
+  "the handshake fails, and the session will not be closed". In the pinned build
+  `closeScope0` returns `void` and `justClose()` has no failure path after it, and
+  R13 never saw a close throw. The comment and the code disagree; which describes
+  this build is not established without reading the HotSpot side of `closeScope0`.
+- The guarantee covers accesses made through the JDK's scoped access paths. It
+  says nothing about native code that was handed a raw address (§3.6), which is
+  why §3.6 forbids that.
+
+This is open question Q9 (§6): confirm the HotSpot behaviour of `closeScope0` on
+the pinned build before the implementation relies on it.
 
 **Reader rule.** A reader must treat `IllegalStateException` from any access
 through a borrowed view, a bulk copy included, as "result invalid; destination
@@ -583,37 +621,33 @@ reads.
 
 **T3 — Release ordering**
 
-- *Shows.* No path releases a lease while a segment bound to the result's Arena is
-  still readable, including when the close races a read that is already inside
-  its access. This is the test that must establish the ordering; R13 does not
-  (§2.4, §3.5).
-- *Overlap evidence required.* A single `MemorySegment.copy` cannot show that the
-  close landed inside the access. The reader therefore copies in chunks and
-  publishes a progress count after each chunk; the main thread closes only after
-  the count shows the loop is under way and before it reaches the total. A round
-  in which the count reached the total before the close, or never moved, has no
-  overlap and is discarded, not counted as a pass.
+- *Shows.* The lgj side of the ordering: the lease is released only by the view's
+  Arena cleanup, never before the Arena close, and the count reflects it. It does
+  **not** show that the release cannot run while another thread is inside an
+  access; no black-box Java test can (§3.5). That part rests on the JDK close
+  mechanism read in source (§3.5) and on open question Q9.
 - *Construction.* Two parts.
-  (a) The R13 F4 shape on a real borrowed view: one thread inside one long
-  `MemorySegment.copy` out of a view as large as the store allows; the main thread
-  closes the view's Arena; the cleanup sets a flag and releases the lease, and the
-  reader reads that flag immediately before it starts each access.
-  Ten rounds. Immediately before `arena.close()` read the count; immediately after
-  it returns read the count.
+  (a) A borrowed view, one reader thread looping accesses through it, the main
+  thread closing the view's Arena. Ten rounds or more. The cleanup sets a flag
+  and releases the lease; the reader reads that flag immediately before each
+  access. Read the lease count immediately before `arena.close()` and
+  immediately after it returns.
   (b) A source fence: `Engine.leaseRelease` has exactly one call site, inside the
   borrow wrapper's cleanup lambda, and the lease handle is not returned or stored.
   This is the `DoctrineFenceTest` pattern (`epoch-recheck-v3.md:260-268`).
 - *Green.* In every round the count is 1 before the close and 0 after. No access
-  that began with the flag already set returned a value (timestamps are not used:
-  a stamp taken after an access returns can be late, so it cannot order the access
-  against the release). A copy that threw
-  `IllegalStateException` is treated as partial and its destination is not used. The
-  fence finds one call site.
+  that saw the flag set before it began returned a value (this check cannot see an
+  access whose flag check came just before the release; no timestamps are used).
+  An access that threw `IllegalStateException` is treated as partial and its result
+  is not used. The fence finds one call site.
 - *Red.* A test-source variant of the borrow wrapper that releases **before**
   closing the Arena (build-time file swap, the pattern of `LaneProbe`,
   `RowStore.java:453-455`). The owner stays open, so a release to count 0 reclaims
   nothing. The assertion "count is 1 while the view is still readable" fails. The
   fence assertion also fails on a second call site.
+- *Not covered, stated.* A release during an in-flight access by a correct
+  wrapper would require the JDK to break the mechanism in §3.5. T3 cannot detect
+  that; Q9 is where it is checked.
 
 **T4 — Stale handles**
 
@@ -727,6 +761,7 @@ twice, both observed through `Weak` and the count, with no dereference.
 | Q6 | The design forbids reclaiming a leased view by force (§3.4). Does the Bardioc runtime need a force path at shutdown, and if so, where does it live (outside lgj)? | Owner of the Bardioc design |
 | Q7 | Disable arms as feature-built libraries (this proposal) or as a test-only export (v3 C1 precedent)? | Repository maintainers |
 | Q8 | Which JDK builds must T1 and T3 pass on (§5.3 item 4)? | Repository owner |
+| Q9 | Does `closeScope0` on the pinned build stop every thread before its liveness check or after its access, as the `ScopedMemoryAccess` comment's main description says, or can the handshake "fail" as the same comment's later sentence says (§3.5)? The release ordering rests on the first. Read the HotSpot side, or ask the JDK owners. | Implementer; confirmed before the borrow symbol is added |
 
 ---
 
@@ -737,7 +772,9 @@ it.
 
 1. **Rule 4(a), the mechanism (`:534-537`).** The design says "a close that races
    an in-flight access fails instead of completing (to be confirmed by test,
-   below)". The design should not state a mechanism yet. R13 found no close that
+   below)". The design should not state a mechanism yet. A test cannot confirm it
+   either way; the ordering rests on the JDK close mechanism read in source (§3.5,
+   Q9). R13 found no close that
    failed and every access ending with `IllegalStateException`, but it did not
    establish that any close overlapped an in-flight access, so it neither
    confirms nor refutes the rule. Replace the rule with the requirement (the
