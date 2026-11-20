@@ -1001,8 +1001,12 @@ it.
    an in-flight access fails instead of completing (to be confirmed by test,
    below)". On `28-beta+16-ea` this is wrong. Corrected mechanism text the design
    should carry, scoped to this build: *a close that races an in-flight scoped
-   access waits for that access, which is made to throw `IllegalStateException`,
-   and then completes; the cleanup, and so the lease release, runs after.* Close
+   access waits until the accessing thread has run the close's handshake while
+   stopped at a safepoint poll (the handshake counter is zero), and then completes;
+   the cleanup, and so the lease release, runs after. The counter can reach zero
+   before the thread's `IllegalStateException` is installed, so the thread may still
+   be stopped in its frame when the release runs; once resumed it makes no further
+   access through the arena.* Close
    throws only when a downcall holds the view (the session's acquire count).
    Evidence: `scopedMemoryAccess.cpp:265-284` at `jdk-28+16` (the close waits and
    has no failure path) and R14 G1-G4. State the requirement too: the release never
@@ -1010,10 +1014,13 @@ it.
    (§9).
 2. **Release-ordering test row (`:563`).** "an arena close that races an in-flight
    read does not complete, and the lease is not released by it". The first half is
-   wrong on this build: the close completes, after the read has been made to throw.
-   Correct the row to: the close waits for the in-flight access and the lease is
-   released only after it. T3 part (c) now checks this for a bulk copy with R14's
-   method; its overlap inference rests on the JDK source structure (§3.5).
+   wrong on this build: the close completes once the reading thread has run the
+   close's handshake (counter zero), not after it has thrown. Correct the row to: no
+   read or copy through the view starts, or is still accessing memory, after the
+   lease is released. That conclusion rests on the HotSpot source reading (§3.5).
+   T3 part (c) adds evidence for a bulk copy with R14's method (overlap signature
+   from the JDK source structure, plus the poison oracle), and the oracle can miss a
+   release if the copy outruns the poison writer, so T3 does not prove it.
 3. **The untested paragraph (`:568-571`).** It says the shared-arena close
    behaviour "was not tested for this document (not established)". R13 now covers
    the single-thread behaviour (F1, F2) and the absence of successful reads after
