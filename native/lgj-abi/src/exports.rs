@@ -2890,6 +2890,10 @@ mod tests {
     /// a `mask_risc::Program`. Two implementations of one law; until this
     /// file, nothing compared them.
     mod lowering_convergence;
+    /// The two shape contracts: ndarray's all-sixteen-positions match over the
+    /// row-major store, its facet-major non-applicability, and the contract's
+    /// cascade ladder against lgj's carving byte order. Test-only.
+    mod positional_parity;
     mod pr4_dst_reuse;
     /// PR4's behaviour-equivalence oracle and falsifier matrix — the frozen
     /// pre-PR4 loop, kept in its own file so the freeze is visible as a file

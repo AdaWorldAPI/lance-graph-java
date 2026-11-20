@@ -1457,6 +1457,65 @@ and `512 = 8 × 64` keeps the row stride cache-line-quantised (both pinned
 in `rowstore.rs`, the substrate half of what R4/R10 measured from the
 Valhalla side).
 
+### Three alignment facts, and two shape contracts
+
+**Three alignment facts, never merged, none inferred from the row width.**
+The row width (512) is a multiple of 64, and nothing follows from that about
+where any lane starts.
+
+1. *Logical geometry*: a lane's offset from the store base, stride, element
+   size, exact covered span `(len-1)*stride + elem`, last element in bounds,
+   span ending at or before `512n`. No address is involved.
+2. *Actual base alignment*: the real address of the store base (`as_ptr()` in
+   Rust, the raw lane's descriptor address in Java) modulo 8, 64 and 128.
+   RECORDED, never asserted to a value: the allocation is `Arc<[u8]>` and the
+   promise is `u8` alignment only. Measured bases here were always 16-aligned,
+   with `base % 64` observed as 0, 16, 32 and 48, varying between allocations,
+   runs and between the Rust and Java processes; that is an allocator accident,
+   not a contract.
+3. *Per-lane alignment*: `(base + lane_offset) % elem_bytes` and `% 64`, from
+   the actual address. Measured consequence: on a base that is a multiple of 8,
+   the 32 row-major `lo64` lanes sit at offset `f*16 + 4`, so none is
+   8-aligned, while all 64 `u32` lanes and (facet-major) all 32 `u64` lanes are
+   element-aligned. Element alignment is decided by the base, never by `n`;
+   64-alignment of facet-major blocks is decided by `n` AND the base (at
+   `n = 257`, 8 of 96 lanes are 64-aligned relative to the base; at `n = 16`
+   all 96 are, and the actual-address count is then 0 or 96 depending on the
+   measured base).
+
+Pinned by `rowstore::tests::alignment_is_three_separate_facts_geometry_then_base_then_per_lane`,
+`...::at_257_an_odd_based_copy_has_misaligned_u32_and_u64_lanes_and_still_reads_equal`
+(every `u32` and `u64` lane misaligned in both layouts, every read and mask
+still equal, tails clear), `...::byte_order_is_little_endian_at_the_documented_positions_in_both_layouts`
+(fixture asymmetric: the big-endian read differs), and Java's
+`AlignmentFactsTest`, which also fails if alignment is simplified to
+`rowStride % 64 == 0`. Each prints one table per layout.
+
+**Two shape contracts, not interchangeable.** (a) The layout addressing of 32
+x 16-byte facets, row-major and facet-major, is owned HERE. (b) ndarray's FACET
+STRIDE positional rule (a 128-bit facet is sixteen byte positions, read by the
+load that brought it in) and its DR512 `lut9` presence/polarity rule are owned
+by ndarray. Applicability in this repository:
+
+| invariant | exercised here | layout | test |
+|---|---|---|---|
+| lane geometry, strided access | yes | both | `layout_parity.rs`, `AlignmentFactsTest`, `DescriptorParityTest` |
+| 12-byte register match, carvings | yes | row-major only | existing kernel tests |
+| all sixteen positions (`ternary_match_strided16_to_mask`), test-only use | exercised in tests, not by production | row-major | `positional_parity::the_sixteen_position_match_equals_a_byte_wise_oracle_over_the_row_major_store` |
+| the same rule on facet-major | not applicable: the sixteen bytes are not contiguous; the equivalent is three per-field passes conjoined, equal to the row-major mask | facet-major | `positional_parity::the_sixteen_position_rule_has_no_facet_major_form_and_its_equivalent_is_three_passes_conjoined` |
+| `lut_u8`, `lut9`, DR512 presence/polarity | not applicable: no DR512 lane, no presence plane, none called | none | `tests/dr512_not_adopted.rs` (fails if production code starts using them) |
+| contract cascade ladder against lgj carving byte order | compared; they differ | row-major | `positional_parity::contract_cascade_byte_is_lgj_carving_register_index_xor_1_and_g4d3_group_sets_differ` |
+
+**Open finding, no resolution here.** `lance_graph_contract::facet`
+`FacetCascade::tier_bytes()` lists each tier hi before lo, so
+`cascade_byte(shape, g, l)` names register byte `(g*D + l) XOR 1`. lgj's
+carvings read register byte `g*D + l` in storage order (little-endian within a
+group; a sum cannot name a group, so the group is inferred from where the
+observed level resets). For G6D2 and G3D4 the two readings name the same byte
+set per group in swapped order; for G4D3 the group sets themselves differ
+(contract group 0 is bytes {0,1,3}, lgj's is {0,1,2}). Neither side was
+changed.
+
 ---
 
 ## 19. The masking-op completion (ABI minor ≥ 11)
