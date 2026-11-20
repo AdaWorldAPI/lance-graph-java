@@ -464,6 +464,12 @@ HotSpot side, `src/hotspot/share/prims/scopedMemoryAccess.cpp` at openjdk tag
 - `Unsafe.copyMemory` is one non-chunked `copyMemory0` call. A bulk copy is one
   non-interruptible VM call, so the handshake reaches that thread only after the
   call returns. That is why close latency follows the copy time (G2).
+  This holds for a copy of 64 bytes or more, which goes through
+  `ScopedMemoryAccess.copyMemory`. A smaller non-overlapping copy is a loop of
+  separate scoped long reads and writes (`SegmentBulkOperations.java:119-131` in
+  the build's `src.zip`) and can be stopped between them, leaving a partial copy.
+  The general guarantee is the same for both: no further access through the
+  closed arena; a thrown copy's destination is invalid either way.
 
 Together these say: the release runs only after every thread that was inside a
 scoped access through the arena's segments has been stopped at a safepoint poll
