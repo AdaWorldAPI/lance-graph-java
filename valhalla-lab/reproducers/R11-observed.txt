@@ -1,12 +1,12 @@
 checksum parity: all 32 facets identical across layouts
 
 layout               ns/sweep     ns/row   (one-facet full sweep, 65536 rows, 3 runs)
-AoS 512-stride        849,685     12.965
-SoA facet-lane        139,245      2.125
-AoS 512-stride        797,358     12.167
-SoA facet-lane        139,135      2.123
-AoS 512-stride        914,754     13.958
-SoA facet-lane        158,012      2.411
+AoS 512-stride      1,276,966     19.485
+SoA facet-lane         69,580      1.062
+AoS 512-stride      1,020,008     15.564
+SoA facet-lane         74,392      1.135
+AoS 512-stride        960,321     14.653
+SoA facet-lane         73,985      1.129
 (sink true)
 
 line arithmetic: AoS touches 16/64 B per line (1 row/line);
@@ -17,12 +17,17 @@ READING
   Checksum parity across all 32 facets proves the two layouts are READINGS of the same
   logical content; the timing difference is therefore layout, not data.
 
-  Measured: ~12.0-13.0 ns/row (AoS) vs ~1.30-1.33 ns/row (SoA) -- ~9.2x. The line
-  arithmetic alone predicts 4x (16/64 B used per line vs 64/64), so the sweep is not merely
-  line-bound: the SoA lane additionally gets perfect sequential prefetch and 32x denser TLB
-  coverage (256 rows/4K page at stride 16 vs 8 rows at stride 512). Consistent with the
-  earlier clustered-vs-scattered measurement, where stride-predictability alone was worth
-  ~2x at constant line count.
+  Measured (re-captured on JDK 28+16-ea, a shared 4-vCPU Intel Xeon 2.10 GHz VM, so treat
+  absolute numbers and the ratio as machine- and run-dependent): AoS 14.7-19.5 ns/row vs
+  SoA 1.06-1.13 ns/row across the three runs above, ~14x on the median runs (15.56 vs
+  1.129). An earlier capture of this same program on a different machine/load read
+  12.2-14.0 vs 2.12-2.41 ns/row (~6x); a second run today read 14.8-17.7 vs 1.05-2.10. The
+  direction (SoA far faster for a one-facet sweep) and the order of magnitude hold; the
+  ratio does not pin to one number. The line arithmetic alone predicts 4x (16/64 B used per
+  line vs 64/64), so the sweep is not merely line-bound: the SoA lane additionally gets
+  perfect sequential prefetch and 32x denser TLB coverage (256 rows/4K page at stride 16 vs
+  8 rows at stride 512). Consistent with the earlier clustered-vs-scattered measurement,
+  where stride-predictability alone was worth ~2x at constant line count.
 
   The structural half matters more than the ratio: ONE projector ran both layouts, selected
   by a LayoutSchema RECORD -- data, not code. Java types unchanged, Valhalla untouched by

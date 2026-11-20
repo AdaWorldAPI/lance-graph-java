@@ -2882,6 +2882,9 @@ mod tests {
     /// against the two-crossing path it replaces, the scalar oracle, the
     /// fk-keyed form against a hand-walked join, and every refusal.
     mod group_sum;
+    /// Layout parity: every lane descriptor of BOTH row-store layouts, as
+    /// served through `lgj_lane_describe`, against the documented geometry.
+    mod layout_parity;
     /// The lowering differential: this crate's `plan_lower` (a flat op list)
     /// against `lance-graph-quack`'s `lower` (a Boolean tree), both producing
     /// a `mask_risc::Program`. Two implementations of one law; until this
