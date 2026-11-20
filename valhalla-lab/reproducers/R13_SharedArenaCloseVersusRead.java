@@ -159,10 +159,13 @@ public class R13_SharedArenaCloseVersusRead {
         int copyOk = 0, copyIse = 0, closeThrew = 0, closeBeforeCopyEnd = 0, cleanupBeforeCopyEnd = 0;
         int completedAfterRelease = 0, cleanupMissing = 0, startedBeforeRelease = 0;
         for (int round = 0; round < rounds; round++) {
-            AtomicLong cleanupAt = new AtomicLong(-1);
+            // `cleaned` is the release flag the checks use; `cleanupAt` is only a timing
+            // observation (System.nanoTime() may be negative, so its sign means nothing).
+            AtomicBoolean cleaned = new AtomicBoolean();
+            AtomicLong cleanupAt = new AtomicLong();
             Arena arena = Arena.ofShared();
             MemorySegment view = MemorySegment.ofAddress(mem.address())
-                    .reinterpret(bytes, arena, s -> cleanupAt.set(System.nanoTime()));
+                    .reinterpret(bytes, arena, s -> { cleanupAt.set(System.nanoTime()); cleaned.set(true); });
             AtomicLong copyEnd = new AtomicLong();
             AtomicBoolean ok = new AtomicBoolean(), ise = new AtomicBoolean();
             AtomicBoolean releasedBeforeStart = new AtomicBoolean();
@@ -170,7 +173,7 @@ public class R13_SharedArenaCloseVersusRead {
             Thread reader = new Thread(() -> {
                 started.countDown();
                 try {
-                    releasedBeforeStart.set(cleanupAt.get() >= 0);
+                    releasedBeforeStart.set(cleaned.get());
                     MemorySegment.copy(view, ValueLayout.JAVA_LONG, 0, heap, 0, heap.length);
                     ok.set(true);
                 } catch (IllegalStateException e) {
@@ -186,20 +189,30 @@ public class R13_SharedArenaCloseVersusRead {
             try { arena.close(); } catch (IllegalStateException e) { threw = true; }
             closeEnd = System.nanoTime();
             reader.join(30_000);
+            if (reader.isAlive()) {
+                check(false, "round " + round + ": reader did not terminate; stopping F4");
+                return;
+            }
+            if (ok.get() == ise.get()) {
+                check(false, "round " + round + ": copy has no single terminal outcome (completed="
+                        + ok.get() + ", threw=" + ise.get() + ")");
+                return;
+            }
             if (ok.get()) copyOk++;
             if (ise.get()) copyIse++;
             if (threw) closeThrew++;
-            if (!threw && closeEnd < copyEnd.get()) closeBeforeCopyEnd++;
-            if (cleanupAt.get() >= 0 && cleanupAt.get() < copyEnd.get()) cleanupBeforeCopyEnd++;
+            if (!threw && closeEnd - copyEnd.get() < 0) closeBeforeCopyEnd++;
+            if (cleaned.get() && cleanupAt.get() - copyEnd.get() < 0) cleanupBeforeCopyEnd++;
             if (ok.get() && releasedBeforeStart.get()) completedAfterRelease++;
-            if (!threw && cleanupAt.get() < 0) cleanupMissing++;
+            if (!threw && !cleaned.get()) cleanupMissing++;
             if (!releasedBeforeStart.get()) startedBeforeRelease++;
             System.out.println("  round " + round + ": copy " + (ok.get() ? "completed" : ise.get() ? "threw ISE" : "?")
                     + ", close " + (threw ? "threw ISE" : "returned")
                     + " after " + (closeEnd - closeStart) / 1000 + " us"
-                    + ", close returned " + (closeEnd < copyEnd.get() ? "BEFORE" : "after") + " the copy ended"
-                    + ", cleanup " + (cleanupAt.get() < 0 ? "did not run"
-                        : cleanupAt.get() < copyEnd.get() ? "ran BEFORE the copy ended" : "ran after the copy ended"));
+                    + ", close returned " + (closeEnd - copyEnd.get() < 0 ? "BEFORE" : "after") + " the copy's end stamp"
+                    + ", cleanup " + (!cleaned.get() ? "did not run"
+                        : cleanupAt.get() - copyEnd.get() < 0 ? "stamped BEFORE the copy's end stamp"
+                        : "stamped after the copy's end stamp"));
         }
         System.out.println("  summary: copyCompleted=" + copyOk + " copyThrew=" + copyIse
                 + " closeThrew=" + closeThrew + " closeReturnedBeforeCopyEnded=" + closeBeforeCopyEnd
