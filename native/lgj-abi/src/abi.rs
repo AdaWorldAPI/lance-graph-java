@@ -716,6 +716,35 @@ mod tests {
         assert_eq!(size_of::<LgjAbiManifest>(), 128);
     }
 
+    /// Every field offset of the three wire structs, pinned to literal
+    /// numbers. The Java `Layouts` test (`DescriptorParityTest`) pins the SAME
+    /// literals, so a reorder on either side is red on one side.
+    #[test]
+    fn field_offsets_are_pinned_to_literals() {
+        use core::mem::offset_of;
+        assert_eq!(offset_of!(LgjLaneDesc, addr), 0);
+        assert_eq!(offset_of!(LgjLaneDesc, len_elems), 8);
+        assert_eq!(offset_of!(LgjLaneDesc, byte_len), 16);
+        assert_eq!(offset_of!(LgjLaneDesc, owner), 24);
+        assert_eq!(offset_of!(LgjLaneDesc, epoch), 32);
+        assert_eq!(offset_of!(LgjLaneDesc, elem_kind), 40);
+        assert_eq!(offset_of!(LgjLaneDesc, elem_bytes), 44);
+        assert_eq!(offset_of!(LgjLaneDesc, stride_bytes), 48);
+        assert_eq!(offset_of!(LgjLaneDesc, flags), 52);
+
+        assert_eq!(offset_of!(LgjResourceInfo, kind), 0);
+        assert_eq!(offset_of!(LgjResourceInfo, lane_count), 4);
+        assert_eq!(offset_of!(LgjResourceInfo, n_rows), 8);
+        assert_eq!(offset_of!(LgjResourceInfo, epoch), 16);
+        assert_eq!(offset_of!(LgjResourceInfo, parent), 24);
+
+        assert_eq!(offset_of!(LgjOpDesc, op), 0);
+        assert_eq!(offset_of!(LgjOpDesc, lane_id), 4);
+        assert_eq!(offset_of!(LgjOpDesc, operand), 8);
+        assert_eq!(offset_of!(LgjOpDesc, combine), 16);
+        assert_eq!(offset_of!(LgjOpDesc, _reserved), 20);
+    }
+
     #[test]
     fn magic_reads_as_lgj_abi_nul_big_endian() {
         assert_eq!(&LGJ_MAGIC.to_be_bytes(), b"LGJ_ABI\0");

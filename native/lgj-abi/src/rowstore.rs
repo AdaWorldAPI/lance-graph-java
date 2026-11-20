@@ -125,12 +125,21 @@ pub enum RowLayout {
     /// Every single-field sweep is CONTIGUOUS — which is what makes the hop's
     /// mask algebra run at canvas speed instead of paying 64 stride-512
     /// passes (measured 19× against it; `.claude/board/`
-    /// `hop-mask-algebra-vs-columnar.txt`). Every region and per-facet block
-    /// offset is a multiple of 64 for ANY `n_rows` (128, 384 and 512 are all
-    /// multiples of 64, and blocks are `4n`/`8n` from 64-multiple bases with
-    /// the same divisibility), so the alignment story is the base pointer's
-    /// alone — same honest `u8`-aligned statement as AoS, and the kernels use
-    /// unaligned loads either way.
+    /// `hop-mask-algebra-vs-columnar.txt`).
+    ///
+    /// # Alignment — what is and is not true
+    ///
+    /// The three REGION bases (`0`, `128n`, `384n`) are multiples of 64 for
+    /// ANY `n_rows` (128 and 384 are). The per-facet BLOCK offsets are not:
+    /// a classid or hi32 block starts at `f*4n` (+ region base), a multiple of
+    /// 64 for every `f` exactly when `n` is a multiple of 16; a lo64 block
+    /// starts at `128n + f*8n`, a multiple of 64 exactly when `n` is a
+    /// multiple of 8. At `n = 257` block 1 starts at byte 1028 (`1028 % 64 ==
+    /// 4`). No padding is added. Absolute alignment also depends on the base
+    /// pointer, which is only `u8`-aligned, same as AoS. NO kernel or Java
+    /// read requires alignment (unaligned loads throughout), so answers do
+    /// not depend on any of this; it is pinned by
+    /// `facet_major_alignment_holds_exactly_when_n_is_a_multiple_of_16`.
     FacetMajor,
 }
 
@@ -496,13 +505,15 @@ mod tests {
     }
 
     /// The three carvings' largest group is ≤ 4 bytes — HALF the JEP 401
-    /// flattening budget — and the 512-byte row stride plus every FacetMajor
-    /// region/block offset is 64-byte aligned for ANY n_rows. R4/R10 measured
-    /// the Valhalla half (a ≤4-byte GROUP flattens, the 12-byte register never
-    /// does); these are the substrate-side halves of the same contract, pinned
-    /// here so a carving or layout change cannot silently break either.
+    /// flattening budget — and the 512-byte row stride is 64-aligned. R4/R10
+    /// measured the Valhalla half (a ≤4-byte GROUP flattens, the 12-byte
+    /// register never does); these are the substrate-side halves of the same
+    /// contract, pinned here so a carving or layout change cannot silently
+    /// break either. FacetMajor block alignment is NOT claimed here: it holds
+    /// only for some `n` and is pinned exactly by
+    /// `facet_major_alignment_holds_exactly_when_n_is_a_multiple_of_16`.
     #[test]
-    fn carving_groups_fit_the_flattening_budget_and_the_layout_is_64_aligned() {
+    fn carving_groups_fit_the_flattening_budget_and_the_row_stride_is_64_aligned() {
         use lance_graph_contract::facet::CascadeShape;
         for shape in CascadeShape::ROTATIONS {
             let gb = 12 / shape.groups() as u64;
@@ -510,23 +521,167 @@ mod tests {
             assert_eq!(gb * shape.groups() as u64, 12, "{shape:?} must tile 12");
         }
         assert_eq!(ROW_BYTES % 64, 0, "512-byte row stride is 64-aligned");
-        // FacetMajor: region bases 0 / 128n / 384n and per-facet block starts
-        // (f*4n, 128n + f*8n, 384n + f*4n) are 64-multiples for ANY n — the
-        // factors 128, 384, 4 and 8 against n… 4n and 8n are NOT always
-        // 64-multiples for arbitrary n, so this pins the REGION bases (always)
-        // and the block claim for the mask-word-quantised n the ABI actually
-        // serves (n padded to 64-row mask words ⇒ 4n ≡ 0 (mod 256)).
-        for n in [64u64, 192, 1000, 4096] {
-            assert_eq!((128 * n) % 64, 0);
-            assert_eq!((384 * n) % 64, 0);
+    }
+
+    /// The truth about FacetMajor alignment, pinned exhaustively for
+    /// `n in 1..=64` and at the named sizes. Region bases are always
+    /// 64-aligned; classid/hi32 blocks are all 64-aligned iff `n % 16 == 0`;
+    /// lo64 blocks iff `n % 8 == 0`. Negative arm included: at `n = 257`
+    /// block 1 starts at 1028, which is not a multiple of 64. Nothing is
+    /// padded, and nothing reads aligned, so this is a statement about
+    /// addresses only.
+    #[test]
+    fn facet_major_alignment_holds_exactly_when_n_is_a_multiple_of_16() {
+        let aligned = |x: u64| x.is_multiple_of(64);
+        for n in (1u64..=64).chain([128, 256, 257, 1000, 4096]) {
+            assert!(
+                aligned(128 * n),
+                "region base 128n is always aligned (n={n})"
+            );
+            assert!(
+                aligned(384 * n),
+                "region base 384n is always aligned (n={n})"
+            );
+            let cls_ok = (0..32u64).all(|f| aligned(f * 4 * n));
+            let lo_ok = (0..32u64).all(|f| aligned(128 * n + f * 8 * n));
+            let hi_ok = (0..32u64).all(|f| aligned(384 * n + f * 4 * n));
+            assert_eq!(cls_ok, n.is_multiple_of(16), "classid blocks, n={n}");
+            assert_eq!(hi_ok, n.is_multiple_of(16), "hi32 blocks, n={n}");
+            assert_eq!(lo_ok, n.is_multiple_of(8), "lo64 blocks, n={n}");
         }
-        for n in [64u64, 128, 4096] {
-            for f in [0u64, 1, 31] {
-                assert_eq!((f * 4 * n) % 64, 0);
-                assert_eq!((128 * n + f * 8 * n) % 64, 0);
-                assert_eq!((384 * n + f * 4 * n) % 64, 0);
+        // Positive, through the layout's own lane table.
+        for n in [16u64, 64, 4096] {
+            for f in 0..ROW_FACETS {
+                for (off, _) in [
+                    RowLayout::FacetMajor.classid_lane(n, f),
+                    RowLayout::FacetMajor.lo64_lane(n, f),
+                    RowLayout::FacetMajor.hi32_lane(n, f),
+                ] {
+                    assert_eq!(off % 64, 0, "n={n} facet={f} offset {off}");
+                }
             }
         }
+        // Negative, through the layout's own lane table.
+        let (off1, _) = RowLayout::FacetMajor.classid_lane(257, 1);
+        assert_eq!(off1, 1028);
+        assert_ne!(off1 % 64, 0, "block 1 at n=257 is NOT 64-aligned");
+        assert_eq!(off1 % 64, 4);
+    }
+
+    /// `(offset, len_elems, elem_bytes, stride, kind, contiguous)` of lane
+    /// `lane` under `layout`, computed here from the documented geometry
+    /// (rowstore.rs `RowLayout` docs; abi.md §11/§18) and NOT from
+    /// `RowLayout`'s own helpers.
+    fn documented_lane(
+        layout: RowLayout,
+        n: u64,
+        lane: u32,
+    ) -> (u64, u64, u64, u64, crate::abi::LgjElemKind, bool) {
+        use crate::abi::LgjElemKind::{U32, U64, U8};
+        if lane == 0 {
+            return (0, 512 * n, 1, 1, U8, true);
+        }
+        let (field, f) = ((lane - 1) / 32, u64::from((lane - 1) % 32));
+        match (layout, field) {
+            (RowLayout::AosRows, 0) => (f * 16, n, 4, 512, U32, false),
+            (RowLayout::AosRows, 1) => (f * 16 + 4, n, 8, 512, U64, false),
+            (RowLayout::AosRows, 2) => (f * 16 + 12, n, 4, 512, U32, false),
+            (RowLayout::FacetMajor, 0) => (f * 4 * n, n, 4, 4, U32, true),
+            (RowLayout::FacetMajor, 1) => (128 * n + f * 8 * n, n, 8, 8, U64, true),
+            (RowLayout::FacetMajor, 2) => (384 * n + f * 4 * n, n, 4, 4, U32, true),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Every lane of BOTH layouts equals the documented geometry, and the 96
+    /// facet lanes tile `[0, 512n)` exactly once each byte: disjoint and
+    /// covering, even where they interleave (AoS) and where they are blocks
+    /// (FacetMajor).
+    #[test]
+    fn lane_geometry_is_the_documented_one_and_the_lanes_tile_the_store() {
+        for layout in [RowLayout::AosRows, RowLayout::FacetMajor] {
+            for n in [16u64, 257, 4096] {
+                let s = RowStore::generate_in(n, 7, layout).unwrap();
+                let base = s.as_bytes().as_ptr() as u64;
+                let mut seen = vec![0u8; (512 * n) as usize];
+                for lane in 0..ROWSTORE_LANE_COUNT {
+                    let (addr, len, kind, stride, contig) = s.lane_raw(lane).unwrap();
+                    let (off, dlen, eb, dstride, dkind, dcontig) = documented_lane(layout, n, lane);
+                    let ctx = format!("{layout:?} n={n} lane={lane}");
+                    assert_eq!(addr - base, off, "{ctx} offset");
+                    assert_eq!(len, dlen, "{ctx} len");
+                    assert_eq!(u64::from(kind.elem_bytes()), eb, "{ctx} elem_bytes");
+                    assert_eq!(u64::from(stride), dstride, "{ctx} stride");
+                    assert_eq!(kind, dkind, "{ctx} kind");
+                    assert_eq!(contig, dcontig, "{ctx} contiguous");
+                    assert_eq!(
+                        contig,
+                        u64::from(stride) == eb,
+                        "{ctx} flag iff stride==elem"
+                    );
+                    if lane == 0 {
+                        continue;
+                    }
+                    for row in 0..len {
+                        let at = (off + row * dstride) as usize;
+                        for b in 0..eb as usize {
+                            seen[at + b] += 1;
+                        }
+                    }
+                }
+                assert!(
+                    seen.iter().all(|&c| c == 1),
+                    "{layout:?} n={n}: the 96 facet lanes must cover every byte exactly once"
+                );
+                // FacetMajor: the lanes are whole blocks, pairwise disjoint,
+                // in ascending order, abutting: [0,512n) with no gap.
+                if layout == RowLayout::FacetMajor {
+                    let mut spans: Vec<(u64, u64)> = (1..ROWSTORE_LANE_COUNT)
+                        .map(|l| {
+                            let (a, len, k, _, _) = s.lane_raw(l).unwrap();
+                            (a - base, len * u64::from(k.elem_bytes()))
+                        })
+                        .collect();
+                    spans.sort();
+                    let mut cursor = 0u64;
+                    for (o, l) in spans {
+                        assert_eq!(o, cursor, "n={n}: blocks must abut");
+                        cursor = o + l;
+                    }
+                    assert_eq!(cursor, 512 * n);
+                }
+            }
+        }
+    }
+
+    /// At n = 257, EVERY lane and EVERY row, read through the served
+    /// (offset, stride), is byte-equal between the two layouts. The existing
+    /// content test samples six rows; this one is exhaustive.
+    #[test]
+    fn every_lane_every_row_is_equal_across_layouts() {
+        let n = 257u64;
+        let a = RowStore::generate_with_edges(n, 0xF00D_CAFE, 3, 0x1, 9).unwrap();
+        let c = RowStore::generate_with_edges_in(n, 0xF00D_CAFE, 3, 0x1, 9, RowLayout::FacetMajor)
+            .unwrap();
+        let (ab, cb) = (a.as_bytes().as_ptr() as u64, c.as_bytes().as_ptr() as u64);
+        let mut compared = 0u64;
+        for lane in 1..ROWSTORE_LANE_COUNT {
+            let (aa, alen, ak, astr, _) = a.lane_raw(lane).unwrap();
+            let (ca, clen, ck, cstr, _) = c.lane_raw(lane).unwrap();
+            assert_eq!((alen, ak), (clen, ck));
+            let eb = ak.elem_bytes() as usize;
+            for row in 0..n {
+                let ao = (aa - ab + row * u64::from(astr)) as usize;
+                let co = (ca - cb + row * u64::from(cstr)) as usize;
+                assert_eq!(
+                    &a.as_bytes()[ao..ao + eb],
+                    &c.as_bytes()[co..co + eb],
+                    "lane {lane} row {row}"
+                );
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 96 * n);
     }
 
     #[test]

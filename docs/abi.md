@@ -1439,10 +1439,19 @@ The gate discriminates by layout: the same calls succeed on AoS, pinned
 two-sided.
 
 **Alignment, stated honestly** (matching §11's own statement): the base
-pointer is `u8`-aligned (`Arc<[u8]>`), and every region base and per-facet
-block offset is a multiple of 64 for any `n_rows` (128, 384 and the block
-factors against `n` all carry the factor; pinned by test). The kernels use
-unaligned loads either way. The carvings' own contract is untouched: every
+pointer is `u8`-aligned (`Arc<[u8]>`). The three region bases (`0`, `128n`,
+`384n`) are multiples of 64 for any `n_rows`. The per-facet BLOCK offsets are
+not: classid and hi32 blocks start at `f*4n` (plus the region base), all
+multiples of 64 exactly when `n` is a multiple of 16; lo64 blocks start at
+`128n + f*8n`, all multiples of 64 exactly when `n` is a multiple of 8. At
+`n = 257`, block 1 starts at byte 1028, and `1028 % 64 == 4`. Nothing is
+padded. No kernel and no Java read requires alignment: the kernels use
+unaligned loads (and give identical mask words at base offsets 1, 3 and 7),
+and Java reads with `*_UNALIGNED` layouts. Pinned by
+`facet_major_alignment_holds_exactly_when_n_is_a_multiple_of_16` and
+`strided_eq_mask_is_independent_of_the_base_alignment`. An earlier text of
+this paragraph claimed "any `n_rows`" for the block offsets; that was false.
+The carvings' own contract is untouched: every
 `CascadeShape` group is ≤ 4 bytes — half the JEP 401 flattening budget —
 and `512 = 8 × 64` keeps the row stride cache-line-quantised (both pinned
 in `rowstore.rs`, the substrate half of what R4/R10 measured from the

@@ -1321,6 +1321,52 @@ mod tests {
         vec![0u64; mask_words_for(n) as usize]
     }
 
+    /// The strided u32 kernel gives the same mask words wherever the buffer's
+    /// base lands. The store is copied at byte offsets 1, 3 and 7 into a
+    /// larger buffer (so the slice start is genuinely misaligned for a `u32`
+    /// load) and swept for a row-major lane (stride 512) and a facet-major
+    /// lane (stride 4), n = 257. Also compared against an independent scalar
+    /// read, and anti-vacuous: the mask is neither empty nor full.
+    #[test]
+    fn strided_eq_mask_is_independent_of_the_base_alignment() {
+        use crate::rowstore::{RowLayout, RowStore};
+        let n = 257u64;
+        let needle = 5u32;
+        for layout in [RowLayout::AosRows, RowLayout::FacetMajor] {
+            let store = RowStore::generate_in(n, 0xA11C_E5ED, layout).unwrap();
+            let (first, stride) = layout.classid_lane(n, 3);
+            let orig = store.as_bytes();
+            let mut want = words_for(n);
+            simd_rowstore_u32_eq_mask(orig, first, stride, n as usize, needle, &mut want);
+            let mut scalar = words_for(n);
+            for row in 0..n {
+                if store.classid_at(row, 3) == needle {
+                    scalar[(row / 64) as usize] |= 1 << (row % 64);
+                }
+            }
+            assert_eq!(want, scalar, "{layout:?}: kernel vs scalar on the original");
+            let pop: u32 = want.iter().map(|w| w.count_ones()).sum();
+            assert!(
+                pop > 0 && u64::from(pop) < n,
+                "{layout:?}: vacuous mask {pop}"
+            );
+            for off in [1usize, 3, 7] {
+                let mut big = vec![0xEEu8; orig.len() + 16];
+                big[off..off + orig.len()].copy_from_slice(orig);
+                let mut got = words_for(n);
+                simd_rowstore_u32_eq_mask(
+                    &big[off..off + orig.len()],
+                    first,
+                    stride,
+                    n as usize,
+                    needle,
+                    &mut got,
+                );
+                assert_eq!(got, want, "{layout:?}: base offset {off}");
+            }
+        }
+    }
+
     /// The falsifier for the whole SIMD provenance story: the ndarray kernels
     /// and an independently-written scalar loop must agree bit-for-bit, at row
     /// counts that are and are not multiples of the lane width.
